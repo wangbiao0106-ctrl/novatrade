@@ -1,0 +1,528 @@
+{
+  "strategy": "HLSR",
+  "strategy_name_en": "High-Level Liquidity Sweep Reversal",
+  "strategy_name_zh": "\u9ad8\u4f4d\u6d41\u52a8\u6027\u626b\u9876\u53cd\u8f6c\u7b56\u7565",
+  "core_formula": "high_value_zone + liquidity_sweep + rejection + structure_break + right_side_confirmation = short",
+  "window": {
+    "start": "2026-03-30T19:00:00+00:00",
+    "end": "2026-09-26T19:00:00+00:00"
+  },
+  "market": "OKX Perpetual",
+  "entry_timeframe": "15m",
+  "htf": [
+    "1H",
+    "4H"
+  ],
+  "leverage": 2.0,
+  "hard_filters": {
+    "gain_24h_gt": 0.4,
+    "quote_volume_24h_gt": 30000000
+  },
+  "symbols": [
+    "SATS-USDT-SWAP",
+    "PEPE-USDT-SWAP",
+    "SHIB-USDT-SWAP",
+    "BONK-USDT-SWAP",
+    "FLOKI-USDT-SWAP",
+    "PUMP-USDT-SWAP",
+    "ONE-USDT-SWAP",
+    "NEIRO-USDT-SWAP",
+    "GALA-USDT-SWAP",
+    "BOME-USDT-SWAP",
+    "NOT-USDT-SWAP",
+    "HMSTR-USDT-SWAP",
+    "DOGE-USDT-SWAP",
+    "IOST-USDT-SWAP",
+    "AKE-USDT-SWAP",
+    "PENGU-USDT-SWAP",
+    "MUBARAK-USDT-SWAP",
+    "MEME-USDT-SWAP",
+    "TRIA-USDT-SWAP",
+    "2Z-USDT-SWAP",
+    "XPL-USDT-SWAP",
+    "MEW-USDT-SWAP",
+    "TURBO-USDT-SWAP",
+    "BILL-USDT-SWAP",
+    "W-USDT-SWAP",
+    "CP-USDT-SWAP",
+    "ENA-USDT-SWAP",
+    "PEOPLE-USDT-SWAP",
+    "BEAT-USDT-SWAP",
+    "WLD-USDT-SWAP",
+    "HUMA-USDT-SWAP",
+    "KMNO-USDT-SWAP",
+    "ARB-USDT-SWAP",
+    "LINEA-USDT-SWAP",
+    "FOGO-USDT-SWAP",
+    "XRP-USDT-SWAP",
+    "STRK-USDT-SWAP",
+    "ANIME-USDT-SWAP",
+    "SOON-USDT-SWAP",
+    "WLFI-USDT-SWAP",
+    "ZIL-USDT-SWAP",
+    "ADA-USDT-SWAP",
+    "HOME-USDT-SWAP",
+    "SOPH-USDT-SWAP",
+    "FIL-USDT-SWAP",
+    "KAT-USDT-SWAP",
+    "RESOLV-USDT-SWAP",
+    "SPK-USDT-SWAP",
+    "RVN-USDT-SWAP",
+    "JELLYJELLY-USDT-SWAP"
+  ],
+  "parameter_count": 384,
+  "folds": [
+    {
+      "fold": 1,
+      "params": {
+        "swing_lookback": 6,
+        "wick_ratio": 0.4,
+        "volume_multiple": 1.0,
+        "minimum_rejection_score": 1,
+        "confirmation_window": 4,
+        "stop_atr": 0.25,
+        "trail_bars": 2,
+        "allow_range": false,
+        "zone_required": "any"
+      },
+      "train": {
+        "params": {
+          "swing_lookback": 6,
+          "wick_ratio": 0.4,
+          "volume_multiple": 1.0,
+          "minimum_rejection_score": 1,
+          "confirmation_window": 4,
+          "stop_atr": 0.25,
+          "trail_bars": 2,
+          "allow_range": false,
+          "zone_required": "any"
+        },
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0.0,
+        "beta": {
+          "posterior_mean": 0.5,
+          "lower_95": 0.025511056276541856,
+          "upper_95": 0.9735537652956829
+        },
+        "total_r": 0,
+        "avg_net_r": 0.0,
+        "average_win_loss_ratio": 0.0,
+        "profit_factor": 0.0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": 0.0,
+          "mean_upper_95": 0.0
+        },
+        "leverage": 2.0
+      },
+      "validation": {
+        "params": {
+          "swing_lookback": 6,
+          "wick_ratio": 0.4,
+          "volume_multiple": 1.0,
+          "minimum_rejection_score": 1,
+          "confirmation_window": 4,
+          "stop_atr": 0.25,
+          "trail_bars": 2,
+          "allow_range": false,
+          "zone_required": "any"
+        },
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0.0,
+        "beta": {
+          "posterior_mean": 0.5,
+          "lower_95": 0.025511056276541856,
+          "upper_95": 0.9735537652956829
+        },
+        "total_r": 0,
+        "avg_net_r": 0.0,
+        "average_win_loss_ratio": 0.0,
+        "profit_factor": 0.0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": 0.0,
+          "mean_upper_95": 0.0
+        },
+        "leverage": 2.0
+      },
+      "test": {
+        "params": {
+          "swing_lookback": 6,
+          "wick_ratio": 0.4,
+          "volume_multiple": 1.0,
+          "minimum_rejection_score": 1,
+          "confirmation_window": 4,
+          "stop_atr": 0.25,
+          "trail_bars": 2,
+          "allow_range": false,
+          "zone_required": "any"
+        },
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0.0,
+        "beta": {
+          "posterior_mean": 0.5,
+          "lower_95": 0.025511056276541856,
+          "upper_95": 0.9735537652956829
+        },
+        "total_r": 0,
+        "avg_net_r": 0.0,
+        "average_win_loss_ratio": 0.0,
+        "profit_factor": 0.0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": 0.0,
+          "mean_upper_95": 0.0
+        },
+        "leverage": 2.0
+      },
+      "test_trades": []
+    },
+    {
+      "fold": 2,
+      "params": {
+        "swing_lookback": 12,
+        "wick_ratio": 0.4,
+        "volume_multiple": 1.0,
+        "minimum_rejection_score": 1,
+        "confirmation_window": 8,
+        "stop_atr": 0.25,
+        "trail_bars": 2,
+        "allow_range": true,
+        "zone_required": "any"
+      },
+      "train": {
+        "params": {
+          "swing_lookback": 12,
+          "wick_ratio": 0.4,
+          "volume_multiple": 1.0,
+          "minimum_rejection_score": 1,
+          "confirmation_window": 8,
+          "stop_atr": 0.25,
+          "trail_bars": 2,
+          "allow_range": true,
+          "zone_required": "any"
+        },
+        "trades": 5,
+        "wins": 3,
+        "losses": 2,
+        "win_rate": 0.6,
+        "beta": {
+          "posterior_mean": 0.5714285714285714,
+          "lower_95": 0.22348901978396668,
+          "upper_95": 0.8796692588594945
+        },
+        "total_r": 11.803093442559975,
+        "avg_net_r": 2.360618688511995,
+        "average_win_loss_ratio": 4.534727176463447,
+        "profit_factor": 6.80209076469517,
+        "max_drawdown_r": 2.0342827992936585,
+        "max_consecutive_losses": 2,
+        "positive_probability": {
+          "positive_mean_probability": 0.857,
+          "mean_lower_95": -0.7479253194861543,
+          "mean_upper_95": 7.056064045634682
+        },
+        "leverage": 2.0
+      },
+      "validation": {
+        "params": {
+          "swing_lookback": 12,
+          "wick_ratio": 0.4,
+          "volume_multiple": 1.0,
+          "minimum_rejection_score": 1,
+          "confirmation_window": 8,
+          "stop_atr": 0.25,
+          "trail_bars": 2,
+          "allow_range": true,
+          "zone_required": "any"
+        },
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0.0,
+        "beta": {
+          "posterior_mean": 0.5,
+          "lower_95": 0.025511056276541856,
+          "upper_95": 0.9735537652956829
+        },
+        "total_r": 0,
+        "avg_net_r": 0.0,
+        "average_win_loss_ratio": 0.0,
+        "profit_factor": 0.0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": 0.0,
+          "mean_upper_95": 0.0
+        },
+        "leverage": 2.0
+      },
+      "test": {
+        "params": {
+          "swing_lookback": 12,
+          "wick_ratio": 0.4,
+          "volume_multiple": 1.0,
+          "minimum_rejection_score": 1,
+          "confirmation_window": 8,
+          "stop_atr": 0.25,
+          "trail_bars": 2,
+          "allow_range": true,
+          "zone_required": "any"
+        },
+        "trades": 3,
+        "wins": 1,
+        "losses": 2,
+        "win_rate": 0.3333333333333333,
+        "beta": {
+          "posterior_mean": 0.4,
+          "lower_95": 0.06815170744111852,
+          "upper_95": 0.800232852606306
+        },
+        "total_r": 0.044172197713853834,
+        "avg_net_r": 0.014724065904617945,
+        "average_win_loss_ratio": 2.041470941408058,
+        "profit_factor": 1.020735470704029,
+        "max_drawdown_r": 2.1302722443272586,
+        "max_consecutive_losses": 2,
+        "positive_probability": {
+          "positive_mean_probability": 0.757,
+          "mean_lower_95": -1.0651361221636293,
+          "mean_upper_95": 2.1744444420411124
+        },
+        "leverage": 2.0
+      },
+      "test_trades": [
+        {
+          "symbol": "BEAT-USDT-SWAP",
+          "entry_ts": 1786239900000,
+          "exit_ts": 1786240800000,
+          "entry": 3.03870762,
+          "sweep_high": 3.0999,
+          "stop": 3.1171723626804373,
+          "tp1": 2.6666,
+          "tp2": 2.30285,
+          "tp3": 1.608,
+          "net_r": -1.0619632719857521,
+          "regime": "range",
+          "zone": "normal_extension",
+          "confirmation": "failed_retest",
+          "partials": "",
+          "invalidated": true
+        },
+        {
+          "symbol": "BEAT-USDT-SWAP",
+          "entry_ts": 1786260600000,
+          "exit_ts": 1786260600000,
+          "entry": 3.17283444,
+          "sweep_high": 3.2144,
+          "stop": 3.247151691892184,
+          "tp1": 2.7135,
+          "tp2": 2.4751,
+          "tp3": 1.608,
+          "net_r": -1.0683089723415067,
+          "regime": "range",
+          "zone": "normal_extension",
+          "confirmation": "failed_retest",
+          "partials": "",
+          "invalidated": true
+        },
+        {
+          "symbol": "BEAT-USDT-SWAP",
+          "entry_ts": 1787392800000,
+          "exit_ts": 1787462100000,
+          "entry": 0.17243448,
+          "sweep_high": 0.1868,
+          "stop": 0.1892265878229644,
+          "tp1": 0.138850264354,
+          "tp2": 0.1309,
+          "tp3": 0.111,
+          "net_r": 2.1744444420411124,
+          "regime": "bearish",
+          "zone": "normal_extension",
+          "confirmation": "break_of_local_low",
+          "partials": "TP1,TP2",
+          "invalidated": false
+        }
+      ]
+    },
+    {
+      "fold": 3,
+      "params": {
+        "swing_lookback": 12,
+        "wick_ratio": 0.4,
+        "volume_multiple": 1.0,
+        "minimum_rejection_score": 1,
+        "confirmation_window": 8,
+        "stop_atr": 0.25,
+        "trail_bars": 2,
+        "allow_range": true,
+        "zone_required": "any"
+      },
+      "train": {
+        "params": {
+          "swing_lookback": 12,
+          "wick_ratio": 0.4,
+          "volume_multiple": 1.0,
+          "minimum_rejection_score": 1,
+          "confirmation_window": 8,
+          "stop_atr": 0.25,
+          "trail_bars": 2,
+          "allow_range": true,
+          "zone_required": "any"
+        },
+        "trades": 5,
+        "wins": 3,
+        "losses": 2,
+        "win_rate": 0.6,
+        "beta": {
+          "posterior_mean": 0.5714285714285714,
+          "lower_95": 0.22348901978396668,
+          "upper_95": 0.8796692588594945
+        },
+        "total_r": 11.803093442559975,
+        "avg_net_r": 2.360618688511995,
+        "average_win_loss_ratio": 4.534727176463447,
+        "profit_factor": 6.80209076469517,
+        "max_drawdown_r": 2.0342827992936585,
+        "max_consecutive_losses": 2,
+        "positive_probability": {
+          "positive_mean_probability": 0.857,
+          "mean_lower_95": -0.7479253194861543,
+          "mean_upper_95": 7.056064045634682
+        },
+        "leverage": 2.0
+      },
+      "validation": {
+        "params": {
+          "swing_lookback": 12,
+          "wick_ratio": 0.4,
+          "volume_multiple": 1.0,
+          "minimum_rejection_score": 1,
+          "confirmation_window": 8,
+          "stop_atr": 0.25,
+          "trail_bars": 2,
+          "allow_range": true,
+          "zone_required": "any"
+        },
+        "trades": 3,
+        "wins": 1,
+        "losses": 2,
+        "win_rate": 0.3333333333333333,
+        "beta": {
+          "posterior_mean": 0.4,
+          "lower_95": 0.06815170744111852,
+          "upper_95": 0.800232852606306
+        },
+        "total_r": 0.044172197713853834,
+        "avg_net_r": 0.014724065904617945,
+        "average_win_loss_ratio": 2.041470941408058,
+        "profit_factor": 1.020735470704029,
+        "max_drawdown_r": 2.1302722443272586,
+        "max_consecutive_losses": 2,
+        "positive_probability": {
+          "positive_mean_probability": 0.757,
+          "mean_lower_95": -1.0651361221636293,
+          "mean_upper_95": 2.1744444420411124
+        },
+        "leverage": 2.0
+      },
+      "test": {
+        "params": {
+          "swing_lookback": 12,
+          "wick_ratio": 0.4,
+          "volume_multiple": 1.0,
+          "minimum_rejection_score": 1,
+          "confirmation_window": 8,
+          "stop_atr": 0.25,
+          "trail_bars": 2,
+          "allow_range": true,
+          "zone_required": "any"
+        },
+        "trades": 1,
+        "wins": 0,
+        "losses": 1,
+        "win_rate": 0.0,
+        "beta": {
+          "posterior_mean": 0.3333333333333333,
+          "lower_95": 0.014373710642592949,
+          "upper_95": 0.8377044554419254
+        },
+        "total_r": -1.076372300324644,
+        "avg_net_r": -1.076372300324644,
+        "average_win_loss_ratio": 0.0,
+        "profit_factor": 0.0,
+        "max_drawdown_r": 1.076372300324644,
+        "max_consecutive_losses": 1,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": -1.076372300324644,
+          "mean_upper_95": -1.076372300324644
+        },
+        "leverage": 2.0
+      },
+      "test_trades": [
+        {
+          "symbol": "ONE-USDT-SWAP",
+          "entry_ts": 1790391600000,
+          "exit_ts": 1790391600000,
+          "entry": 0.00254710932,
+          "sweep_high": 0.00258,
+          "stop": 0.002600471270532803,
+          "tp1": 0.002440385419,
+          "tp2": 0.0022731,
+          "tp3": 0.0014702,
+          "net_r": -1.076372300324644,
+          "regime": "bearish",
+          "zone": "normal_extension",
+          "confirmation": "failed_retest",
+          "partials": "",
+          "invalidated": false
+        }
+      ]
+    }
+  ],
+  "sample_out_of_sample": {
+    "trades": 4,
+    "wins": 1,
+    "win_rate": 0.25,
+    "total_r": -1.03220010261079,
+    "avg_net_r": -0.2580500256526975
+  },
+  "passed": false,
+  "survivorship_bias": "current live USDT swaps are used because historical listing metadata is unavailable",
+  "core_entry_module": [
+    "value_zone",
+    "liquidity_sweep",
+    "rejection",
+    "structure_confirmation"
+  ],
+  "risk_management_module": [
+    "position_size",
+    "leverage",
+    "stop_distance",
+    "volatility",
+    "funding_rate",
+    "open_interest",
+    "liquidation_data"
+  ],
+  "assumptions": {
+    "same_bar_priority": "stop_first",
+    "fee_rate_one_way": 0.0006,
+    "slippage_one_way": 0.0002,
+    "funding_rate_per_trade": 0.0,
+    "reentry": "cooldown after exit; no averaging down"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "detect": [
+    {"L": 10, "R": 5, "sweep_wait": 96, "reject_wait": 5, "retest_entry": 1, "retest_wait": 12, "retest_mode": "resweep"},
+    {"L": 5, "R": 5, "sweep_wait": 96, "reject_wait": 5, "retest_entry": 1, "retest_wait": 12, "retest_mode": "resweep"}
+  ],
+  "filters": [
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.2},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.3},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.3, "rsi_s_min": 62},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.3, "drop_before_rs": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.3, "hod": 1},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.3, "eqh_w": 96, "eqh_min_dist": 0.9},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.3, "rej_body": 0.3},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.3, "rsi_s_min": 62, "drop_before_rs": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.3, "hod": 1, "drop_before_rs": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.3, "rsi_s_min": 62, "hod": 1},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.3, "sma_dist": 2.0, "sma_dist_len": 200}
+  ],
+  "bufs": [1.3, 1.4, 1.6, 2.0],
+  "tp_mults": [1.2, 1.4, 1.5, 1.8]
+}

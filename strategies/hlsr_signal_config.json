@@ -1,0 +1,32 @@
+{
+  "strategy": "HLSR",
+  "version": "1.0",
+  "market": "OKX_USDT_LINEAR_PERPETUAL",
+  "entry_timeframe_minutes": 15,
+  "hard_filters": {
+    "gain_24h_gt": 0.4,
+    "quote_volume_24h_gt": 30000000
+  },
+  "signal_parameters": {
+    "swing_lookback": 6,
+    "wick_ratio": 0.6,
+    "volume_multiple": 1.0,
+    "minimum_rejection_score": 2,
+    "confirmation_window": 4,
+    "stop_atr": 0.25,
+    "trail_bars": 2,
+    "allow_range": true,
+    "zone_required": "any"
+  },
+  "position_management": {
+    "leverage": 2.0,
+    "partial_targets": [0.3, 0.3, 0.4],
+    "move_stop_to_entry_after_tp1": true,
+    "cooldown_bars": 16
+  },
+  "costs": {
+    "fee_rate_one_way": 0.0006,
+    "slippage": 0.0002,
+    "funding_rate": 0.0
+  }
+}

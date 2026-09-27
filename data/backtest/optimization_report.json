@@ -1,0 +1,80 @@
+{
+  "window": {
+    "start": "2026-06-28T18:00:00+00:00",
+    "end": "2026-09-26T18:00:00+00:00"
+  },
+  "symbols": [
+    "SATS-USDT-SWAP",
+    "PEPE-USDT-SWAP",
+    "SHIB-USDT-SWAP",
+    "BONK-USDT-SWAP",
+    "ONE-USDT-SWAP",
+    "FLOKI-USDT-SWAP",
+    "PUMP-USDT-SWAP",
+    "NEIRO-USDT-SWAP",
+    "BOME-USDT-SWAP",
+    "GALA-USDT-SWAP",
+    "DOGE-USDT-SWAP",
+    "HMSTR-USDT-SWAP",
+    "PENGU-USDT-SWAP",
+    "AKE-USDT-SWAP",
+    "MUBARAK-USDT-SWAP",
+    "IOST-USDT-SWAP",
+    "MEME-USDT-SWAP",
+    "2Z-USDT-SWAP",
+    "NOT-USDT-SWAP",
+    "MEW-USDT-SWAP"
+  ],
+  "train_best": {
+    "params": {
+      "extension": 2.0,
+      "rsi": 70.0,
+      "volume": 1.0,
+      "stop_atr": 0.5,
+      "ema": 20.0,
+      "lookback": 20.0,
+      "cooldown": 12.0,
+      "setup_window": 24.0
+    },
+    "trades": 48,
+    "wins": 11,
+    "losses": 37,
+    "win_rate": 0.22916666666666666,
+    "avg_r": -0.12849839140333988,
+    "profit_factor": 0.8403632949056044,
+    "max_drawdown_r": 0.0,
+    "total_r": -6.167922787360315,
+    "avg_win_r": 2.9517567365592043,
+    "avg_loss_r": 1.0442499159327447
+  },
+  "test_result": {
+    "params": {
+      "extension": 2.0,
+      "rsi": 70.0,
+      "volume": 1.0,
+      "stop_atr": 0.5,
+      "ema": 20.0,
+      "lookback": 20.0,
+      "cooldown": 12.0,
+      "setup_window": 24.0
+    },
+    "trades": 51,
+    "wins": 8,
+    "losses": 43,
+    "win_rate": 0.1568627450980392,
+    "avg_r": -0.4082416808576288,
+    "profit_factor": 0.5316855786765659,
+    "max_drawdown_r": 0.0,
+    "total_r": -20.820325723739067,
+    "avg_win_r": 2.9547101334659622,
+    "avg_loss_r": 1.0339071346852735
+  },
+  "tested_parameter_sets": 144,
+  "passed": false,
+  "assumptions": {
+    "round_trip_fee_slippage": 0.0016,
+    "funding_included": false,
+    "same_bar_stop_target": "stop_first",
+    "stop_gap": "open_price"
+  }
+}

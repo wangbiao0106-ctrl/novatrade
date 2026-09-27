@@ -1,0 +1,31 @@
+{
+  "detect": [
+    {"L": 5, "R": 5, "sweep_wait": 96, "reject_wait": 5, "retest_entry": 1, "retest_wait": 12, "retest_mode": "resweep"},
+    {"L": 10, "R": 5, "sweep_wait": 96, "reject_wait": 5, "retest_entry": 1, "retest_wait": 12, "retest_mode": "resweep"},
+    {"L": 5, "R": 5, "sweep_wait": 96, "reject_wait": 3, "retest_entry": 1, "retest_wait": 8, "retest_mode": "resweep"}
+  ],
+  "filters": [
+    {"major_win": 288, "rs_lower_ext": 1},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_close_low": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_lower_close": 1},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_shallow": 0.4},
+    {"major_win": 288, "rs_lower_ext": 1, "rj1_min": 0.3},
+    {"major_win": 288, "rs_lower_ext": 1, "rej_body": 0.3},
+    {"major_win": 288, "rs_lower_ext": 1, "drop_before_rs": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "drop_before_rs": 1.0},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_rsi_div": -2.0},
+    {"major_win": 288, "rs_lower_ext": 1, "hod": 1},
+    {"major_win": 288, "rs_lower_ext": 1, "vol_mult": 1.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_close_low": 0.5, "rs_lower_close": 1},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_close_low": 0.5, "drop_before_rs": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_lower_close": 1, "drop_before_rs": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_shallow": 0.4, "rs_close_low": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "hod": 1, "rs_close_low": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_rsi_div": -2.0, "rs_close_low": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "vol_mult": 1.5, "rs_close_low": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rej_body": 0.3, "rs_close_low": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rj1_min": 0.3, "rs_close_low": 0.5}
+  ],
+  "bufs": [0.1, 0.2, 0.3],
+  "tp_mults": [2.0, 2.3, 2.5]
+}

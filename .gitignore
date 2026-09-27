@@ -1,0 +1,11 @@
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+data/market_export/
+strategy_sweep_reversal/out/

@@ -1,0 +1,1184 @@
+{
+  "window": {
+    "start": "2026-03-30T19:00:00+00:00",
+    "end": "2026-09-26T19:00:00+00:00"
+  },
+  "interval": "15m",
+  "leverage": 2.0,
+  "symbols": [
+    "SHIB-USDT-SWAP",
+    "PEPE-USDT-SWAP",
+    "SATS-USDT-SWAP",
+    "BONK-USDT-SWAP",
+    "PUMP-USDT-SWAP",
+    "FLOKI-USDT-SWAP",
+    "ONE-USDT-SWAP",
+    "NEIRO-USDT-SWAP",
+    "BOME-USDT-SWAP",
+    "GALA-USDT-SWAP",
+    "DOGE-USDT-SWAP",
+    "HMSTR-USDT-SWAP",
+    "PENGU-USDT-SWAP",
+    "AKE-USDT-SWAP",
+    "IOST-USDT-SWAP",
+    "NOT-USDT-SWAP",
+    "MUBARAK-USDT-SWAP",
+    "MEME-USDT-SWAP",
+    "TRIA-USDT-SWAP",
+    "2Z-USDT-SWAP",
+    "XPL-USDT-SWAP",
+    "TURBO-USDT-SWAP",
+    "MEW-USDT-SWAP",
+    "CP-USDT-SWAP",
+    "BILL-USDT-SWAP",
+    "ENA-USDT-SWAP",
+    "WLD-USDT-SWAP",
+    "PEOPLE-USDT-SWAP",
+    "HUMA-USDT-SWAP",
+    "BEAT-USDT-SWAP",
+    "LINEA-USDT-SWAP",
+    "ARB-USDT-SWAP",
+    "KMNO-USDT-SWAP",
+    "SEI-USDT-SWAP",
+    "HOME-USDT-SWAP",
+    "ADA-USDT-SWAP",
+    "XRP-USDT-SWAP",
+    "RLS-USDT-SWAP",
+    "STRK-USDT-SWAP",
+    "SPK-USDT-SWAP",
+    "ZIL-USDT-SWAP",
+    "W-USDT-SWAP",
+    "ATH-USDT-SWAP",
+    "RVN-USDT-SWAP",
+    "SOPH-USDT-SWAP",
+    "WLFI-USDT-SWAP",
+    "H-USDT-SWAP",
+    "SUI-USDT-SWAP",
+    "RESOLV-USDT-SWAP",
+    "FOGO-USDT-SWAP"
+  ],
+  "skips": {},
+  "screening_stats": {
+    "SHIB-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 1729,
+      "composite_hits": 0
+    },
+    "PEPE-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 17022,
+      "composite_hits": 0
+    },
+    "SATS-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 86,
+      "quote_volume_30m_hits": 209,
+      "composite_hits": 61
+    },
+    "BONK-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 153,
+      "composite_hits": 0
+    },
+    "PUMP-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 11062,
+      "composite_hits": 0
+    },
+    "FLOKI-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "ONE-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 331,
+      "quote_volume_30m_hits": 973,
+      "composite_hits": 302
+    },
+    "NEIRO-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 68,
+      "quote_volume_30m_hits": 300,
+      "composite_hits": 52
+    },
+    "BOME-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 36,
+      "quote_volume_30m_hits": 624,
+      "composite_hits": 34
+    },
+    "GALA-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 1,
+      "quote_volume_30m_hits": 310,
+      "composite_hits": 0
+    },
+    "DOGE-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 17184,
+      "composite_hits": 0
+    },
+    "HMSTR-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 154,
+      "quote_volume_30m_hits": 919,
+      "composite_hits": 152
+    },
+    "PENGU-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 3433,
+      "composite_hits": 0
+    },
+    "AKE-USDT-SWAP": {
+      "bars": 1008,
+      "gain_40pct_hits": 148,
+      "quote_volume_30m_hits": 858,
+      "composite_hits": 148
+    },
+    "IOST-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 65,
+      "quote_volume_30m_hits": 454,
+      "composite_hits": 65
+    },
+    "NOT-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 411,
+      "composite_hits": 0
+    },
+    "MUBARAK-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 173,
+      "quote_volume_30m_hits": 896,
+      "composite_hits": 163
+    },
+    "MEME-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "TRIA-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 29,
+      "quote_volume_30m_hits": 648,
+      "composite_hits": 6
+    },
+    "2Z-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 2,
+      "quote_volume_30m_hits": 39,
+      "composite_hits": 2
+    },
+    "XPL-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 15,
+      "quote_volume_30m_hits": 6226,
+      "composite_hits": 15
+    },
+    "TURBO-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "MEW-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "CP-USDT-SWAP": {
+      "bars": 2318,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 431,
+      "composite_hits": 0
+    },
+    "BILL-USDT-SWAP": {
+      "bars": 13772,
+      "gain_40pct_hits": 26,
+      "quote_volume_30m_hits": 3544,
+      "composite_hits": 26
+    },
+    "ENA-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 36,
+      "quote_volume_30m_hits": 4611,
+      "composite_hits": 36
+    },
+    "WLD-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 3,
+      "quote_volume_30m_hits": 15074,
+      "composite_hits": 3
+    },
+    "PEOPLE-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 14,
+      "quote_volume_30m_hits": 233,
+      "composite_hits": 14
+    },
+    "HUMA-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "BEAT-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 358,
+      "quote_volume_30m_hits": 11296,
+      "composite_hits": 358
+    },
+    "LINEA-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "ARB-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 62,
+      "quote_volume_30m_hits": 2863,
+      "composite_hits": 62
+    },
+    "KMNO-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "SEI-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 93,
+      "composite_hits": 0
+    },
+    "HOME-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 93,
+      "quote_volume_30m_hits": 2290,
+      "composite_hits": 93
+    },
+    "ADA-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 14992,
+      "composite_hits": 0
+    },
+    "XRP-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 17184,
+      "composite_hits": 0
+    },
+    "RLS-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 217,
+      "quote_volume_30m_hits": 650,
+      "composite_hits": 190
+    },
+    "STRK-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 39,
+      "quote_volume_30m_hits": 604,
+      "composite_hits": 39
+    },
+    "SPK-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 73,
+      "quote_volume_30m_hits": 518,
+      "composite_hits": 72
+    },
+    "ZIL-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 127,
+      "composite_hits": 0
+    },
+    "W-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "ATH-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "RVN-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "SOPH-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 61,
+      "quote_volume_30m_hits": 251,
+      "composite_hits": 61
+    },
+    "WLFI-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 2239,
+      "composite_hits": 0
+    },
+    "H-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 248,
+      "quote_volume_30m_hits": 4137,
+      "composite_hits": 248
+    },
+    "SUI-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 15225,
+      "composite_hits": 0
+    },
+    "RESOLV-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 21,
+      "quote_volume_30m_hits": 592,
+      "composite_hits": 21
+    },
+    "FOGO-USDT-SWAP": {
+      "bars": 17280,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 30,
+      "composite_hits": 0
+    }
+  },
+  "survivorship_bias": "current live USDT swaps are used when historical listing data is unavailable",
+  "assumptions": {
+    "gain_window_bars": 96,
+    "min_gain": 0.4,
+    "min_quote_volume_24h": 30000000,
+    "fee_rate_one_way": 0.0006,
+    "slippage_one_way": 0.0002,
+    "funding_rate_per_trade": 0.0,
+    "same_bar_priority": "stop_first",
+    "risk_fraction": 0.005
+  },
+  "selected_params": {
+    "peak_window": 32,
+    "retrace_pct": 0.02,
+    "tolerance_pct": 0.02,
+    "weakness": "bear_half",
+    "stop_mode": "pct",
+    "stop_atr": 0.5,
+    "stop_pct": 0.01,
+    "target_r": 3.0,
+    "trail_bars": 2,
+    "entry_mode": "wick_retest",
+    "cooldown_bars": 8
+  },
+  "final_all_period": {
+    "params": {
+      "peak_window": 32,
+      "retrace_pct": 0.02,
+      "tolerance_pct": 0.02,
+      "weakness": "bear_half",
+      "stop_mode": "pct",
+      "stop_atr": 0.5,
+      "stop_pct": 0.01,
+      "target_r": 3.0,
+      "trail_bars": 2,
+      "entry_mode": "wick_retest",
+      "cooldown_bars": 8
+    },
+    "trades": 94,
+    "wins": 49,
+    "losses": 45,
+    "win_rate": 0.5212765957446809,
+    "beta": {
+      "posterior_mean": 0.5208333333333334,
+      "lower_95": 0.4182532044206715,
+      "upper_95": 0.6198012260228488
+    },
+    "total_r": -22.105100380182407,
+    "avg_net_r": -0.23516064234236603,
+    "average_win_loss_ratio": 0.6072395553036287,
+    "profit_factor": 0.6612164046639513,
+    "max_drawdown_r": 31.672362796366183,
+    "max_consecutive_losses": 4,
+    "positive_probability": {
+      "positive_mean_probability": 0.027,
+      "mean_lower_95": -0.45823247805926565,
+      "mean_upper_95": 0.006628439366112648
+    },
+    "leverage": 2.0
+  },
+  "folds": [
+    {
+      "fold": 1,
+      "train": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.01,
+          "weakness": "ema",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2,
+          "entry_mode": "wick_retest",
+          "cooldown_bars": 8
+        },
+        "trades": 1,
+        "wins": 1,
+        "losses": 0,
+        "win_rate": 1.0,
+        "beta": {
+          "posterior_mean": 0.6666666666666666,
+          "lower_95": 0.15193514560251892,
+          "upper_95": 0.9874102785527523
+        },
+        "total_r": 1.2622599413460809,
+        "avg_net_r": 1.2622599413460809,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 1.0,
+          "mean_lower_95": 1.2622599413460809,
+          "mean_upper_95": 1.2622599413460809
+        },
+        "leverage": 2.0
+      },
+      "validation": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.01,
+          "weakness": "ema",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2,
+          "entry_mode": "wick_retest",
+          "cooldown_bars": 8
+        },
+        "trades": 1,
+        "wins": 1,
+        "losses": 0,
+        "win_rate": 1.0,
+        "beta": {
+          "posterior_mean": 0.6666666666666666,
+          "lower_95": 0.15193514560251892,
+          "upper_95": 0.9874102785527523
+        },
+        "total_r": 1.023945467013865,
+        "avg_net_r": 1.023945467013865,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 1.0,
+          "mean_lower_95": 1.023945467013865,
+          "mean_upper_95": 1.023945467013865
+        },
+        "leverage": 2.0
+      },
+      "test": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.01,
+          "weakness": "ema",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2,
+          "entry_mode": "wick_retest",
+          "cooldown_bars": 8
+        },
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0,
+        "beta": {
+          "posterior_mean": 0.5,
+          "lower_95": 0.025511056276541856,
+          "upper_95": 0.9735537652956829
+        },
+        "total_r": 0,
+        "avg_net_r": 0,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": 0.0,
+          "mean_upper_95": 0.0
+        },
+        "leverage": 2.0
+      },
+      "candidate_count": 432,
+      "minimum_train_trades": 20,
+      "minimum_train_trades_met": false,
+      "trades": []
+    },
+    {
+      "fold": 2,
+      "train": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.02,
+          "weakness": "prev_low",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2,
+          "entry_mode": "wick_retest",
+          "cooldown_bars": 8
+        },
+        "trades": 23,
+        "wins": 15,
+        "losses": 8,
+        "win_rate": 0.6521739130434783,
+        "beta": {
+          "posterior_mean": 0.64,
+          "lower_95": 0.4451364955579228,
+          "upper_95": 0.8126054326621488
+        },
+        "total_r": -0.4166130253123608,
+        "avg_net_r": -0.0181136097961896,
+        "average_win_loss_ratio": 0.5160695939036386,
+        "profit_factor": 0.9676304885693224,
+        "max_drawdown_r": 4.815713638991516,
+        "max_consecutive_losses": 2,
+        "positive_probability": {
+          "positive_mean_probability": 0.5005,
+          "mean_lower_95": -0.6612646919697747,
+          "mean_upper_95": 0.5081837219140372
+        },
+        "leverage": 2.0
+      },
+      "validation": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.02,
+          "weakness": "prev_low",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2,
+          "entry_mode": "wick_retest",
+          "cooldown_bars": 8
+        },
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0,
+        "beta": {
+          "posterior_mean": 0.5,
+          "lower_95": 0.025511056276541856,
+          "upper_95": 0.9735537652956829
+        },
+        "total_r": 0,
+        "avg_net_r": 0,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": 0.0,
+          "mean_upper_95": 0.0
+        },
+        "leverage": 2.0
+      },
+      "test": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.02,
+          "weakness": "prev_low",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2,
+          "entry_mode": "wick_retest",
+          "cooldown_bars": 8
+        },
+        "trades": 6,
+        "wins": 3,
+        "losses": 3,
+        "win_rate": 0.5,
+        "beta": {
+          "posterior_mean": 0.5,
+          "lower_95": 0.18238010514692146,
+          "upper_95": 0.8173889109016703
+        },
+        "total_r": -1.1211754972023018,
+        "avg_net_r": -0.1868625828670503,
+        "average_win_loss_ratio": 0.720449936717209,
+        "profit_factor": 0.720449936717209,
+        "max_drawdown_r": 2.7893928088362676,
+        "max_consecutive_losses": 2,
+        "positive_probability": {
+          "positive_mean_probability": 0.3545,
+          "mean_lower_95": -1.1090235044675048,
+          "mean_upper_95": 0.7675754014036741
+        },
+        "leverage": 2.0
+      },
+      "candidate_count": 96,
+      "minimum_train_trades": 20,
+      "minimum_train_trades_met": true,
+      "trades": [
+        {
+          "symbol": "BOME-USDT-SWAP",
+          "entry_ts": 1787228100000,
+          "exit_ts": 1787229900000,
+          "entry": 0.0012562512,
+          "initial_stop": 0.001292295,
+          "final_target": 0.0011481198,
+          "net_r": 0.2442344614052902,
+          "outcome": "loss",
+          "partials": "1R",
+          "margin_return_pct": 0.007007466404808207
+        },
+        {
+          "symbol": "MUBARAK-USDT-SWAP",
+          "entry_ts": 1787159700000,
+          "exit_ts": 1787166900000,
+          "entry": 0.0235667124,
+          "initial_stop": 0.02439251,
+          "final_target": 0.021089319599999996,
+          "net_r": 1.4239828502286753,
+          "outcome": "loss",
+          "partials": "1R,2R,1R",
+          "margin_return_pct": 0.04989756739085935
+        },
+        {
+          "symbol": "ENA-USDT-SWAP",
+          "entry_ts": 1787321700000,
+          "exit_ts": 1787322600000,
+          "entry": 0.142888572,
+          "initial_stop": 0.14635910000000002,
+          "final_target": 0.1324769879999999,
+          "net_r": -1.1410510778763279,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.027714250760375772
+        },
+        {
+          "symbol": "PEOPLE-USDT-SWAP",
+          "entry_ts": 1787303700000,
+          "exit_ts": 1787303700000,
+          "entry": 0.011729345399999999,
+          "initial_stop": 0.01187154,
+          "final_target": 0.011302761599999996,
+          "net_r": -1.1319807688899568,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.013722978320682849
+        },
+        {
+          "symbol": "BEAT-USDT-SWAP",
+          "entry_ts": 1786246200000,
+          "exit_ts": 1786250700000,
+          "entry": 3.0751149,
+          "initial_stop": 3.220587,
+          "final_target": 2.6386985999999997,
+          "net_r": 1.2212501652206846,
+          "outcome": "loss",
+          "partials": "1R,2R,1R",
+          "margin_return_pct": 0.05777274408835913
+        },
+        {
+          "symbol": "HOME-USDT-SWAP",
+          "entry_ts": 1785686400000,
+          "exit_ts": 1785693600000,
+          "entry": 0.0084026802,
+          "initial_stop": 0.00872943,
+          "final_target": 0.007422430800000001,
+          "net_r": -1.7376111272906674,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.06756940342915818
+        }
+      ]
+    },
+    {
+      "fold": 3,
+      "train": {
+        "params": {
+          "peak_window": 32,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.02,
+          "weakness": "bear_half",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2,
+          "entry_mode": "wick_retest",
+          "cooldown_bars": 8
+        },
+        "trades": 33,
+        "wins": 18,
+        "losses": 15,
+        "win_rate": 0.5454545454545454,
+        "beta": {
+          "posterior_mean": 0.5428571428571428,
+          "lower_95": 0.38147422426366806,
+          "upper_95": 0.7006406074517727
+        },
+        "total_r": -8.287024189019462,
+        "avg_net_r": -0.25112194512180186,
+        "average_win_loss_ratio": 0.5564269442170436,
+        "profit_factor": 0.6677123330604523,
+        "max_drawdown_r": 14.64932579736016,
+        "max_consecutive_losses": 4,
+        "positive_probability": {
+          "positive_mean_probability": 0.145,
+          "mean_lower_95": -0.6081735831494769,
+          "mean_upper_95": 0.2673988487542066
+        },
+        "leverage": 2.0
+      },
+      "validation": {
+        "params": {
+          "peak_window": 32,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.02,
+          "weakness": "bear_half",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2,
+          "entry_mode": "wick_retest",
+          "cooldown_bars": 8
+        },
+        "trades": 14,
+        "wins": 8,
+        "losses": 6,
+        "win_rate": 0.5714285714285714,
+        "beta": {
+          "posterior_mean": 0.5625,
+          "lower_95": 0.3199411060680986,
+          "upper_95": 0.7848272082647327
+        },
+        "total_r": -1.9232872749365342,
+        "avg_net_r": -0.13737766249546673,
+        "average_win_loss_ratio": 0.5601475247807848,
+        "profit_factor": 0.7468633663743797,
+        "max_drawdown_r": 3.8117949596849394,
+        "max_consecutive_losses": 3,
+        "positive_probability": {
+          "positive_mean_probability": 0.3255,
+          "mean_lower_95": -0.7017972215632321,
+          "mean_upper_95": 0.44855712039764245
+        },
+        "leverage": 2.0
+      },
+      "test": {
+        "params": {
+          "peak_window": 32,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.02,
+          "weakness": "bear_half",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2,
+          "entry_mode": "wick_retest",
+          "cooldown_bars": 8
+        },
+        "trades": 28,
+        "wins": 12,
+        "losses": 16,
+        "win_rate": 0.42857142857142855,
+        "beta": {
+          "posterior_mean": 0.43333333333333335,
+          "lower_95": 0.2603590375630671,
+          "upper_95": 0.6101396761319375
+        },
+        "total_r": -10.37186203053577,
+        "avg_net_r": -0.37042364394770605,
+        "average_win_loss_ratio": 0.6907830245224296,
+        "profit_factor": 0.5180872683918222,
+        "max_drawdown_r": 13.886914194682372,
+        "max_consecutive_losses": 6,
+        "positive_probability": {
+          "positive_mean_probability": 0.05,
+          "mean_lower_95": -0.7885411143281276,
+          "mean_upper_95": 0.0683152367328572
+        },
+        "leverage": 2.0
+      },
+      "candidate_count": 60,
+      "minimum_train_trades": 20,
+      "minimum_train_trades_met": true,
+      "trades": [
+        {
+          "symbol": "ONE-USDT-SWAP",
+          "entry_ts": 1789623000000,
+          "exit_ts": 1789624800000,
+          "entry": 0.0010957190999999998,
+          "initial_stop": 0.0011312,
+          "final_target": 0.0009892763999999994,
+          "net_r": 0.23320968295617672,
+          "outcome": "loss",
+          "partials": "1R",
+          "margin_return_pct": 0.007551652097695338
+        },
+        {
+          "symbol": "ONE-USDT-SWAP",
+          "entry_ts": 1789632000000,
+          "exit_ts": 1789637400000,
+          "entry": 0.00108901776,
+          "initial_stop": 0.001156955,
+          "final_target": 0.00088520604,
+          "net_r": 0.9526860906330608,
+          "outcome": "loss",
+          "partials": "1R,1R,1R",
+          "margin_return_pct": 0.05943233063894204
+        },
+        {
+          "symbol": "ONE-USDT-SWAP",
+          "entry_ts": 1789659000000,
+          "exit_ts": 1789660800000,
+          "entry": 0.0012224444399999998,
+          "initial_stop": 0.001249572,
+          "final_target": 0.0011410617599999992,
+          "net_r": -1.5486638350076392,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.03436677343307329
+        },
+        {
+          "symbol": "ONE-USDT-SWAP",
+          "entry_ts": 1789669800000,
+          "exit_ts": 1789676100000,
+          "entry": 0.0015363072,
+          "initial_stop": 0.001612768,
+          "final_target": 0.0013069248,
+          "net_r": 0.1708743366535545,
+          "outcome": "loss",
+          "partials": "1R",
+          "margin_return_pct": 0.008504281227087985
+        },
+        {
+          "symbol": "ONE-USDT-SWAP",
+          "entry_ts": 1789838100000,
+          "exit_ts": 1789841700000,
+          "entry": 0.00307181424,
+          "initial_stop": 0.003247756,
+          "final_target": 0.0025439889599999993,
+          "net_r": -1.620994713159625,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.0928443715997618
+        },
+        {
+          "symbol": "ONE-USDT-SWAP",
+          "entry_ts": 1789848000000,
+          "exit_ts": 1789849800000,
+          "entry": 0.00400100004,
+          "initial_stop": 0.00411878,
+          "final_target": 0.0036476601600000007,
+          "net_r": 1.1456477989634228,
+          "outcome": "loss",
+          "partials": "1R,2R,1R",
+          "margin_return_pct": 0.03372515635765896
+        },
+        {
+          "symbol": "ONE-USDT-SWAP",
+          "entry_ts": 1790368200000,
+          "exit_ts": 1790379000000,
+          "entry": 0.00239437878,
+          "initial_stop": 0.002513688,
+          "final_target": 0.0020364511199999994,
+          "net_r": -0.03497712957975842,
+          "outcome": "loss",
+          "partials": "1R",
+          "margin_return_pct": -0.0017428712962449119
+        },
+        {
+          "symbol": "ONE-USDT-SWAP",
+          "entry_ts": 1790392500000,
+          "exit_ts": 1790417700000,
+          "entry": 0.0025380075,
+          "initial_stop": 0.002733363,
+          "final_target": 0.0019519409999999996,
+          "net_r": 0.9985379884364656,
+          "outcome": "loss",
+          "partials": "1R,1R,1R",
+          "margin_return_pct": 0.07685946081719619
+        },
+        {
+          "symbol": "AKE-USDT-SWAP",
+          "entry_ts": 1789762500000,
+          "exit_ts": 1789764300000,
+          "entry": 0.03765753,
+          "initial_stop": 0.0395314,
+          "final_target": 0.03203592,
+          "net_r": -1.1061183796101093,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.055041370158903015
+        },
+        {
+          "symbol": "AKE-USDT-SWAP",
+          "entry_ts": 1789774200000,
+          "exit_ts": 1789790400000,
+          "entry": 0.044078813999999994,
+          "initial_stop": 0.046934699999999996,
+          "final_target": 0.03551115599999999,
+          "net_r": 0.7852313074121295,
+          "outcome": "loss",
+          "partials": "1R,1R",
+          "margin_return_pct": 0.05087548629597881
+        },
+        {
+          "symbol": "AKE-USDT-SWAP",
+          "entry_ts": 1789801200000,
+          "exit_ts": 1789802100000,
+          "entry": 0.056721342,
+          "initial_stop": 0.0582265,
+          "final_target": 0.052205868,
+          "net_r": -1.1157713324448333,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.029608117297365778
+        },
+        {
+          "symbol": "AKE-USDT-SWAP",
+          "entry_ts": 1789812900000,
+          "exit_ts": 1789813800000,
+          "entry": 0.06311262000000001,
+          "initial_stop": 0.0644077,
+          "final_target": 0.05922738000000004,
+          "net_r": -1.0951911789233129,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.022473479820676007
+        },
+        {
+          "symbol": "IOST-USDT-SWAP",
+          "entry_ts": 1788843600000,
+          "exit_ts": 1788859800000,
+          "entry": 0.00112582512,
+          "initial_stop": 0.001174226,
+          "final_target": 0.0009806224799999998,
+          "net_r": 1.1615901158821902,
+          "outcome": "loss",
+          "partials": "1R,1R,1R",
+          "margin_return_pct": 0.04993846984689774
+        },
+        {
+          "symbol": "IOST-USDT-SWAP",
+          "entry_ts": 1788962400000,
+          "exit_ts": 1788966000000,
+          "entry": 0.00133366668,
+          "initial_stop": 0.00141097,
+          "final_target": 0.0011017567199999995,
+          "net_r": -1.1573524486141065,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.06708361844055369
+        },
+        {
+          "symbol": "IOST-USDT-SWAP",
+          "entry_ts": 1788976800000,
+          "exit_ts": 1788978600000,
+          "entry": 0.0018463692,
+          "initial_stop": 0.00194425,
+          "final_target": 0.0015527267999999996,
+          "net_r": -1.2023296777304626,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.06373860153213129
+        },
+        {
+          "symbol": "MUBARAK-USDT-SWAP",
+          "entry_ts": 1790001900000,
+          "exit_ts": 1790019000000,
+          "entry": 0.0451360254,
+          "initial_stop": 0.046661999999999995,
+          "final_target": 0.04055810160000002,
+          "net_r": 0.907133080301599,
+          "outcome": "loss",
+          "partials": "1R,1R,1R",
+          "margin_return_pct": 0.030668673794214816
+        },
+        {
+          "symbol": "MUBARAK-USDT-SWAP",
+          "entry_ts": 1790061300000,
+          "exit_ts": 1790071200000,
+          "entry": 0.055143026399999996,
+          "initial_stop": 0.061105,
+          "final_target": 0.037257105599999986,
+          "net_r": -1.017314541989921,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.10999038025667747
+        },
+        {
+          "symbol": "MUBARAK-USDT-SWAP",
+          "entry_ts": 1790072100000,
+          "exit_ts": 1790074800000,
+          "entry": 0.060877173,
+          "initial_stop": 0.06249375,
+          "final_target": 0.056027442,
+          "net_r": -1.7940565013605903,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.04764068917589194
+        },
+        {
+          "symbol": "MUBARAK-USDT-SWAP",
+          "entry_ts": 1790085600000,
+          "exit_ts": 1790095500000,
+          "entry": 0.0669263826,
+          "initial_stop": 0.07431378000000001,
+          "final_target": 0.04476419039999997,
+          "net_r": -1.8803238623875826,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.20755192604956363
+        },
+        {
+          "symbol": "TRIA-USDT-SWAP",
+          "entry_ts": 1788516000000,
+          "exit_ts": 1788516900000,
+          "entry": 0.0053970792,
+          "initial_stop": 0.00549541,
+          "final_target": 0.0051020868,
+          "net_r": -1.8768903204285914,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.034195556500264034
+        },
+        {
+          "symbol": "ARB-USDT-SWAP",
+          "entry_ts": 1788658200000,
+          "exit_ts": 1788659100000,
+          "entry": 0.190058004,
+          "initial_stop": 0.1932231,
+          "final_target": 0.18056271599999998,
+          "net_r": -1.7649034362306864,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.029391494642867083
+        },
+        {
+          "symbol": "ARB-USDT-SWAP",
+          "entry_ts": 1788668100000,
+          "exit_ts": 1788681600000,
+          "entry": 0.191948382,
+          "initial_stop": 0.200788,
+          "final_target": 0.16542952800000002,
+          "net_r": -1.1164210276054916,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.05141348579432148
+        },
+        {
+          "symbol": "ARB-USDT-SWAP",
+          "entry_ts": 1788682500000,
+          "exit_ts": 1788691500000,
+          "entry": 0.199919976,
+          "initial_stop": 0.2062824,
+          "final_target": 0.18083270399999998,
+          "net_r": 0.9105503245932681,
+          "outcome": "loss",
+          "partials": "1R,1R,1R",
+          "margin_return_pct": 0.028978130921744432
+        },
+        {
+          "symbol": "STRK-USDT-SWAP",
+          "entry_ts": 1789766100000,
+          "exit_ts": 1789767900000,
+          "entry": 0.042928584,
+          "initial_stop": 0.0438845,
+          "final_target": 0.040060835999999996,
+          "net_r": -1.2345245130325286,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.027489882601299035
+        },
+        {
+          "symbol": "STRK-USDT-SWAP",
+          "entry_ts": 1789777800000,
+          "exit_ts": 1789784100000,
+          "entry": 0.043488696,
+          "initial_stop": 0.0456924,
+          "final_target": 0.036877584,
+          "net_r": 0.26165786621070714,
+          "outcome": "loss",
+          "partials": "1R",
+          "margin_return_pct": 0.013258996921866785
+        },
+        {
+          "symbol": "STRK-USDT-SWAP",
+          "entry_ts": 1789789500000,
+          "exit_ts": 1789795800000,
+          "entry": 0.04365873,
+          "initial_stop": 0.0457833,
+          "final_target": 0.03728502,
+          "net_r": 1.294145653944092,
+          "outcome": "loss",
+          "partials": "1R,1R,2R",
+          "margin_return_pct": 0.06297716475032597
+        },
+        {
+          "symbol": "SOPH-USDT-SWAP",
+          "entry_ts": 1788846300000,
+          "exit_ts": 1788847200000,
+          "entry": 0.0097159428,
+          "initial_stop": 0.00996466,
+          "final_target": 0.0089697912,
+          "net_r": -1.9564497689745612,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.050082912023730684
+        },
+        {
+          "symbol": "SOPH-USDT-SWAP",
+          "entry_ts": 1788861600000,
+          "exit_ts": 1788874200000,
+          "entry": 0.0114232842,
+          "initial_stop": 0.011691759999999999,
+          "final_target": 0.010617856800000002,
+          "net_r": 2.329156390557365,
+          "outcome": "loss",
+          "partials": "1R,2R,1R",
+          "margin_return_pct": 0.05474101093274026
+        }
+      ]
+    }
+  ],
+  "sample_out_of_sample_trades": 34,
+  "sample_out_of_sample_win_rate": 0.4411764705882353,
+  "sample_out_of_sample_total_r": -11.493037527738071,
+  "passed": false
+}

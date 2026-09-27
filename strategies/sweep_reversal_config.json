@@ -1,0 +1,51 @@
+{
+  "strategy": "SWEEP_REVERSAL_SHORT",
+  "version": "1.0",
+  "name_zh": "山寨币高位二次扫顶做空",
+  "market": "OKX_USDT_LINEAR_PERPETUAL",
+  "entry_timeframe_minutes": 60,
+  "universe": {
+    "note": "中低流动性加密山寨币（排除BTC/稳定币/股票ETF商品代币）。名单: strategy_sweep_reversal/out/universe_recommended.json",
+    "btc_not_traded": true
+  },
+  "signal_parameters": {
+    "L": 10,
+    "R": 5,
+    "major_window": 288,
+    "sweep_wait": 96,
+    "reject_wait": 5,
+    "resweep_wait": 12,
+    "rsi_min": 62,
+    "volume_multiple": 1.5,
+    "resweep_deep_atr": 0.2,
+    "resweep_lower_ext": true
+  },
+  "regime_gate": {
+    "enabled": true,
+    "rule": "BTC 1H close < BTC SMA200(1H)",
+    "when_off": "停止新开仓，已持仓位按原止损止盈管理"
+  },
+  "position_management": {
+    "leverage": 1.0,
+    "stop": "扫顶期间最高价 + 0.5 * ATR14",
+    "take_profit": "入场价 - 2.2 * (止损 - 入场价)",
+    "time_exit_bars": 96,
+    "cooldown_bars": 96,
+    "risk_per_trade_pct": 1.0,
+    "min_atr_pct": 0.5,
+    "max_risk_atr": 5.0
+  },
+  "costs": {
+    "fee_rate_one_way": 0.0005,
+    "funding_note": "做空需评估资金费率"
+  },
+  "backtest": {
+    "pool": "177个中低流动性山寨币",
+    "trades": 60,
+    "win_rate": 0.517,
+    "reward_risk_ratio": 1.69,
+    "expectancy_R_per_trade": 0.37,
+    "max_drawdown_R": 7.9,
+    "period": "2026-03-31 ~ 2026-09-27"
+  }
+}

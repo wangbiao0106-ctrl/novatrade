@@ -1,0 +1,37 @@
+{
+  "detect": [
+    {"L": 5, "R": 5, "sweep_wait": 96, "reject_wait": 3}
+  ],
+  "filters": [
+    {},
+    {"major_win": 48},
+    {"major_win": 96},
+    {"major_win": 144},
+    {"major_win": 288},
+    {"major_win": 144, "new_high": 1},
+    {"major_win": 288, "new_high": 1},
+    {"sma_len": 200, "sma_below": 1},
+    {"sma_dist": 1.0, "sma_dist_len": 200},
+    {"sma_dist": 2.0, "sma_dist_len": 200},
+    {"sma_dist": 3.0, "sma_dist_len": 200},
+    {"rsi_div": 0.0},
+    {"rsi_div": -2.0},
+    {"rsi_div": -4.0},
+    {"wick_min": 0.3},
+    {"wick_min": 0.5},
+    {"wick_min": 1.0},
+    {"rj_min": 0.2},
+    {"rj_min": 0.5},
+    {"vol_mult": 1.5},
+    {"vol_mult": 2.0},
+    {"age_min": 12},
+    {"age_min": 24},
+    {"age_min": 48},
+    {"eqh_w": 96, "eqh_eps": 0.3},
+    {"eqh_w": 96, "eqh_eps": 0.5},
+    {"eqh_w": 96, "eqh_eps": 0.8},
+    {"k_eq_s": 1}
+  ],
+  "bufs": [0.1, 0.3],
+  "tp_mults": [2.0, 2.3, 2.5]
+}

@@ -1,0 +1,32 @@
+{
+  "detect": [
+    {"L": 5, "R": 5, "sweep_wait": 96, "reject_wait": 3, "retest_entry": 1, "retest_wait": 8, "retest_mode": "resweep"},
+    {"L": 5, "R": 5, "sweep_wait": 96, "reject_wait": 5, "retest_entry": 1, "retest_wait": 12, "retest_mode": "resweep"},
+    {"L": 5, "R": 5, "sweep_wait": 96, "reject_wait": 3, "retest_entry": 1, "retest_wait": 12, "retest_mode": "resweep"},
+    {"L": 10, "R": 5, "sweep_wait": 96, "reject_wait": 3, "retest_entry": 1, "retest_wait": 8, "retest_mode": "resweep"}
+  ],
+  "filters": [
+    {},
+    {"major_win": 288},
+    {"major_win": 288, "new_high": 1},
+    {"major_win": 288, "rej_body": 0.3},
+    {"major_win": 288, "rs_lower_ext": 1},
+    {"major_win": 288, "rs_rsi_div": -2.0},
+    {"major_win": 288, "rs_vol_fade": 1},
+    {"major_win": 288, "rj1_min": 0.3},
+    {"major_win": 288, "rs_rej_body": 0.3},
+    {"major_win": 288, "rs_lower_ext": 1, "rej_body": 0.3},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_rsi_div": -2.0},
+    {"major_win": 288, "rs_lower_ext": 1, "rj1_min": 0.3},
+    {"major_win": 288, "eqh_w": 96, "eqh_eps": 0.5},
+    {"major_win": 288, "rs_lower_ext": 1, "eqh_w": 96, "eqh_eps": 0.5},
+    {"major_win": 288, "sma_dist": 2.0, "sma_dist_len": 200},
+    {"major_win": 288, "vol_mult": 1.5},
+    {"major_win": 288, "rs_lower_ext": 1, "vol_mult": 1.5},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_rej_body": 0.3},
+    {"major_win": 288, "rs_rsi_div": -2.0, "rs_vol_fade": 1},
+    {"major_win": 288, "rs_lower_ext": 1, "rs_rsi_div": -2.0, "rej_body": 0.3}
+  ],
+  "bufs": [0.2, 0.5],
+  "tp_mults": [2.0, 2.3]
+}

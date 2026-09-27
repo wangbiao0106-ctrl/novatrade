@@ -1,0 +1,580 @@
+{
+  "window": {
+    "start": "2026-06-28T19:00:00+00:00",
+    "end": "2026-09-26T19:00:00+00:00"
+  },
+  "interval": "15m",
+  "leverage": 2.0,
+  "symbols": [
+    "SATS-USDT-SWAP",
+    "PEPE-USDT-SWAP",
+    "SHIB-USDT-SWAP",
+    "BONK-USDT-SWAP",
+    "ONE-USDT-SWAP",
+    "FLOKI-USDT-SWAP",
+    "PUMP-USDT-SWAP",
+    "NEIRO-USDT-SWAP",
+    "BOME-USDT-SWAP",
+    "GALA-USDT-SWAP",
+    "HMSTR-USDT-SWAP",
+    "DOGE-USDT-SWAP",
+    "PENGU-USDT-SWAP",
+    "AKE-USDT-SWAP",
+    "IOST-USDT-SWAP",
+    "MUBARAK-USDT-SWAP",
+    "MEME-USDT-SWAP",
+    "NOT-USDT-SWAP",
+    "2Z-USDT-SWAP",
+    "MEW-USDT-SWAP"
+  ],
+  "skips": {},
+  "screening_stats": {
+    "SATS-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 2,
+      "quote_volume_30m_hits": 55,
+      "composite_hits": 0
+    },
+    "PEPE-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 8382,
+      "composite_hits": 0
+    },
+    "SHIB-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 1386,
+      "composite_hits": 0
+    },
+    "BONK-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 153,
+      "composite_hits": 0
+    },
+    "ONE-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 331,
+      "quote_volume_30m_hits": 973,
+      "composite_hits": 302
+    },
+    "FLOKI-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "PUMP-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 7343,
+      "composite_hits": 0
+    },
+    "NEIRO-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 14,
+      "quote_volume_30m_hits": 142,
+      "composite_hits": 14
+    },
+    "BOME-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 34,
+      "quote_volume_30m_hits": 512,
+      "composite_hits": 32
+    },
+    "GALA-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 1,
+      "quote_volume_30m_hits": 86,
+      "composite_hits": 0
+    },
+    "HMSTR-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 88,
+      "quote_volume_30m_hits": 571,
+      "composite_hits": 88
+    },
+    "DOGE-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 8544,
+      "composite_hits": 0
+    },
+    "PENGU-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 1263,
+      "composite_hits": 0
+    },
+    "AKE-USDT-SWAP": {
+      "bars": 1008,
+      "gain_40pct_hits": 148,
+      "quote_volume_30m_hits": 858,
+      "composite_hits": 148
+    },
+    "IOST-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 65,
+      "quote_volume_30m_hits": 454,
+      "composite_hits": 65
+    },
+    "MUBARAK-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 173,
+      "quote_volume_30m_hits": 896,
+      "composite_hits": 163
+    },
+    "MEME-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "NOT-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    },
+    "2Z-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 2,
+      "quote_volume_30m_hits": 39,
+      "composite_hits": 2
+    },
+    "MEW-USDT-SWAP": {
+      "bars": 8640,
+      "gain_40pct_hits": 0,
+      "quote_volume_30m_hits": 0,
+      "composite_hits": 0
+    }
+  },
+  "survivorship_bias": "current live USDT swaps are used when historical listing data is unavailable",
+  "assumptions": {
+    "gain_window_bars": 96,
+    "min_gain": 0.4,
+    "min_quote_volume_24h": 30000000,
+    "fee_rate_one_way": 0.0006,
+    "slippage_one_way": 0.0002,
+    "funding_rate_per_trade": 0.0,
+    "same_bar_priority": "stop_first",
+    "risk_fraction": 0.005
+  },
+  "selected_params": {
+    "peak_window": 16,
+    "retrace_pct": 0.02,
+    "tolerance_pct": 0.02,
+    "weakness": "prev_low",
+    "stop_mode": "atr",
+    "stop_atr": 1.0,
+    "stop_pct": 0.01,
+    "target_r": 3.0,
+    "trail_bars": 2
+  },
+  "final_all_period": {
+    "params": {
+      "peak_window": 16,
+      "retrace_pct": 0.02,
+      "tolerance_pct": 0.02,
+      "weakness": "prev_low",
+      "stop_mode": "atr",
+      "stop_atr": 1.0,
+      "stop_pct": 0.01,
+      "target_r": 3.0,
+      "trail_bars": 2
+    },
+    "trades": 3,
+    "wins": 2,
+    "losses": 1,
+    "win_rate": 0.6666666666666666,
+    "beta": {
+      "posterior_mean": 0.6,
+      "lower_95": 0.18825302636361926,
+      "upper_95": 0.9356469294529907
+    },
+    "total_r": -0.4774140294263216,
+    "avg_net_r": -0.15913800980877388,
+    "average_win_loss_ratio": 0.3599144894039272,
+    "profit_factor": 0.7198289788078543,
+    "max_drawdown_r": 1.7040093132933387,
+    "max_consecutive_losses": 1,
+    "positive_probability": {
+      "positive_mean_probability": 0.408,
+      "mean_lower_95": -1.7040093132933387,
+      "mean_upper_95": 0.9820407068709294
+    },
+    "leverage": 2.0
+  },
+  "folds": [
+    {
+      "fold": 1,
+      "train": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.01,
+          "weakness": "prev_low",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2
+        },
+        "trades": 1,
+        "wins": 1,
+        "losses": 0,
+        "win_rate": 1.0,
+        "beta": {
+          "posterior_mean": 0.6666666666666666,
+          "lower_95": 0.15193514560251892,
+          "upper_95": 0.9874102785527523
+        },
+        "total_r": 0.6322382349836367,
+        "avg_net_r": 0.6322382349836367,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 1.0,
+          "mean_lower_95": 0.6322382349836367,
+          "mean_upper_95": 0.6322382349836367
+        },
+        "leverage": 2.0
+      },
+      "validation": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.01,
+          "weakness": "prev_low",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2
+        },
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0,
+        "beta": {
+          "posterior_mean": 0.5,
+          "lower_95": 0.025511056276541856,
+          "upper_95": 0.9735537652956829
+        },
+        "total_r": 0,
+        "avg_net_r": 0,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": 0.0,
+          "mean_upper_95": 0.0
+        },
+        "leverage": 2.0
+      },
+      "test": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.01,
+          "weakness": "prev_low",
+          "stop_mode": "pct",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2
+        },
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0,
+        "beta": {
+          "posterior_mean": 0.5,
+          "lower_95": 0.025511056276541856,
+          "upper_95": 0.9735537652956829
+        },
+        "total_r": 0,
+        "avg_net_r": 0,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": 0.0,
+          "mean_upper_95": 0.0
+        },
+        "leverage": 2.0
+      },
+      "candidate_count": 576,
+      "minimum_train_trades": 20,
+      "minimum_train_trades_met": false,
+      "trades": []
+    },
+    {
+      "fold": 2,
+      "train": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.01,
+          "weakness": "bear_half",
+          "stop_mode": "atr",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2
+        },
+        "trades": 2,
+        "wins": 1,
+        "losses": 1,
+        "win_rate": 0.5,
+        "beta": {
+          "posterior_mean": 0.5,
+          "lower_95": 0.09326451721707668,
+          "upper_95": 0.9061353675719512
+        },
+        "total_r": 1.159234838820627,
+        "avg_net_r": 0.5796174194103135,
+        "average_win_loss_ratio": 11.76851541049232,
+        "profit_factor": 11.76851541049232,
+        "max_drawdown_r": 0.10765038583602005,
+        "max_consecutive_losses": 1,
+        "positive_probability": {
+          "positive_mean_probability": 1.0,
+          "mean_lower_95": 0.5796174194103135,
+          "mean_upper_95": 0.5796174194103135
+        },
+        "leverage": 2.0
+      },
+      "validation": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.01,
+          "weakness": "bear_half",
+          "stop_mode": "atr",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2
+        },
+        "trades": 1,
+        "wins": 0,
+        "losses": 1,
+        "win_rate": 0.0,
+        "beta": {
+          "posterior_mean": 0.3333333333333333,
+          "lower_95": 0.014373710642592949,
+          "upper_95": 0.8377044554419254
+        },
+        "total_r": -1.0894322656287634,
+        "avg_net_r": -1.0894322656287634,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 1.0894322656287634,
+        "max_consecutive_losses": 1,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": -1.0894322656287634,
+          "mean_upper_95": -1.0894322656287634
+        },
+        "leverage": 2.0
+      },
+      "test": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.01,
+          "weakness": "bear_half",
+          "stop_mode": "atr",
+          "stop_atr": 0.5,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2
+        },
+        "trades": 2,
+        "wins": 0,
+        "losses": 2,
+        "win_rate": 0.0,
+        "beta": {
+          "posterior_mean": 0.25,
+          "lower_95": 0.007805951856004034,
+          "upper_95": 0.7140186636823276
+        },
+        "total_r": -2.7609852973477462,
+        "avg_net_r": -1.3804926486738731,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 2.7609852973477462,
+        "max_consecutive_losses": 2,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": -1.6221506514956037,
+          "mean_upper_95": -1.1388346458521428
+        },
+        "leverage": 2.0
+      },
+      "candidate_count": 576,
+      "minimum_train_trades": 20,
+      "minimum_train_trades_met": false,
+      "trades": [
+        {
+          "symbol": "IOST-USDT-SWAP",
+          "entry_ts": 1788840000000,
+          "exit_ts": 1788841800000,
+          "entry": 0.00105791154,
+          "initial_stop": 0.001076159244826762,
+          "final_target": 0.0010031684255197135,
+          "net_r": -1.1388346458521428,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.019643531314537055
+        },
+        {
+          "symbol": "IOST-USDT-SWAP",
+          "entry_ts": 1788965100000,
+          "exit_ts": 1788966900000,
+          "entry": 0.00139297854,
+          "initial_stop": 0.0014397992379382432,
+          "final_target": 0.0012525164461852705,
+          "net_r": -1.6221506514956037,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.054523615032863314
+        }
+      ]
+    },
+    {
+      "fold": 3,
+      "train": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.02,
+          "weakness": "prev_low",
+          "stop_mode": "atr",
+          "stop_atr": 1.0,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2
+        },
+        "trades": 1,
+        "wins": 1,
+        "losses": 0,
+        "win_rate": 1.0,
+        "beta": {
+          "posterior_mean": 0.6666666666666666,
+          "lower_95": 0.15193514560251892,
+          "upper_95": 0.9874102785527523
+        },
+        "total_r": 0.9820407068709294,
+        "avg_net_r": 0.9820407068709294,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 1.0,
+          "mean_lower_95": 0.9820407068709294,
+          "mean_upper_95": 0.9820407068709294
+        },
+        "leverage": 2.0
+      },
+      "validation": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.02,
+          "weakness": "prev_low",
+          "stop_mode": "atr",
+          "stop_atr": 1.0,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2
+        },
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0,
+        "beta": {
+          "posterior_mean": 0.5,
+          "lower_95": 0.025511056276541856,
+          "upper_95": 0.9735537652956829
+        },
+        "total_r": 0,
+        "avg_net_r": 0,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 0.0,
+        "max_consecutive_losses": 0,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": 0.0,
+          "mean_upper_95": 0.0
+        },
+        "leverage": 2.0
+      },
+      "test": {
+        "params": {
+          "peak_window": 16,
+          "retrace_pct": 0.02,
+          "tolerance_pct": 0.02,
+          "weakness": "prev_low",
+          "stop_mode": "atr",
+          "stop_atr": 1.0,
+          "stop_pct": 0.01,
+          "target_r": 3.0,
+          "trail_bars": 2
+        },
+        "trades": 1,
+        "wins": 0,
+        "losses": 1,
+        "win_rate": 0.0,
+        "beta": {
+          "posterior_mean": 0.3333333333333333,
+          "lower_95": 0.014373710642592949,
+          "upper_95": 0.8377044554419254
+        },
+        "total_r": -1.7040093132933387,
+        "avg_net_r": -1.7040093132933387,
+        "average_win_loss_ratio": 0,
+        "profit_factor": 0,
+        "max_drawdown_r": 1.7040093132933387,
+        "max_consecutive_losses": 1,
+        "positive_probability": {
+          "positive_mean_probability": 0.0,
+          "mean_lower_95": -1.7040093132933387,
+          "mean_upper_95": -1.7040093132933387
+        },
+        "leverage": 2.0
+      },
+      "candidate_count": 576,
+      "minimum_train_trades": 20,
+      "minimum_train_trades_met": false,
+      "trades": [
+        {
+          "symbol": "AKE-USDT-SWAP",
+          "entry_ts": 1789801200000,
+          "exit_ts": 1789812000000,
+          "entry": 0.056721342,
+          "initial_stop": 0.06238998011825726,
+          "final_target": 0.039715427645228216,
+          "net_r": -1.7040093132933387,
+          "outcome": "loss",
+          "partials": "",
+          "margin_return_pct": -0.17029590285786964
+        }
+      ]
+    }
+  ],
+  "sample_out_of_sample_trades": 3,
+  "sample_out_of_sample_win_rate": 0.0,
+  "sample_out_of_sample_total_r": -4.464994610641085,
+  "passed": false
+}

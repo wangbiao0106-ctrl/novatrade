@@ -1,0 +1,10 @@
+{
+  "detect": [
+    {"L": 5, "R": 5, "sweep_wait": 96, "reject_wait": 3, "retest_entry": 1, "retest_wait": 8, "retest_mode": "resweep"}
+  ],
+  "filters": [
+    {"major_win": 144, "rs_lower_ext": 1, "rs_deep": 0.2}
+  ],
+  "bufs": [1.3, 1.4, 1.6],
+  "tp_mults": [1.2, 1.4]
+}
