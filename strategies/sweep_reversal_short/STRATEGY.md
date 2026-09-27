@@ -1,4 +1,4 @@
-# SWEEP_REVERSAL_SHORT 山寨币高位二次扫顶做空策略
+# SWEEP_REVERSAL_SHORT 山寨币二次扫顶做空（1h）
 
 版本：1.0（已集成到 NovaTrade 策略引擎，`StrategyType.sweepReversalShort`）
 市场：OKX USDT 线性永续合约 · 1 小时 K 线
@@ -57,5 +57,5 @@
 - 引擎：`Sources/TradingService/StrategyEngine.swift` 的 `evaluateSweepReversal`（与 Python 回测逐条一致）；
 - 门控数据：`PaperTradingStore.evaluate` 缓存 BTC 1H K 线并传入引擎；
 - 信号：`StrategySignal.stopPrice / takePrice` 携带止损止盈价位；
-- UI：新建策略对话框可选"高位二次扫顶做空（山寨币）"规则；
+- UI：新建策略对话框可选"山寨币二次扫顶做空（1h）"规则；
 - 建议在启动后端前确保订阅了 BTC-USDT-SWAP 1H 行情（门控依赖）。

@@ -3,7 +3,7 @@ import Testing
 import TradingDomain
 @testable import TradingService
 
-/// 高位二次扫顶做空策略引擎测试：与 Python 回测（strategies/sweep_reversal_short/engine.py）逐条对应。
+/// 山寨币二次扫顶做空（1h）策略引擎测试：与 Python 回测（strategies/sweep_reversal_short/engine.py）逐条对应。
 /// 构造序列：缓涨 → 288 根高位摆动点 p → 首次扫顶 s（放量、收盘回落）→ 二次扫顶 j（更低高点、收盘回落，最后一根）。
 
 private func makeSweepCandles(resweep: Bool = true) -> [Candle] {
@@ -80,12 +80,20 @@ private func makeBTCBullishCandles() -> [Candle] {
 
 private func makeSweepConfig() -> StrategyConfig {
     StrategyConfig(
-        name: "山寨币高位二次扫顶做空", instrumentID: "SATS-USDT-SWAP", interval: .oneHour, type: .sweepReversalShort,
+        name: "山寨币二次扫顶做空（1h）", instrumentID: "SATS-USDT-SWAP", interval: .oneHour, type: .sweepReversalShort,
         parameters: ["L": 10, "R": 5, "majorWindow": 288, "sweepWait": 96, "rejectWait": 5,
                      "resweepWait": 12, "rsiMin": 62, "volMult": 1.5, "rsDeep": 0.2,
                      "bufATR": 0.5, "tpMult": 2.2, "minATRPct": 0.5, "maxRiskATR": 5.0, "btcGateEnabled": 1],
         enabled: true, cooldownBars: 96
     )
+}
+
+@Test
+func sweepReversalKeepsIdentifierSeparateFromDisplayName() {
+    let config = makeSweepConfig()
+    #expect(config.strategyIdentifier == "sweepReversalShort")
+    #expect(config.displayName == "山寨币二次扫顶做空（1h）")
+    #expect(StrategyType.sweepReversalShort.identifier == "sweepReversalShort")
 }
 
 @Test

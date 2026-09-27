@@ -1,7 +1,7 @@
 {
   "strategy": "SWEEP_REVERSAL_SHORT",
   "version": "1.0",
-  "name_zh": "山寨币高位二次扫顶做空",
+  "name_zh": "山寨币二次扫顶做空（1h）",
   "market": "OKX_USDT_LINEAR_PERPETUAL",
   "entry_timeframe_minutes": 60,
   "universe": {

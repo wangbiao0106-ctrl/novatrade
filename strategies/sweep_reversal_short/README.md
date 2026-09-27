@@ -1,6 +1,9 @@
 # Sweep Reversal Short
 
-山寨币高位二次扫顶做空策略，已集成到 `StrategyType.sweepReversalShort` 和 `Sources/TradingService/StrategyEngine.swift`。
+山寨币二次扫顶做空（1h），已集成到 `StrategyType.sweepReversalShort` 和 `Sources/TradingService/StrategyEngine.swift`。
+
+- 稳定策略标识：`sweepReversalShort`（`StrategyType.identifier`，程序匹配和路由使用）
+- UI 显示名称：`山寨币二次扫顶做空（1h）`（`StrategyConfig.displayName`，修改文案不影响程序标识）
 
 - 集成规则：[`STRATEGY.md`](STRATEGY.md)
 - 研究材料和实验配置：[`research/`](research/)

@@ -5,6 +5,6 @@
 当前策略：
 
 - [`hlsr/`](hlsr/)：高位流动性扫顶反转。
-- [`sweep_reversal_short/`](sweep_reversal_short/)：山寨币高位二次扫顶做空，已接入策略引擎。
+- [`sweep_reversal_short/`](sweep_reversal_short/)：山寨币二次扫顶做空（1h），已接入策略引擎。
 
 目录细则见 [`spec/DIRECTORY_STRUCTURE.md`](../spec/DIRECTORY_STRUCTURE.md)。

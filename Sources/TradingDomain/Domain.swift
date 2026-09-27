@@ -291,7 +291,20 @@ public struct LiveTradingStatus: Codable, Equatable, Sendable {
     }
 }
 
-public enum StrategyType: String, Codable, CaseIterable, Sendable { case trendFollowing, rsiReversal, sweepReversalShort }
+public enum StrategyType: String, Codable, CaseIterable, Sendable {
+    case trendFollowing, rsiReversal, sweepReversalShort
+
+    /// Stable machine-readable identifier. Keep this independent from UI copy.
+    public var identifier: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .trendFollowing: return "EMA 20 / EMA 60 金叉"
+        case .rsiReversal: return "RSI < 28 买入"
+        case .sweepReversalShort: return "山寨币二次扫顶做空（1h）"
+        }
+    }
+}
 public enum StrategyState: String, Codable, Sendable { case draft, running, paused, error }
 
 public enum StrategyScopeMode: String, Codable, CaseIterable, Sendable {
@@ -392,6 +405,12 @@ public struct StrategyConfig: Codable, Equatable, Sendable, Identifiable {
     public var cooldownBars: Int
     public var trailingStopPercent: Double
     public var scope: StrategyScope
+
+    /// Stable strategy type identifier for routing and persistence.
+    public var strategyIdentifier: String { type.identifier }
+
+    /// User-facing strategy name. This may change without changing `type`.
+    public var displayName: String { name }
 
     public init(id: UUID = UUID(), name: String, instrumentID: String, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, stopLossPercent: Double = 1.5, takeProfitPercent: Double = 3, riskPercent: Double = 1, cooldownBars: Int = 3, trailingStopPercent: Double = 1) {
         self.id = id; self.name = name; self.instrumentID = instrumentID; self.interval = interval; self.type = type; self.parameters = parameters; self.enabled = enabled

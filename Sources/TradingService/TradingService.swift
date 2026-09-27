@@ -23,6 +23,13 @@ public actor PaperTradingStore {
     /// BTC 1 小时 K 线缓存：供"扫顶反转"策略的 BTC<SMA200 门控使用
     private var btcHourlyCandles: [Candle] = []
 
+    private static func normalizedName(for config: StrategyConfig) -> StrategyConfig {
+        guard config.type == .sweepReversalShort else { return config }
+        var normalized = config
+        normalized.name = config.type.displayName
+        return normalized
+    }
+
     public init(directory: URL = PaperTradingStore.defaultDirectory()) {
         self.directory = directory
         self.encoder = JSONEncoder()
@@ -32,7 +39,7 @@ public actor PaperTradingStore {
         self.orders = []
         self.fills = []
         if let file = Self.loadFile(directory: directory, decoder: decoder) {
-            self.strategies = file.strategies
+            self.strategies = file.strategies.map(Self.normalizedName(for:))
             self.statuses = Dictionary(uniqueKeysWithValues: file.statuses.compactMap { entry in
                 guard let uuid = UUID(uuidString: entry.key) else { return nil }
                 return (uuid, entry.value)
@@ -40,6 +47,8 @@ public actor PaperTradingStore {
             self.orders = file.orders
             self.fills = file.fills
             self.risk = file.risk
+            let strategyIDs = Set(self.strategies.map(\.id))
+            self.orders.removeAll { $0.status == "pending" && !strategyIDs.contains($0.strategyID) }
         }
         if self.strategies.isEmpty {
             // A new installation starts with no strategy instances. Strategies
@@ -80,28 +89,30 @@ public actor PaperTradingStore {
     public func riskSnapshot() -> RiskSnapshot { risk }
 
     public func create(_ config: StrategyConfig) throws -> StrategyConfig {
-        guard !strategies.contains(where: { $0.id == config.id }) else { throw StoreError.conflict }
-        guard !strategies.contains(where: { $0.type == config.type }) else { throw StoreError.conflict }
-        strategies.append(config)
-        statuses[config.id] = StrategyStatus(id: config.id, state: .paused)
+        let normalized = Self.normalizedName(for: config)
+        guard !strategies.contains(where: { $0.id == normalized.id }) else { throw StoreError.conflict }
+        guard !strategies.contains(where: { $0.type == normalized.type }) else { throw StoreError.conflict }
+        strategies.append(normalized)
+        statuses[normalized.id] = StrategyStatus(id: normalized.id, state: .paused)
         save()
-        return config
+        return normalized
     }
 
     public func update(_ config: StrategyConfig) throws -> StrategyConfig {
-        guard let index = strategies.firstIndex(where: { $0.id == config.id }) else { throw StoreError.notFound }
-        guard !strategies.contains(where: { $0.id != config.id && $0.type == config.type }) else { throw StoreError.conflict }
+        let normalized = Self.normalizedName(for: config)
+        guard let index = strategies.firstIndex(where: { $0.id == normalized.id }) else { throw StoreError.notFound }
+        guard !strategies.contains(where: { $0.id != normalized.id && $0.type == normalized.type }) else { throw StoreError.conflict }
         let wasEnabled = strategies[index].enabled
-        strategies[index] = config
-        statusesByInstrument[config.id] = [:]
-        if let previous = statuses[config.id] {
-            let lastSignal = !wasEnabled && config.enabled ? nil : previous.lastSignal
-            statuses[config.id] = StrategyStatus(id: previous.id, state: config.enabled ? .running : .paused, direction: previous.direction, cooldown: previous.cooldown, pnl: previous.pnl, lastSignal: lastSignal, indicators: previous.indicators)
+        strategies[index] = normalized
+        statusesByInstrument[normalized.id] = [:]
+        if let previous = statuses[normalized.id] {
+            let lastSignal = !wasEnabled && normalized.enabled ? nil : previous.lastSignal
+            statuses[normalized.id] = StrategyStatus(id: previous.id, state: normalized.enabled ? .running : .paused, direction: previous.direction, cooldown: previous.cooldown, pnl: previous.pnl, lastSignal: lastSignal, indicators: previous.indicators)
         } else {
-            statuses[config.id] = StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+            statuses[normalized.id] = StrategyStatus(id: normalized.id, state: normalized.enabled ? .running : .paused)
         }
         save()
-        return config
+        return normalized
     }
 
     public func delete(_ id: UUID) throws -> StrategyConfig {
@@ -606,7 +617,7 @@ public actor TradingBackend {
         switch type {
         case .trendFollowing: return "EMA / 唐奇安趋势过滤"
         case .rsiReversal: return "RSI 超买超卖回穿"
-        case .sweepReversalShort: return "高位二次扫顶做空（山寨币）"
+        case .sweepReversalShort: return "山寨币二次扫顶做空（1h）"
         }
     }
 

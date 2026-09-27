@@ -47,7 +47,7 @@ spec/                               稳定的工程规范和接口约定
 | 目录 | 用途 | 状态 |
 | --- | --- | --- |
 | `strategies/hlsr/` | 高位流动性扫顶反转及其 15 分钟回测 | 研究中，可生成信号 |
-| `strategies/sweep_reversal_short/` | 山寨币高位二次扫顶做空 | 已集成 `Sources/TradingService/StrategyEngine.swift` |
+| `strategies/sweep_reversal_short/` | 山寨币二次扫顶做空（1h） | 已集成 `Sources/TradingService/StrategyEngine.swift` |
 
 ## 迁移检查
 

@@ -153,7 +153,7 @@ final class DashboardModel: ObservableObject {
         switch type {
         case .trendFollowing: return "EMA / 唐奇安趋势过滤"
         case .rsiReversal: return "RSI 超买超卖回穿"
-        case .sweepReversalShort: return "高位二次扫顶做空（山寨币）"
+        case .sweepReversalShort: return "山寨币二次扫顶做空（1h）"
         }
     }
 
@@ -372,7 +372,7 @@ final class DashboardModel: ObservableObject {
             if let configs = try? await client.strategies() {
                 strategyConfigs = configs
                 strategies = configs.map { config in
-                    TradingStrategy(serviceID: config.id, name: config.name, symbol: config.scope.displayName, rule: DashboardModel.ruleLabel(config.type), state: config.enabled ? .running : .paused, pnl: 0, allocation: Int(config.riskPercent))
+                    TradingStrategy(serviceID: config.id, name: config.displayName, symbol: config.scope.displayName, rule: DashboardModel.ruleLabel(config.type), state: config.enabled ? .running : .paused, pnl: 0, allocation: Int(config.riskPercent))
                 }
             }
             guard generation == lifecycleGeneration, autoStartBackend else {
@@ -553,7 +553,7 @@ final class DashboardModel: ObservableObject {
     func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig {
         let created = try await client.createStrategy(config)
         strategyConfigs.append(created)
-        strategies.insert(TradingStrategy(serviceID: created.id, name: created.name, symbol: created.scope.displayName, rule: DashboardModel.ruleLabel(created.type), state: .paused, pnl: 0, allocation: Int(created.riskPercent)), at: 0)
+        strategies.insert(TradingStrategy(serviceID: created.id, name: created.displayName, symbol: created.scope.displayName, rule: DashboardModel.ruleLabel(created.type), state: .paused, pnl: 0, allocation: Int(created.riskPercent)), at: 0)
         return created
     }
 
@@ -780,7 +780,6 @@ struct StrategyStatusModule: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 Text(strategy.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text(strategy.symbol).font(.caption.monospaced()).foregroundStyle(.secondary)
                 Spacer()
                 if strategy.serviceID != nil {
                     Button { requestDelete() } label: { Image(systemName: "trash") }
@@ -793,7 +792,7 @@ struct StrategyStatusModule: View {
                 Text(status?.direction?.uppercased() ?? "空仓").font(.caption2.weight(.semibold)).padding(.horizontal, 7).padding(.vertical, 4).background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
             }
             HStack(spacing: 6) {
-                Text(strategy.rule).font(.caption).foregroundStyle(.secondary)
+                Text(strategy.symbol).font(.caption.monospaced()).foregroundStyle(.secondary)
                 Spacer()
                 Circle().fill(strategy.state.color).frame(width: 7, height: 7)
                 Text(strategy.state.rawValue).font(.caption2).foregroundStyle(strategy.state.color)
@@ -1375,9 +1374,10 @@ struct StrategyCard: View {
                         .opacity(strategy.state == .running ? 0.45 : 1)
                         .disabled(strategy.state == .running)
                         .help(strategy.state == .running ? "请先停止策略" : "删除策略实例")
-                }
+                    }
             }
-            Text(strategy.symbol).font(.caption.monospaced()).foregroundStyle(.secondary); Text(strategy.rule).font(.caption).foregroundStyle(.primary); Divider().overlay(Color.white.opacity(0.08))
+            Text(strategy.symbol).font(.caption.monospaced()).foregroundStyle(.secondary)
+            Divider().overlay(Color.white.opacity(0.08))
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 4) { Text("累计收益").font(.caption2).foregroundStyle(.secondary); Text(String(format: "%+.2f USDT", strategy.pnl)).font(.headline.monospacedDigit()).foregroundStyle(strategy.pnl >= 0 ? .green : .red) }
                 Spacer()
@@ -1500,19 +1500,23 @@ struct OperationsSection: View {
 struct NewStrategySheet: View {
     @ObservedObject var model: DashboardModel
     @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
     @State private var scopeMode: StrategyScopeMode = .single
     @State private var symbolCategory: StrategySymbolCategory = .mainstream
     @State private var symbol = ""
     @State private var selectedSymbols: Set<String> = []
-    @State private var rule = "EMA 20 / EMA 60 金叉"
+    @State private var selectedRule: StrategyType = .trendFollowing
     @State private var allocation = 20.0
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack { Text("新建策略").font(.title2.weight(.bold)); Spacer(); Button("取消") { dismiss() }.buttonStyle(.plain).foregroundStyle(.secondary) }
             Text("配置完成后可在策略中心启动，订单将发送到当前 OKX 模拟账户。").font(.caption).foregroundStyle(.secondary)
             Form {
-                TextField("策略名称", text: $name)
+                Picker("策略规则", selection: $selectedRule) {
+                    ForEach(StrategyType.allCases, id: \.self) { strategyType in
+                        Text("\(strategyType.displayName)\(model.hasStrategyType(strategyType) ? "（已有实例）" : "")")
+                            .tag(strategyType)
+                    }
+                }
                 Picker("绑定范围", selection: $scopeMode) {
                     Text("单币种").tag(StrategyScopeMode.single)
                     Text("多币种").tag(StrategyScopeMode.multiple)
@@ -1561,11 +1565,6 @@ struct NewStrategySheet: View {
                         }
                     }
                 }
-                Picker("策略规则", selection: $rule) {
-                    Text("EMA 20 / EMA 60 金叉\(model.hasStrategyType(.trendFollowing) ? "（已有实例）" : "")").tag("EMA 20 / EMA 60 金叉")
-                    Text("RSI < 28 买入\(model.hasStrategyType(.rsiReversal) ? "（已有实例）" : "")").tag("RSI < 28 买入")
-                    Text("高位二次扫顶做空（山寨币）\(model.hasStrategyType(.sweepReversalShort) ? "（已有实例）" : "")").tag("高位二次扫顶做空（山寨币）")
-                }
                 VStack(alignment: .leading) { Text("资金分配 \(Int(allocation))%"); Slider(value: $allocation, in: 5...80, step: 5) }
             }.formStyle(.grouped)
             Spacer(); HStack { Spacer(); Button("创建并保存") { create() }.buttonStyle(.borderedProminent).tint(.mint).disabled(!canCreate) }
@@ -1580,8 +1579,7 @@ struct NewStrategySheet: View {
     }
 
     private var canCreate: Bool {
-        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        guard !model.hasStrategyType(selectedStrategyType) else { return false }
+        guard !model.hasStrategyType(selectedRule) else { return false }
         switch scopeMode {
         case .single: return !symbol.isEmpty
         case .multiple: return !selectedSymbols.isEmpty
@@ -1611,7 +1609,7 @@ struct NewStrategySheet: View {
         case .dynamicCategory:
             scope = .dynamic(symbolCategory.domainValue)
         }
-        let type = selectedStrategyType
+        let type = selectedRule
         let parameters: [String: Double]
         if type == .rsiReversal {
             parameters = ["period": 14, "oversold": 30, "overbought": 70]
@@ -1623,18 +1621,13 @@ struct NewStrategySheet: View {
         } else {
             parameters = ["fastEMA": 20, "slowEMA": 60]
         }
-        let config = StrategyConfig(name: name, scope: scope, interval: .oneHour, type: type, parameters: parameters, enabled: false, riskPercent: allocation, cooldownBars: type == .sweepReversalShort ? 96 : 3)
+        let config = StrategyConfig(name: type.displayName, scope: scope, interval: .oneHour, type: type, parameters: parameters, enabled: false, riskPercent: allocation, cooldownBars: type == .sweepReversalShort ? 96 : 3)
         Task {
             do { _ = try await model.createStrategy(config); dismiss() }
             catch { model.errorMessage = error.localizedDescription }
         }
     }
 
-    private var selectedStrategyType: StrategyType {
-        if rule.contains("RSI") { return .rsiReversal }
-        if rule.contains("扫顶") { return .sweepReversalShort }
-        return .trendFollowing
-    }
 }
 
 private func formatPrice(_ value: Double) -> String {

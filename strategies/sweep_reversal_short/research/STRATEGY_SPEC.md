@@ -1,6 +1,6 @@
 # 高位流动性扫顶反转（做空）策略 · 规则说明书 v1.0
 
-> 名称：**BTC门控 · 高位二次扫顶反转做空（Sweep & Resweep Top Reversal Short）**
+> 名称：**BTC门控 · 山寨币二次扫顶做空（1h）（Sweep & Resweep Top Reversal Short）**
 > 状态：已定稿（用户确认）。本文档是唯一权威规则定义，任何实现需与本文档及回测代码 `engine.py` 逐条一致。
 
 ---

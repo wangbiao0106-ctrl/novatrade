@@ -97,15 +97,16 @@ python3 strategies/hlsr/src/hlsr_signal_generator.py \
 
 回测的 `--days` 至少为 180 天，以覆盖三个 60/30/30 天 walk-forward 折；`--end` 支持带时区的 ISO-8601 时间，也支持 `Z` 结尾。
 
-## 山寨币高位二次扫顶做空策略（已集成）
+## 山寨币二次扫顶做空（1h）（已集成）
 
 另一个同族但信号不同的做空策略（BTC 门控 + 12 天高点二次假突破）已集成到策略引擎（`StrategyType.sweepReversalShort`）：
 
 - 规则与集成说明：`strategies/sweep_reversal_short/STRATEGY.md`
 - 参数配置：`strategies/sweep_reversal_short/config/strategy.json`
 - 引擎实现：`Sources/TradingService/StrategyEngine.swift`（`evaluateSweepReversal`，与 Python 回测逐条一致；信号携带 ATR 标定的止损/止盈价位）
+- 稳定策略标识：`sweepReversalShort`；UI 显示名称：`山寨币二次扫顶做空（1h）`
 - 门控数据流：`PaperTradingStore` 缓存 BTC 1H K 线（BTC<SMA200 才发做空信号）
-- UI：新建策略对话框可选"高位二次扫顶做空（山寨币）"规则
+- UI：新建策略对话框可选"山寨币二次扫顶做空（1h）"规则
 - 单元测试：`Tests/OKXGatewayTests/SweepReversalStrategyTests.swift`（4 项，含门控与假突破场景）
 - 研究与回测：`strategies/sweep_reversal_short/`（推荐池 177 个中低流动性山寨币，60 笔，胜率 51.7%，盈亏比 1.69R，期望 +0.37R/笔）
 
