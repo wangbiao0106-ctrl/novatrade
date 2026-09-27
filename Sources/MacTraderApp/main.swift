@@ -372,7 +372,7 @@ final class DashboardModel: ObservableObject {
             if let configs = try? await client.strategies() {
                 strategyConfigs = configs
                 strategies = configs.map { config in
-                    TradingStrategy(serviceID: config.id, name: config.name, symbol: config.effectiveScope.displayName, rule: DashboardModel.ruleLabel(config.type), state: config.enabled ? .running : .paused, pnl: 0, allocation: Int(config.riskPercent))
+                    TradingStrategy(serviceID: config.id, name: config.name, symbol: config.scope.displayName, rule: DashboardModel.ruleLabel(config.type), state: config.enabled ? .running : .paused, pnl: 0, allocation: Int(config.riskPercent))
                 }
             }
             guard generation == lifecycleGeneration, autoStartBackend else {
@@ -553,7 +553,7 @@ final class DashboardModel: ObservableObject {
     func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig {
         let created = try await client.createStrategy(config)
         strategyConfigs.append(created)
-        strategies.insert(TradingStrategy(serviceID: created.id, name: created.name, symbol: created.effectiveScope.displayName, rule: DashboardModel.ruleLabel(created.type), state: .paused, pnl: 0, allocation: Int(created.riskPercent)), at: 0)
+        strategies.insert(TradingStrategy(serviceID: created.id, name: created.name, symbol: created.scope.displayName, rule: DashboardModel.ruleLabel(created.type), state: .paused, pnl: 0, allocation: Int(created.riskPercent)), at: 0)
         return created
     }
 
@@ -566,8 +566,8 @@ final class DashboardModel: ObservableObject {
     private func strategyInstrumentIDs(for serviceID: UUID) -> Set<String> {
         var ids = Set(orders.filter { $0.strategyID == serviceID }.map(\.instrumentID))
         guard let config = strategyConfigs.first(where: { $0.id == serviceID }) else { return ids }
-        ids.formUnion(config.effectiveScope.instrumentIDs)
-        if config.effectiveScope.mode == .dynamicCategory, let category = config.effectiveScope.category {
+        ids.formUnion(config.scope.instrumentIDs)
+        if config.scope.mode == .dynamicCategory, let category = config.scope.category {
             let uiCategory: StrategySymbolCategory
             switch category {
             case .mainstream: uiCategory = .mainstream

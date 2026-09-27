@@ -228,7 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Export all live OKX USDT linear swap 5m candles for AI analysis")
     parser.add_argument("--days", type=int, default=180, help="number of recent UTC days (default: 180)")
     parser.add_argument("--bar", default="5m", choices=("5m",), help="candle interval (default: 5m)")
-    parser.add_argument("--output", type=Path, default=Path("data/market_export"), help="output directory")
+    parser.add_argument("--output", type=Path, default=Path("data/kline/okx/swap/5m"), help="output directory")
     parser.add_argument("--workers", type=int, default=4, help="parallel contract downloads (default: 4)")
     parser.add_argument("--symbols", nargs="+", help="optional instrument IDs; defaults to every live USDT linear swap")
     parser.add_argument("--start", help="UTC ISO-8601 start; overrides --days")

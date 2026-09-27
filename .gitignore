@@ -7,5 +7,5 @@ DerivedData/
 .venv/
 __pycache__/
 *.py[cod]
-data/market_export/
-strategy_sweep_reversal/out/
+data/kline/okx/swap/
+strategies/sweep_reversal_short/results/

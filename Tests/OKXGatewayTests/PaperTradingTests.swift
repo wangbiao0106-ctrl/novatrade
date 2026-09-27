@@ -17,14 +17,6 @@ func strategyScopesResolveSingleMultipleAndDynamicTargets() throws {
 }
 
 @Test
-func legacyStrategyConfigDefaultsToSingleScope() throws {
-    let data = Data(#"{"id":"00000000-0000-0000-0000-000000000001","name":"legacy","instrumentID":"BTC-USDT-SWAP","interval":"1H","type":"trendFollowing","parameters":{},"enabled":false,"stopLossPercent":1.5,"takeProfitPercent":3,"riskPercent":1,"cooldownBars":3,"trailingStopPercent":1}"#.utf8)
-    let config = try JSONDecoder().decode(StrategyConfig.self, from: data)
-    #expect(config.scope == nil)
-    #expect(config.effectiveScope.matches("BTC-USDT-SWAP", contracts: []))
-}
-
-@Test
 func strategyStoreAllowsOneInstancePerRuleAndDeletesIt() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-store-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }

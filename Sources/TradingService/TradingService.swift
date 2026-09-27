@@ -149,7 +149,7 @@ public actor PaperTradingStore {
         }
         var changed = false
         var evaluatedStatuses: [StrategyStatus] = []
-        for config in strategies where config.effectiveScope.matches(snapshot.instrumentID, contracts: contracts) && config.interval == snapshot.interval {
+        for config in strategies where config.scope.matches(snapshot.instrumentID, contracts: contracts) && config.interval == snapshot.interval {
             let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
                 ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
             let next = engine.evaluate(config: config, candles: snapshot.candles, previous: previous, btcCandles: config.type == .sweepReversalShort ? btcHourlyCandles : nil)

@@ -3,7 +3,7 @@ import Testing
 import TradingDomain
 @testable import TradingService
 
-/// 高位二次扫顶做空策略引擎测试：与 Python 回测（strategy_sweep_reversal/engine.py）逐条对应。
+/// 高位二次扫顶做空策略引擎测试：与 Python 回测（strategies/sweep_reversal_short/engine.py）逐条对应。
 /// 构造序列：缓涨 → 288 根高位摆动点 p → 首次扫顶 s（放量、收盘回落）→ 二次扫顶 j（更低高点、收盘回落，最后一根）。
 
 private func makeSweepCandles(resweep: Bool = true) -> [Candle] {

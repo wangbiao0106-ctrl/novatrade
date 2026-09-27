@@ -152,7 +152,7 @@ private final class StreamHub: @unchecked Sendable {
                 }
                 var targets = Set<StrategyTarget>()
                 for config in configs where config.enabled {
-                    for instrumentID in config.effectiveScope.resolvedInstrumentIDs(from: contracts) {
+                    for instrumentID in config.scope.resolvedInstrumentIDs(from: contracts) {
                         targets.insert(StrategyTarget(instrumentID: instrumentID, interval: config.interval))
                     }
                     if config.type == .sweepReversalShort, (config.parameters["btcGateEnabled"] ?? 1) >= 1 {

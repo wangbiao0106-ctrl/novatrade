@@ -51,49 +51,48 @@ Swift 应用不会直接打开配置文件，也不会持久化或展示密钥�
 
 ## 山寨币高位做空回测
 
-历史1小时版本的结果保留在 `data/backtest/optimization_report.json`；当前脚本已升级为下面的15分钟二次见顶版本。
+HLSR 回测只保留当前配置和可重建的输入，输出统一写入对应策略的 `results/` 目录。
 
 ```bash
-python3 scripts/altcoin_backtest.py --symbols 50 --min-trades 20 --end 2026-09-26T19:00:00+00:00
+python3 strategies/hlsr/src/altcoin_backtest.py --symbols 50 --min-trades 20 --end 2026-09-26T19:00:00+00:00
 ```
 
-旧版输出位于 `data/backtest/optimization_report.json` 和 `data/backtest/trades_best_test.csv`。
 
 ### 15分钟二次见顶版本
 
-`scripts/altcoin_backtest.py` 现在默认执行180天15分钟回测：滚动96根K线硬性筛选24小时涨幅至少40%、24小时报价成交额至少3,000万 USDT 的当前可交易USDT线性永续，比较前高收盘转弱、上影线反抽和跌破EMA后反抽失败三类入场时机，使用2倍杠杆、1R/2R/最终目标分批止盈和高点跟踪止损。参数通过60天训练、30天验证、30天测试的三个滚动窗口选择，并输出Beta胜率区间和按标的/日期聚类Bootstrap的正收益概率。
+`strategies/hlsr/src/altcoin_backtest.py` 现在默认执行180天15分钟回测：滚动96根K线硬性筛选24小时涨幅至少40%、24小时报价成交额至少3,000万 USDT 的当前可交易USDT线性永续，比较前高收盘转弱、上影线反抽和跌破EMA后反抽失败三类入场时机，使用2倍杠杆、1R/2R/最终目标分批止盈和高点跟踪止损。参数通过60天训练、30天验证、30天测试的三个滚动窗口选择，并输出Beta胜率区间和按标的/日期聚类Bootstrap的正收益概率。
 
 ```bash
-python3 scripts/altcoin_backtest.py --symbols 50 --min-trades 20 --end 2026-09-26T19:00:00+00:00
-python3 -m unittest scripts/test_altcoin_backtest.py
+python3 strategies/hlsr/src/altcoin_backtest.py --symbols 50 --min-trades 20 --end 2026-09-26T19:00:00+00:00
+python3 -m unittest strategies/hlsr/tests/test_altcoin_backtest.py
 ```
 
-结果写入带周期后缀的 `data/backtest/15m_180d_optimization_report.json`、`data/backtest/15m_180d_trades_test.csv` 和 `data/backtest/15m_180d_parameter_grid.csv`。当复合条件导致训练样本少于 `--min-trades` 时，程序仍输出报告并将对应折标记为未满足最小样本；不会把稀疏样本误判为策略通过。
+结果写入 `strategies/hlsr/results/`。当复合条件导致训练样本少于 `--min-trades` 时，程序仍输出报告并将对应折标记为未满足最小样本；这些结果可随时重建，不作为运行时数据。
 
 ### HLSR — High-Level Liquidity Sweep Reversal
 
-高位流动性扫顶反转策略位于 `scripts/high_short_strategy.py`，设计和流程图见 [`docs/HIGH_SHORT_STRATEGY.md`](docs/HIGH_SHORT_STRATEGY.md)。核心公式是“高位价值区 + 流动性扫顶 + 拒绝 + 结构破坏 + 右侧确认 = 做空”。1H/4H负责市场结构，15分钟执行入场；仓位、杠杆、止损、波动率、资金费率、OI和爆仓数据作为独立风险管理模块。
+高位流动性扫顶反转策略位于 `strategies/hlsr/src/high_short_strategy.py`，设计和流程图见 [`strategies/hlsr/DESIGN.md`](strategies/hlsr/DESIGN.md)。核心公式是“高位价值区 + 流动性扫顶 + 拒绝 + 结构破坏 + 右侧确认 = 做空”。1H/4H负责市场结构，15分钟执行入场；仓位、杠杆、止损、波动率、资金费率、OI和爆仓数据作为独立风险管理模块。
 
 ```bash
-python3 scripts/high_short_strategy.py --symbols 50 --days 180 --end 2026-09-26T19:00:00+00:00
-python3 -m unittest scripts/test_high_short_strategy.py
+python3 strategies/hlsr/src/high_short_strategy.py --symbols 50 --days 180 --end 2026-09-26T19:00:00+00:00
+python3 -m unittest strategies/hlsr/tests/test_high_short_strategy.py
 ```
 
-结果写入 `data/backtest/high_short_180d_report.json` 和 `data/backtest/high_short_180d_trades.csv`。该策略的回测结果必须通过样本外交易数、胜率和平均净R门槛才会标记为 `PASS`。
+结果写入 `strategies/hlsr/results/`。该策略的回测结果必须通过样本外交易数、胜率和平均净R门槛才会标记为 `PASS`。
 
 HLSR 的标准策略说明、参数配置和只读信号生成器分别位于：
 
-- `strategies/HLSR_STRATEGY.md`
-- `strategies/hlsr_signal_config.json`
-- `scripts/hlsr_signal_generator.py`
+- `strategies/hlsr/STRATEGY.md`
+- `strategies/hlsr/config/signal.json`
+- `strategies/hlsr/src/hlsr_signal_generator.py`
 
 信号生成器读取已确认的 5 分钟或 15 分钟 OHLCV 文件，自动聚合到 15 分钟，输出最近或全部历史信号；它不会连接交易所，也不会提交订单：
 
 ```bash
-python3 scripts/hlsr_signal_generator.py \
-  --input data/market_export/BEAT_USDT_SWAP_5m_20260331T065300Z_20260927T065300Z.jsonl.gz \
+python3 strategies/hlsr/src/hlsr_signal_generator.py \
+  --input data/kline/okx/swap/5m/BEAT_USDT_SWAP_5m_20260331T065300Z_20260927T065300Z.jsonl.gz \
   --symbol BEAT-USDT-SWAP \
-  --config strategies/hlsr_signal_config.json
+  --config strategies/hlsr/config/signal.json
 ```
 
 回测的 `--days` 至少为 180 天，以覆盖三个 60/30/30 天 walk-forward 折；`--end` 支持带时区的 ISO-8601 时间，也支持 `Z` 结尾。
@@ -102,13 +101,13 @@ python3 scripts/hlsr_signal_generator.py \
 
 另一个同族但信号不同的做空策略（BTC 门控 + 12 天高点二次假突破）已集成到策略引擎（`StrategyType.sweepReversalShort`）：
 
-- 规则与集成说明：`strategies/SWEEP_REVERSAL_STRATEGY.md`
-- 参数配置：`strategies/sweep_reversal_config.json`
+- 规则与集成说明：`strategies/sweep_reversal_short/STRATEGY.md`
+- 参数配置：`strategies/sweep_reversal_short/config/strategy.json`
 - 引擎实现：`Sources/TradingService/StrategyEngine.swift`（`evaluateSweepReversal`，与 Python 回测逐条一致；信号携带 ATR 标定的止损/止盈价位）
 - 门控数据流：`PaperTradingStore` 缓存 BTC 1H K 线（BTC<SMA200 才发做空信号）
 - UI：新建策略对话框可选"高位二次扫顶做空（山寨币）"规则
 - 单元测试：`Tests/OKXGatewayTests/SweepReversalStrategyTests.swift`（4 项，含门控与假突破场景）
-- 研究与回测：`strategy_sweep_reversal/`（推荐池 177 个中低流动性山寨币，60 笔，胜率 51.7%，盈亏比 1.69R，期望 +0.37R/笔）
+- 研究与回测：`strategies/sweep_reversal_short/`（推荐池 177 个中低流动性山寨币，60 笔，胜率 51.7%，盈亏比 1.69R，期望 +0.37R/笔）
 
 ## 本机运行
 
@@ -124,7 +123,7 @@ swift run okx-atk-cli BTC-USDT-SWAP
 
 ## 导出 AI 行情数据
 
-后台导出脚本会读取 OKX 当前全部存续的 USDT 线性永续合约，下载最近 180 天的 5 分钟 K 线，并写入 `data/market_export/manifest.json` 和每合约一个 `.jsonl.gz` 文件。公共行情接口不需要 API Key：
+后台导出脚本会读取 OKX 当前全部存续的 USDT 线性永续合约，下载最近 180 天的 5 分钟 K 线，并写入 `data/kline/okx/swap/5m/manifest.json` 和每合约一个 `.jsonl.gz` 文件。公共行情接口不需要 API Key：
 
 ```bash
 python3 scripts/export_market_data.py
@@ -141,6 +140,10 @@ python3 scripts/export_market_data.py
 3. 增加 ATK CLI 的账户、持仓和订单 JSON 适配，处理超时、重连、部分失败和幂等。
 4. 增加 iOS 与 Mac 的本地配对，只同步脱敏状态和告警。
 5. 最后才开放实盘写操作，并要求独立小额子账户、无提币权限、日损熔断和保护单核验。
+
+## 目录规范
+
+行情数据、策略研究和源码导入的固定目录规则见 [`spec/DIRECTORY_STRUCTURE.md`](spec/DIRECTORY_STRUCTURE.md)。新增数据或策略文件前先按该规范选择目录。
 
 官方参考：
 

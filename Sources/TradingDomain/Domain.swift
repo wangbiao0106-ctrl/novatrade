@@ -331,11 +331,9 @@ public struct StrategyScope: Codable, Equatable, Sendable {
     public static func multiple(_ instrumentIDs: [String]) -> StrategyScope { StrategyScope(mode: .multiple, instrumentIDs: instrumentIDs) }
     public static func dynamic(_ category: StrategyUniverseCategory) -> StrategyScope { StrategyScope(mode: .dynamicCategory, category: category) }
 
-    public var legacyInstrumentID: String { instrumentIDs.first ?? "" }
-
     public var displayName: String {
         switch mode {
-        case .single: return legacyInstrumentID.isEmpty ? "未选择合约" : legacyInstrumentID
+        case .single: return instrumentIDs.first ?? "未选择合约"
         case .multiple: return "\(instrumentIDs.count) 个币种"
         case .dynamicCategory: return "动态 · \(category?.displayName ?? "未分类")"
         }
@@ -393,19 +391,16 @@ public struct StrategyConfig: Codable, Equatable, Sendable, Identifiable {
     public var riskPercent: Double
     public var cooldownBars: Int
     public var trailingStopPercent: Double
-    /// Optional for backwards compatibility. Missing scope fields in older
-    /// persisted configs continue to behave as a single instrument.
-    public var scope: StrategyScope?
+    public var scope: StrategyScope
 
-    public var effectiveScope: StrategyScope { scope ?? .single(instrumentID) }
-
-    public init(id: UUID = UUID(), name: String, instrumentID: String, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, stopLossPercent: Double = 1.5, takeProfitPercent: Double = 3, riskPercent: Double = 1, cooldownBars: Int = 3, trailingStopPercent: Double = 1, scope: StrategyScope? = nil) {
+    public init(id: UUID = UUID(), name: String, instrumentID: String, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, stopLossPercent: Double = 1.5, takeProfitPercent: Double = 3, riskPercent: Double = 1, cooldownBars: Int = 3, trailingStopPercent: Double = 1) {
         self.id = id; self.name = name; self.instrumentID = instrumentID; self.interval = interval; self.type = type; self.parameters = parameters; self.enabled = enabled
-        self.stopLossPercent = stopLossPercent; self.takeProfitPercent = takeProfitPercent; self.riskPercent = riskPercent; self.cooldownBars = cooldownBars; self.trailingStopPercent = trailingStopPercent; self.scope = scope
+        self.stopLossPercent = stopLossPercent; self.takeProfitPercent = takeProfitPercent; self.riskPercent = riskPercent; self.cooldownBars = cooldownBars; self.trailingStopPercent = trailingStopPercent; self.scope = .single(instrumentID)
     }
 
     public init(id: UUID = UUID(), name: String, scope: StrategyScope, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, stopLossPercent: Double = 1.5, takeProfitPercent: Double = 3, riskPercent: Double = 1, cooldownBars: Int = 3, trailingStopPercent: Double = 1) {
-        self.init(id: id, name: name, instrumentID: scope.legacyInstrumentID, interval: interval, type: type, parameters: parameters, enabled: enabled, stopLossPercent: stopLossPercent, takeProfitPercent: takeProfitPercent, riskPercent: riskPercent, cooldownBars: cooldownBars, trailingStopPercent: trailingStopPercent, scope: scope)
+        self.id = id; self.name = name; self.instrumentID = scope.instrumentIDs.first ?? ""; self.interval = interval; self.type = type; self.parameters = parameters; self.enabled = enabled
+        self.stopLossPercent = stopLossPercent; self.takeProfitPercent = takeProfitPercent; self.riskPercent = riskPercent; self.cooldownBars = cooldownBars; self.trailingStopPercent = trailingStopPercent; self.scope = scope
     }
 }
 
