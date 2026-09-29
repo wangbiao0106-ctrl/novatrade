@@ -27,8 +27,42 @@ public actor CandleStore {
 }
 
 public actor RiskEngine {
+    private struct PoolState {
+        var allocationPercent: Decimal
+        var initialCapital: Decimal
+        var equity: Decimal
+        var reservedCapital: Decimal
+        var realizedPnL: Decimal
+        var unrealizedPnL: Decimal
+        var rolloverCount: Int
+        var updatedAt: Date
+        /// 当前未平仓订单的止损风险合计（|入场价 − 止损价| × 数量）。
+        /// 用于执行策略实验室的"开放止损风险 ≤ 池权益比例"上限。
+        var openRisk: Decimal = 0
+        /// 当前未平仓订单数，用于执行策略实验室的并发持仓上限。
+        var openPositions: Int = 0
+
+        func snapshot(strategyID: UUID) -> StrategyCapitalSnapshot {
+            StrategyCapitalSnapshot(
+                strategyID: strategyID,
+                allocationPercent: allocationPercent,
+                initialCapital: initialCapital,
+                equity: equity,
+                reservedCapital: reservedCapital,
+                availableCapital: max(0, equity - reservedCapital),
+                realizedPnL: realizedPnL,
+                unrealizedPnL: unrealizedPnL,
+                rolloverCount: rolloverCount,
+                updatedAt: updatedAt,
+                openRisk: openRisk,
+                openPositions: openPositions
+            )
+        }
+    }
+
     public let limits: RiskLimits
     private var equity: Decimal
+    private var unrealizedPnL: Decimal = 0
     private var equityPeak: Decimal
     private var dayStartEquity: Decimal
     private var hasSynchronizedEquity = false
@@ -37,11 +71,19 @@ public actor RiskEngine {
     /// baseline at midnight and historical candle ingestion rolls it in
     /// candle-time order.
     private var dayStartBoundary: Date?
+    /// A persisted kill switch may be restored after midnight. Keep this bit
+    /// so the next manual reset is allowed even though `refresh` has already
+    /// advanced the in-memory boundary to the current day.
+    private var resetEligibleAfterDayChange = false
+    /// When restoring after midnight, the first authenticated account read is
+    /// the authoritative equity for today's baseline.
+    private var needsDayStartEquitySync = false
     private var realizedPnL: Decimal = 0
     private var orderTimes: [Date] = []
     private var notionals: [String: Decimal] = [:]
     private var killSwitch = false
     private var reason: String?
+    private var pools: [UUID: PoolState] = [:]
 
     public init(limits: RiskLimits = RiskLimits(), initialEquity: Decimal = 100_000) {
         self.limits = limits
@@ -50,7 +92,36 @@ public actor RiskEngine {
         self.dayStartEquity = initialEquity
     }
 
-    public func authorize(instrumentID: String, notional: Decimal, margin: Decimal, reduceOnly: Bool = false, now: Date = .now) -> RiskDecision {
+    public func registerStrategy(_ strategyID: UUID, allocationPercent: Decimal = 100, now: Date = .now) -> StrategyCapitalSnapshot {
+        if let existing = pools[strategyID] { return existing.snapshot(strategyID: strategyID) }
+        let allocation = min(max(allocationPercent, 0), 100)
+        let usedAllocation = pools.values.reduce(0) { $0 + $1.allocationPercent }
+        let remaining = max(0, 100 - usedAllocation)
+        let effectiveAllocation = min(allocation, remaining)
+        let capital = equity * effectiveAllocation / 100
+        let state = PoolState(allocationPercent: effectiveAllocation, initialCapital: capital, equity: capital, reservedCapital: 0, realizedPnL: 0, unrealizedPnL: 0, rolloverCount: 0, updatedAt: now)
+        pools[strategyID] = state
+        return state.snapshot(strategyID: strategyID)
+    }
+
+    public func removeStrategy(_ strategyID: UUID) {
+        pools.removeValue(forKey: strategyID)
+    }
+
+    public func strategyCapital(_ strategyID: UUID, allocationPercent: Decimal = 100, now: Date = .now) -> StrategyCapitalSnapshot {
+        _ = registerStrategy(strategyID, allocationPercent: allocationPercent, now: now)
+        return pools[strategyID]!.snapshot(strategyID: strategyID)
+    }
+
+    public func strategyCapitals() -> [StrategyCapitalSnapshot] {
+        pools.map { $0.value.snapshot(strategyID: $0.key) }.sorted { $0.strategyID.uuidString < $1.strategyID.uuidString }
+    }
+
+    public func hasStrategyPool(_ strategyID: UUID) -> Bool { pools[strategyID] != nil }
+
+    /// `riskAmount` 是该订单的止损风险（|入场价 − 止损价| × 数量）；配合
+    /// `maxOpenRiskPercent` / `maxConcurrentPositions` 执行策略实验室的组合上限。
+    public func authorize(instrumentID: String, notional: Decimal, margin: Decimal, reduceOnly: Bool = false, now: Date = .now, strategyID: UUID? = nil, poolAllocationPercent: Decimal = 100, riskAmount: Decimal = 0, maxOpenRiskPercent: Decimal? = nil, maxConcurrentPositions: Int? = nil) -> RiskDecision {
         refresh(now: now)
         if notional <= 0 { return RiskDecision(allowed: false, reason: "名义价值必须大于 0") }
         if margin < 0 { return RiskDecision(allowed: false, reason: "保证金不能为负") }
@@ -67,6 +138,23 @@ public actor RiskEngine {
         if equity > 0, margin / equity * 100 > limits.maxMarginPercent {
             return RiskDecision(allowed: false, reason: "单笔保证金超过权益比例")
         }
+        if let strategyID {
+            let pool = strategyCapital(strategyID, allocationPercent: poolAllocationPercent, now: now)
+            guard margin <= pool.availableCapital else {
+                return RiskDecision(allowed: false, reason: "策略资金池可用余额不足")
+            }
+            // 开放止损风险上限：按池权益的百分比计算，累计已开仓风险 + 本单风险。
+            if let cap = maxOpenRiskPercent, cap > 0 {
+                let limit = pool.equity * cap / 100
+                if pool.openRisk + riskAmount > limit {
+                    return RiskDecision(allowed: false, reason: "策略开放止损风险超过上限")
+                }
+            }
+            if let maxConcurrent = maxConcurrentPositions, maxConcurrent > 0,
+               pool.openPositions + 1 > maxConcurrent {
+                return RiskDecision(allowed: false, reason: "策略并发持仓超过上限")
+            }
+        }
         let hourAgo = now.addingTimeInterval(-3600)
         orderTimes.removeAll { $0 < hourAgo }
         if orderTimes.count >= limits.maxOrdersPerHour { return RiskDecision(allowed: false, reason: "每小时下单次数超过上限") }
@@ -75,11 +163,26 @@ public actor RiskEngine {
         }
         orderTimes.append(now)
         notionals[instrumentID, default: 0] += notional
+        if let strategyID, var pool = pools[strategyID] {
+            pool.reservedCapital += margin
+            pool.openRisk += riskAmount
+            pool.openPositions += 1
+            pool.updatedAt = now
+            pools[strategyID] = pool
+        }
         return RiskDecision(allowed: true)
     }
 
-    public func release(instrumentID: String, notional: Decimal) {
+    /// 释放一笔授权。`closedPosition` 为真时同时释放一个并发名额（平仓 / 入场单失败）。
+    public func release(instrumentID: String, notional: Decimal, strategyID: UUID? = nil, margin: Decimal? = nil, riskAmount: Decimal = 0, closedPosition: Bool = false) {
         notionals[instrumentID] = max(0, notionals[instrumentID, default: 0] - notional)
+        if let strategyID, var pool = pools[strategyID] {
+            pool.reservedCapital = max(0, pool.reservedCapital - (margin ?? notional))
+            if riskAmount > 0 { pool.openRisk = max(0, pool.openRisk - riskAmount) }
+            if closedPosition { pool.openPositions = max(0, pool.openPositions - 1) }
+            pool.updatedAt = .now
+            pools[strategyID] = pool
+        }
     }
 
     /// Reconciles the local risk baseline with the authenticated account before
@@ -93,36 +196,151 @@ public actor RiskEngine {
         if !hasSynchronizedEquity {
             // The default equity is only a standalone-paper fallback. On the
             // first authenticated read, establish all baselines from the real
-            // account instead of treating the difference as a loss.
+            // account instead of treating the difference as a loss. A peak that
+            // was already raised by locally recorded PnL must stay monotone,
+            // otherwise a real drawdown would be silently erased.
+            let hasLocalActivity = realizedPnL != 0 || unrealizedPnL != 0
             equity = value
-            equityPeak = value
+            unrealizedPnL = 0
+            equityPeak = hasLocalActivity ? max(equityPeak, value) : value
             dayStartEquity = value
             dayStartBoundary = dayStart
             hasSynchronizedEquity = true
+            rebaseUnreservedPools(to: value, now: now)
             refresh(now: now)
             return
         }
         equity = value
+        unrealizedPnL = 0
         equityPeak = max(equityPeak, value)
+        if needsDayStartEquitySync, dayStartBoundary == dayStart {
+            dayStartEquity = value
+            needsDayStartEquitySync = false
+        }
         if dayStartBoundary.map({ dayStart > $0 }) == true {
             dayStartEquity = value
             dayStartBoundary = dayStart
+            if killSwitch { resetEligibleAfterDayChange = true }
         }
         refresh(now: now)
     }
 
-    public func record(realizedPnL: Decimal, now: Date = .now) {
+    /// Records a realized result. `settledUnrealizedPnL` is the portion of the
+    /// account's currently marked unrealized PnL that was crystallized by this
+    /// fill. Callers that first reconcile open positions (as `PaperBroker`
+    /// does) should leave it at zero; direct callers can provide it to avoid
+    /// counting the same mark-to-market result twice.
+    public func record(realizedPnL: Decimal, now: Date = .now, strategyID: UUID? = nil, settledUnrealizedPnL: Decimal = 0, countRollover: Bool = true) {
         self.realizedPnL += realizedPnL
-        equity += realizedPnL
+        equity += realizedPnL - settledUnrealizedPnL
+        unrealizedPnL -= settledUnrealizedPnL
+        if let strategyID, var pool = pools[strategyID] {
+            pool.equity = max(0, pool.equity + realizedPnL)
+            pool.realizedPnL += realizedPnL
+            if countRollover { pool.rolloverCount += 1 }
+            pool.unrealizedPnL -= settledUnrealizedPnL
+            pool.updatedAt = now
+            pools[strategyID] = pool
+        }
         equityPeak = max(equityPeak, equity)
         refresh(now: now)
+    }
+
+    /// Credits a realized result reported by the remote exchange to the
+    /// strategy pool. Account equity is deliberately left untouched here and
+    /// will be reconciled from the next authenticated account snapshot; this
+    /// prevents an estimated remote fill from being added on top of the same
+    /// mark-to-market value twice.
+    public func recordStrategyRealized(_ realizedPnL: Decimal, strategyID: UUID, now: Date = .now) {
+        guard var pool = pools[strategyID] else { return }
+        pool.equity = max(0, pool.equity + realizedPnL)
+        pool.realizedPnL += realizedPnL
+        pool.rolloverCount += 1
+        pool.updatedAt = now
+        pools[strategyID] = pool
+    }
+
+    /// Updates account equity with mark-to-market unrealized PnL. Unrealized
+    /// gains remain informational for strategy pools and never increase their
+    /// available opening balance.
+    public func markToMarket(unrealizedPnL: Decimal, now: Date = .now) {
+        let realizedEquity = equity - self.unrealizedPnL
+        self.unrealizedPnL = unrealizedPnL
+        equity = realizedEquity + unrealizedPnL
+        refresh(now: now)
+    }
+
+    public func recordStrategyUnrealized(_ values: [UUID: Decimal], now: Date = .now) {
+        for strategyID in pools.keys {
+            guard var pool = pools[strategyID] else { continue }
+            let value = values[strategyID] ?? 0
+            pool.unrealizedPnL = value
+            pool.updatedAt = now
+            pools[strategyID] = pool
+        }
+        markToMarket(unrealizedPnL: values.values.reduce(0, +), now: now)
     }
 
     public func snapshot(now: Date = .now) -> RiskSnapshot {
         refresh(now: now)
         let daily = dayStartEquity == 0 ? 0 : (equity - dayStartEquity) / dayStartEquity * 100
         let drawdown = equityPeak == 0 ? 0 : (equityPeak - equity) / equityPeak * 100
-        return RiskSnapshot(equity: equity, equityPeak: equityPeak, dayStartEquity: dayStartEquity, dailyPnLPercent: daily, drawdownPercent: drawdown, killSwitch: killSwitch, reason: reason)
+        let capitalSnapshots = pools.map { $0.value.snapshot(strategyID: $0.key) }
+            .sorted { $0.strategyID.uuidString < $1.strategyID.uuidString }
+        return RiskSnapshot(equity: equity, equityPeak: equityPeak, dayStartEquity: dayStartEquity, dayStartAt: dayStartBoundary, dailyPnLPercent: daily, drawdownPercent: drawdown, killSwitch: killSwitch, reason: reason, strategyCapitals: capitalSnapshots)
+    }
+
+    public func restore(_ snapshot: RiskSnapshot, now: Date = .now) {
+        guard snapshot.equity > 0 else { return }
+        let calendar = Calendar(identifier: .gregorian)
+        let currentDay = calendar.startOfDay(for: now)
+        equity = snapshot.equity
+        equityPeak = max(snapshot.equityPeak, snapshot.equity)
+        dayStartEquity = snapshot.dayStartEquity > 0 ? snapshot.dayStartEquity : snapshot.equity
+        let persistedDay = snapshot.dayStartAt.map(calendar.startOfDay(for:))
+        let restoredFromPriorDay = persistedDay.map { currentDay > $0 } ?? false
+        dayStartBoundary = persistedDay ?? currentDay
+        if restoredFromPriorDay {
+            // The old baseline no longer belongs to today. The current
+            // equity is the best available midnight baseline until the next
+            // authenticated account sync supplies the exact value.
+            dayStartEquity = snapshot.equity
+            dayStartBoundary = currentDay
+        }
+        unrealizedPnL = 0
+        killSwitch = snapshot.killSwitch
+        reason = snapshot.reason
+        resetEligibleAfterDayChange = restoredFromPriorDay && snapshot.killSwitch
+        needsDayStartEquitySync = restoredFromPriorDay
+        pools = Dictionary(uniqueKeysWithValues: snapshot.strategyCapitals.map { capital in
+            (capital.strategyID, PoolState(
+                allocationPercent: capital.allocationPercent,
+                initialCapital: capital.initialCapital,
+                equity: capital.equity,
+                reservedCapital: capital.reservedCapital,
+                realizedPnL: capital.realizedPnL,
+                // PaperBroker positions are runtime-only and are not restored
+                // alongside the risk snapshot. Do not expose an old mark as
+                // current floating PnL after a service restart; the next
+                // position mark will repopulate this field.
+                unrealizedPnL: 0,
+                rolloverCount: capital.rolloverCount,
+                updatedAt: capital.updatedAt
+            ))
+        })
+        hasSynchronizedEquity = true
+    }
+
+    public func resetKillSwitch(now: Date = .now) -> RiskSnapshot {
+        let dayStart = Calendar(identifier: .gregorian).startOfDay(for: now)
+        guard resetEligibleAfterDayChange || dayStartBoundary.map({ dayStart > $0 }) == true else { return snapshot(now: now) }
+        dayStartEquity = equity
+        dayStartBoundary = dayStart
+        killSwitch = false
+        reason = nil
+        resetEligibleAfterDayChange = false
+        needsDayStartEquitySync = false
+        return snapshot(now: now)
     }
 
     private func refresh(now: Date) {
@@ -130,16 +348,33 @@ public actor RiskEngine {
         let dayStart = calendar.startOfDay(for: now)
         if let boundary = dayStartBoundary {
             if dayStart > boundary {
+                let wasKillSwitch = killSwitch
                 dayStartEquity = equity
                 dayStartBoundary = dayStart
+                if wasKillSwitch { resetEligibleAfterDayChange = true }
             }
         } else {
             dayStartBoundary = dayStart
         }
         let daily = dayStartEquity == 0 ? 0 : (equity - dayStartEquity) / dayStartEquity * 100
         let drawdown = equityPeak == 0 ? 0 : (equityPeak - equity) / equityPeak * 100
+        // The account-level hard stop is deliberately limited to the
+        // calendar-day loss rule. Strategy-specific stops (including its
+        // ATR stop, take-profit and time exit) own all other exits. Keep the
+        // historical drawdown value in RiskSnapshot for display and
+        // compatibility, but never let it silently stop every strategy.
         if daily <= -limits.maxDailyLossPercent { killSwitch = true; reason = "单日亏损熔断" }
-        if drawdown >= limits.maxDrawdownPercent { killSwitch = true; reason = "最大回撤熔断" }
+    }
+
+    private func rebaseUnreservedPools(to accountEquity: Decimal, now: Date) {
+        for strategyID in pools.keys {
+            guard var pool = pools[strategyID], pool.reservedCapital == 0, pool.realizedPnL == 0 else { continue }
+            let capital = accountEquity * pool.allocationPercent / 100
+            pool.initialCapital = capital
+            pool.equity = capital
+            pool.updatedAt = now
+            pools[strategyID] = pool
+        }
     }
 }
 
@@ -151,6 +386,7 @@ public actor PaperBroker {
     private var orders: [PaperOrder] = []
     private var fills: [PaperFill] = []
     private var positions: [String: PaperPosition] = [:]
+    private var positionStrategyIDs: [String: UUID] = [:]
     // PaperOrder predates reduceOnly and is persisted without that field. Keep
     // the execution-only flag separately so the public ledger stays compatible.
     private var reduceOnlyOrderIDs: Set<UUID> = []
@@ -174,7 +410,8 @@ public actor PaperBroker {
             return .failure(BrokerError.invalidOrder("数量和参考价格必须大于 0"))
         }
         let notional = abs(quantity * referencePrice)
-        let decision = await risk.authorize(instrumentID: instrumentID, notional: notional, margin: notional, reduceOnly: reduceOnly, now: requestedAt)
+        let poolStrategyID = await risk.hasStrategyPool(strategyID) ? strategyID : nil
+        let decision = await risk.authorize(instrumentID: instrumentID, notional: notional, margin: notional, reduceOnly: reduceOnly, now: requestedAt, strategyID: poolStrategyID)
         guard decision.allowed else { return .failure(BrokerError.riskRejected(decision.reason ?? "风险拒绝")) }
         let order = PaperOrder(strategyID: strategyID, instrumentID: instrumentID, side: normalizedSide, quantity: quantity, requestedAt: requestedAt)
         pending.append(order)
@@ -190,17 +427,36 @@ public actor PaperBroker {
         for order in due { await fill(order, at: candle.open, timestamp: candle.timestamp) }
     }
 
-    public func mark(instrumentID: String, price: Decimal, at timestamp: Date = .now) {
+    public func mark(instrumentID: String, price: Decimal, at timestamp: Date = .now) async {
         guard let position = positions[instrumentID] else { return }
         let sign: Decimal = position.side == "short" ? -1 : 1
         let pnl = (price - position.entryPrice) * position.quantity * sign
         positions[instrumentID] = PaperPosition(id: position.id, instrumentID: position.instrumentID, side: position.side, quantity: position.quantity, entryPrice: position.entryPrice, markPrice: price, unrealizedPnL: pnl, updatedAt: timestamp)
+        var byStrategy: [UUID: Decimal] = [:]
+        for (id, current) in positions {
+            guard let strategyID = positionStrategyIDs[id] else { continue }
+            byStrategy[strategyID, default: 0] += current.unrealizedPnL
+        }
+        await risk.recordStrategyUnrealized(byStrategy, now: timestamp)
     }
 
     public func allOrders() -> [PaperOrder] { orders }
     public func allFills() -> [PaperFill] { fills }
     public func allPositions() -> [PaperPosition] { Array(positions.values) }
     public func riskSnapshot() async -> RiskSnapshot { await risk.snapshot() }
+
+    /// Keeps the risk engine's mark-to-market view aligned with the positions
+    /// after a fill changes quantity or entry price. This must run before a
+    /// realized result is recorded; otherwise the same PnL can be counted once
+    /// as unrealized and again as realized.
+    private func synchronizeRiskUnrealized(at timestamp: Date) async {
+        var byStrategy: [UUID: Decimal] = [:]
+        for (instrumentID, position) in positions {
+            guard let strategyID = positionStrategyIDs[instrumentID] else { continue }
+            byStrategy[strategyID, default: 0] += position.unrealizedPnL
+        }
+        await risk.recordStrategyUnrealized(byStrategy, now: timestamp)
+    }
 
     private func fill(_ order: PaperOrder, at open: Decimal, timestamp: Date) async {
         let reduceOnly = reduceOnlyOrderIDs.remove(order.id) != nil
@@ -219,6 +475,12 @@ public actor PaperBroker {
             if let index = orders.firstIndex(where: { $0.id == order.id }) { orders[index] = filled }
             fills.append(PaperFill(orderID: order.id, price: price, quantity: order.quantity, fee: fee, timestamp: timestamp))
             positions[order.instrumentID] = PaperPosition(instrumentID: order.instrumentID, side: order.side, quantity: order.quantity, entryPrice: price, markPrice: price, updatedAt: timestamp)
+            positionStrategyIDs[order.instrumentID] = order.strategyID
+            // Entry fees reduce account/pool equity immediately. They are a
+            // realized cost, but opening a position is not a rollover event.
+            if fee > 0 {
+                await risk.record(realizedPnL: -fee, now: timestamp, strategyID: order.strategyID, countRollover: false)
+            }
             return
         }
         // A reduce-only order can only close the opposite side; it must never
@@ -238,32 +500,80 @@ public actor PaperBroker {
             if let index = orders.firstIndex(where: { $0.id == order.id }) { orders[index] = filled }
             fills.append(PaperFill(orderID: order.id, price: price, quantity: executedQuantity, fee: fee, timestamp: timestamp))
             let direction: Decimal = existing.side == "short" ? -1 : 1
-            await risk.record(realizedPnL: (price - existing.entryPrice) * closeQuantity * direction - fee, now: timestamp)
-            await risk.release(instrumentID: order.instrumentID, notional: closeQuantity * existing.entryPrice)
+            let strategyID = positionStrategyIDs[order.instrumentID] ?? order.strategyID
+            let realized = (price - existing.entryPrice) * closeQuantity * direction - fee
             let remaining = existing.quantity - closeQuantity
             // A normal order reserves risk for its full requested quantity.
             // Release the fraction used to close the old position; any
             // residual reversal remains reserved for the new position.
             if !reduceOnly, let reservedOrderNotional {
                 let closedReservation = reservedOrderNotional * closeQuantity / order.quantity
-                await risk.release(instrumentID: order.instrumentID, notional: closedReservation)
+                await risk.release(instrumentID: order.instrumentID, notional: closedReservation, strategyID: order.strategyID, margin: closedReservation)
             }
             if remaining > 0 {
-                positions[order.instrumentID] = PaperPosition(id: existing.id, instrumentID: order.instrumentID, side: existing.side, quantity: remaining, entryPrice: existing.entryPrice, markPrice: price, updatedAt: timestamp)
+                let remainingPnL = (price - existing.entryPrice) * remaining * direction
+                positions[order.instrumentID] = PaperPosition(id: existing.id, instrumentID: order.instrumentID, side: existing.side, quantity: remaining, entryPrice: existing.entryPrice, markPrice: price, unrealizedPnL: remainingPnL, updatedAt: timestamp)
             } else if !reduceOnly, order.quantity > closeQuantity {
                 // A normal order that exceeds the current position reverses
                 // the residual quantity instead of silently losing it.
                 positions[order.instrumentID] = PaperPosition(id: existing.id, instrumentID: order.instrumentID, side: order.side, quantity: order.quantity - closeQuantity, entryPrice: price, markPrice: price, updatedAt: timestamp)
+                positionStrategyIDs[order.instrumentID] = order.strategyID
             } else {
                 positions.removeValue(forKey: order.instrumentID)
+                positionStrategyIDs.removeValue(forKey: order.instrumentID)
             }
+            // Reconcile the remaining positions before crystallizing the
+            // closing result so the old mark is removed exactly once.
+            await synchronizeRiskUnrealized(at: timestamp)
+            await risk.record(realizedPnL: realized, now: timestamp, strategyID: strategyID)
+            await risk.release(instrumentID: order.instrumentID, notional: closeQuantity * existing.entryPrice, strategyID: strategyID, margin: closeQuantity * existing.entryPrice)
         } else {
             // Adding to an existing position merges the average entry price.
+            let fee = abs(price * order.quantity) * feeRate
             let totalQuantity = existing.quantity + order.quantity
-            guard totalQuantity != 0 else { positions.removeValue(forKey: order.instrumentID); return }
+            guard totalQuantity != 0 else { positions.removeValue(forKey: order.instrumentID); positionStrategyIDs.removeValue(forKey: order.instrumentID); return }
             let blendedEntry = (existing.entryPrice * existing.quantity + price * order.quantity) / totalQuantity
-            positions[order.instrumentID] = PaperPosition(id: existing.id, instrumentID: order.instrumentID, side: existing.side, quantity: totalQuantity, entryPrice: blendedEntry, markPrice: price, updatedAt: timestamp)
+            positions[order.instrumentID] = PaperPosition(id: existing.id, instrumentID: order.instrumentID, side: existing.side, quantity: totalQuantity, entryPrice: blendedEntry, markPrice: price, unrealizedPnL: (price - blendedEntry) * totalQuantity * sign, updatedAt: timestamp)
+            positionStrategyIDs[order.instrumentID] = positionStrategyIDs[order.instrumentID] ?? order.strategyID
+            await synchronizeRiskUnrealized(at: timestamp)
+            // Every fill pays a fee, including an addition to an existing
+            // position. Charge it immediately so account equity and the
+            // strategy pool cannot overstate available capital.
+            if fee > 0 {
+                await risk.record(realizedPnL: -fee, now: timestamp, strategyID: order.strategyID, countRollover: false)
+            }
         }
+    }
+
+    public func cancelPendingOrders() async {
+        for order in pending {
+            if let reserved = reservedNotionals.removeValue(forKey: order.id) {
+                await risk.release(instrumentID: order.instrumentID, notional: reserved, strategyID: order.strategyID, margin: reserved)
+            }
+            reduceOnlyOrderIDs.remove(order.id)
+            if let index = orders.firstIndex(where: { $0.id == order.id }) {
+                orders[index] = PaperOrder(id: order.id, strategyID: order.strategyID, instrumentID: order.instrumentID, side: order.side, quantity: order.quantity, requestedAt: order.requestedAt, status: "cancelled", remoteOrderID: order.remoteOrderID)
+            }
+        }
+        pending.removeAll()
+    }
+
+    @discardableResult
+    public func flattenAll(at timestamp: Date = .now) async -> [PaperPosition] {
+        let closed = Array(positions.values)
+        for position in closed {
+            let price = position.markPrice ?? position.entryPrice
+            let direction: Decimal = position.side == "short" ? -1 : 1
+            let strategyID = positionStrategyIDs[position.instrumentID]
+            let realized = (price - position.entryPrice) * position.quantity * direction - abs(price * position.quantity) * feeRate
+            positions.removeValue(forKey: position.instrumentID)
+            positionStrategyIDs.removeValue(forKey: position.instrumentID)
+            await synchronizeRiskUnrealized(at: timestamp)
+            await risk.record(realizedPnL: realized, now: timestamp, strategyID: strategyID)
+            await risk.release(instrumentID: position.instrumentID, notional: position.entryPrice * position.quantity, strategyID: strategyID, margin: position.entryPrice * position.quantity)
+        }
+        await risk.recordStrategyUnrealized([:], now: timestamp)
+        return closed
     }
 
     public enum BrokerError: LocalizedError, Sendable {

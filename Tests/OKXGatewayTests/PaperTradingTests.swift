@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ATKGateway
 import TradingDomain
 @testable import TradingService
 
@@ -17,16 +18,36 @@ func strategyScopesResolveSingleMultipleAndDynamicTargets() throws {
 }
 
 @Test
+func hotAltcoinScopeExcludesNonTargetsAndCapsAtTwenty() {
+    let ranked = (0..<21).map { index in
+        ContractMarket(id: "ALT\(index)-USDT-SWAP", name: "ALT\(index)", baseCurrency: "ALT\(index)", quoteCurrency: "USDT", last: 1, volume24h: Decimal(21_000 - index))
+    }
+    let excluded = [
+        ContractMarket(id: "BTC-USDT-SWAP", name: "BTC", baseCurrency: "BTC", quoteCurrency: "USDT", last: 1, volume24h: 99_999),
+        ContractMarket(id: "AAPL-USDT-SWAP", name: "AAPL", baseCurrency: "AAPL", quoteCurrency: "USDT", last: 1, volume24h: 99_998),
+        ContractMarket(id: "USDC-USDT-SWAP", name: "USDC", baseCurrency: "USDC", quoteCurrency: "USDT", last: 1, volume24h: 99_997),
+        ContractMarket(id: "ALT-BTC-SWAP", name: "ALT/BTC", baseCurrency: "ALT", quoteCurrency: "BTC", last: 1, volume24h: 99_996)
+    ]
+    let ids = StrategyScope.dynamic(.hotAltcoins).resolvedInstrumentIDs(from: ranked + excluded)
+    #expect(ids.count == 20)
+    #expect(ids.first == "ALT0-USDT-SWAP")
+    #expect(!ids.contains("BTC-USDT-SWAP"))
+    #expect(!ids.contains("AAPL-USDT-SWAP"))
+    #expect(!ids.contains("USDC-USDT-SWAP"))
+    #expect(!ids.contains("ALT-BTC-SWAP"))
+}
+
+@Test
 func strategyStoreAllowsOneInstancePerRuleAndDeletesIt() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-store-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = PaperTradingStore(directory: directory)
     #expect((await store.allStrategies()).isEmpty)
 
-    let config = StrategyConfig(name: "唯一趋势", instrumentID: "BTC-USDT-SWAP", interval: .fifteenMinutes, type: .trendFollowing)
+    let config = StrategyConfig(name: "山寨币二次扫顶做空（1h）", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
     _ = try await store.create(config)
     do {
-        _ = try await store.create(StrategyConfig(name: "重复趋势", instrumentID: "ETH-USDT-SWAP", interval: .fifteenMinutes, type: .trendFollowing))
+        _ = try await store.create(StrategyConfig(name: "重复扫顶", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort))
         Issue.record("expected duplicate strategy rule to be rejected")
     } catch PaperTradingStore.StoreError.conflict {
         // Expected.
@@ -41,6 +62,53 @@ func strategyStoreAllowsOneInstancePerRuleAndDeletesIt() async throws {
     _ = try await store.setState(config.id, running: false)
     _ = try await store.delete(config.id)
     #expect((await store.allStrategies()).isEmpty)
+}
+
+@Test
+func tradingBackendCannotRestartStrategyWhileAccountKillSwitchIsLatched() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-kill-switch-start-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let risk = RiskEngine(initialEquity: 1_000)
+    let lossTime = Date(timeIntervalSince1970: 1_700_000_000)
+    await risk.record(realizedPnL: -60, now: lossTime)
+    let backend = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: risk)
+    let config = try await backend.createStrategy(StrategyConfig(name: "山寨币二次扫顶做空（1h）", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort))
+
+    do {
+        _ = try await backend.startStrategy(config.id)
+        Issue.record("expected strategy start to be blocked by the account kill switch")
+    } catch ATKError.unavailable {
+        // Expected.
+    }
+}
+
+@Test
+func deletingStrategyPersistsRemovalOfItsCapitalPool() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-pool-delete-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let first = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: RiskEngine(initialEquity: 10_000))
+    let config = StrategyConfig(name: "山寨币二次扫顶做空（1h）", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
+    let created = try await first.createStrategy(config)
+    #expect((await first.strategyCapital()).contains { $0.strategyID == created.id })
+    _ = try await first.deleteStrategy(created.id)
+
+    let second = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: RiskEngine(initialEquity: 10_000))
+    #expect((await second.strategyCapital()).isEmpty)
+}
+
+@Test
+func strategyStoreRejectsRiskAboveOnePercent() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-risk-(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PaperTradingStore(directory: directory)
+    let config = StrategyConfig(name: "超限", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 1.1)
+    do {
+        _ = try await store.create(config)
+        Issue.record("expected risk above one percent to be rejected")
+    } catch PaperTradingStore.StoreError.unsupported {
+        // Expected.
+    }
 }
 
 @Test
@@ -107,6 +175,31 @@ func riskEngineRollsDailyBaselineWhenCalendarDayChanges() async {
 }
 
 @Test
+func riskEngineRestoresPriorDayKillAndAllowsResetOnTheNewDay() async {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+    let dayOne = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 23))!
+    let dayTwo = calendar.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 0, minute: 1))!
+
+    let source = RiskEngine(initialEquity: 1_000)
+    await source.record(realizedPnL: -60, now: dayOne)
+    let persisted = await source.snapshot(now: dayOne)
+    #expect(persisted.killSwitch)
+    #expect(persisted.dayStartAt != nil)
+
+    let restored = RiskEngine(initialEquity: 100_000)
+    await restored.restore(persisted, now: dayTwo)
+    let afterRestart = await restored.snapshot(now: dayTwo)
+    #expect(afterRestart.dayStartEquity == Decimal(940))
+    #expect(afterRestart.dailyPnLPercent == 0)
+    #expect(afterRestart.killSwitch)
+
+    let reset = await restored.resetKillSwitch(now: dayTwo)
+    #expect(!reset.killSwitch)
+    #expect(reset.dayStartEquity == Decimal(940))
+}
+
+@Test
 func riskEngineTripwiresDailyLossLimit() async {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -118,6 +211,103 @@ func riskEngineTripwiresDailyLossLimit() async {
     let snapshot = await risk.snapshot(now: dayOne.addingTimeInterval(120))
     #expect(snapshot.killSwitch)
     #expect(snapshot.reason == "单日亏损熔断")
+}
+
+@Test
+func riskEngineTripwiresDailyLossOnMarkToMarketEquity() async {
+    let risk = RiskEngine(initialEquity: 10_000)
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    await risk.markToMarket(unrealizedPnL: -500, now: now)
+    let snapshot = await risk.snapshot(now: now)
+    #expect(snapshot.equity == Decimal(9_500))
+    #expect(snapshot.dailyPnLPercent == Decimal(-5))
+    #expect(snapshot.killSwitch)
+    #expect(snapshot.reason == "单日亏损熔断")
+}
+
+@Test
+func riskEngineDoesNotUseCumulativeDrawdownAsAccountKillSwitch() async {
+    let risk = RiskEngine(initialEquity: 10_000)
+    let calendar = Calendar(identifier: .gregorian)
+    let dayOne = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 12))!
+    let dayTwo = calendar.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 12))!
+
+    await risk.record(realizedPnL: 2_000, now: dayOne)
+    await risk.synchronizeEquity(11_000, now: dayTwo)
+    await risk.markToMarket(unrealizedPnL: -500, now: dayTwo)
+
+    let snapshot = await risk.snapshot(now: dayTwo)
+    #expect(snapshot.drawdownPercent > 10)
+    #expect(snapshot.dailyPnLPercent > -5)
+    #expect(!snapshot.killSwitch)
+}
+
+@Test
+func strategyCapitalPoolsAreIsolatedAndCompoundRealizedPnL() async {
+    let risk = RiskEngine(limits: RiskLimits(maxMarginPercent: 100, minOrderIntervalSeconds: 0), initialEquity: 10_000)
+    let first = UUID()
+    let second = UUID()
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let firstPool = await risk.registerStrategy(first, allocationPercent: 50, now: now)
+    let secondPool = await risk.registerStrategy(second, allocationPercent: 50, now: now)
+    #expect(firstPool.equity == Decimal(5_000))
+    #expect(secondPool.equity == Decimal(5_000))
+    let allowed = await risk.authorize(instrumentID: "A-USDT-SWAP", notional: 4_000, margin: 4_000, now: now, strategyID: first, poolAllocationPercent: 50)
+    let rejected = await risk.authorize(instrumentID: "B-USDT-SWAP", notional: 2_000, margin: 2_000, now: now.addingTimeInterval(1), strategyID: first, poolAllocationPercent: 50)
+    #expect(allowed.allowed)
+    #expect(!rejected.allowed)
+    await risk.release(instrumentID: "A-USDT-SWAP", notional: 4_000, strategyID: first, margin: 4_000)
+    await risk.record(realizedPnL: 500, now: now.addingTimeInterval(2), strategyID: first)
+    let compounded = await risk.strategyCapital(first, allocationPercent: 50, now: now.addingTimeInterval(2))
+    let isolated = await risk.strategyCapital(second, allocationPercent: 50, now: now.addingTimeInterval(2))
+    #expect(compounded.equity == Decimal(5_500))
+    #expect(compounded.realizedPnL == Decimal(500))
+    #expect(compounded.rolloverCount == 1)
+    #expect(isolated.equity == Decimal(5_000))
+}
+
+@Test
+func remoteStrategyRealizedCreditOnlyChangesItsPoolUntilAccountReconciliation() async {
+    let risk = RiskEngine(initialEquity: 10_000)
+    let strategyID = UUID()
+    _ = await risk.registerStrategy(strategyID, allocationPercent: 100)
+
+    await risk.recordStrategyRealized(125, strategyID: strategyID)
+
+    let pool = await risk.strategyCapital(strategyID)
+    #expect(pool.equity == Decimal(10_125))
+    #expect(pool.realizedPnL == Decimal(125))
+    #expect(pool.rolloverCount == 1)
+    #expect((await risk.snapshot()).equity == Decimal(10_000))
+}
+
+@Test
+func riskEngineRestoreDoesNotCarryStalePoolMarkAfterRestart() async {
+    let strategyID = UUID()
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let persisted = RiskSnapshot(
+        equity: 10_000,
+        equityPeak: 10_000,
+        dayStartEquity: 10_000,
+        dayStartAt: now,
+        strategyCapitals: [
+            StrategyCapitalSnapshot(
+                strategyID: strategyID,
+                allocationPercent: 50,
+                initialCapital: 5_000,
+                equity: 5_000,
+                reservedCapital: 0,
+                unrealizedPnL: 275
+            )
+        ]
+    )
+    let risk = RiskEngine(initialEquity: 1)
+    await risk.restore(persisted, now: now)
+
+    let pool = await risk.strategyCapital(strategyID)
+    #expect(pool.equity == Decimal(5_000))
+    #expect(pool.unrealizedPnL == 0)
+    #expect(pool.availableCapital == Decimal(5_000))
 }
 
 @Test
@@ -164,9 +354,51 @@ func paperBrokerPartialCloseKeepsRemainderAndMergesAdditions() async {
     #expect(positions[0].quantity == 2)
     #expect(positions[0].entryPrice == 110)
 
-    // The close realized +10 with zero fee/slippage in this setup.
+    // The close realized +10 and the remaining two-lot position is marked at
+    // 120, so account equity includes its +20 unrealized PnL.
     let snapshot = await risk.snapshot(now: base.addingTimeInterval(300))
-    #expect(snapshot.equity == Decimal(10_010))
+    #expect(snapshot.equity == Decimal(10_030))
+}
+
+@Test
+func paperBrokerRealizedCloseDoesNotDoubleCountPriorMark() async {
+    let risk = RiskEngine(limits: RiskLimits(minOrderIntervalSeconds: 0), initialEquity: 10_000)
+    let broker = PaperBroker(risk: risk, feeRate: 0, slippageBps: 0)
+    let base = Date(timeIntervalSince1970: 1_700_100_000)
+    let strategyID = UUID()
+
+    _ = await broker.submit(strategyID: strategyID, instrumentID: "BTC-USDT-SWAP", side: "long", quantity: 1, referencePrice: 100, requestedAt: base)
+    await broker.processNextOpen(instrumentID: "BTC-USDT-SWAP", candle: Candle(timestamp: base.addingTimeInterval(60), open: 100, high: 101, low: 99, close: 100))
+    await broker.mark(instrumentID: "BTC-USDT-SWAP", price: 90, at: base.addingTimeInterval(120))
+
+    _ = await broker.submit(strategyID: strategyID, instrumentID: "BTC-USDT-SWAP", side: "short", quantity: 1, referencePrice: 90, requestedAt: base.addingTimeInterval(180))
+    await broker.processNextOpen(instrumentID: "BTC-USDT-SWAP", candle: Candle(timestamp: base.addingTimeInterval(240), open: 90, high: 91, low: 89, close: 90))
+
+    // The -10 mark is crystallized once by the close; it must not be added a
+    // second time on top of the existing mark-to-market equity.
+    #expect((await risk.snapshot(now: base.addingTimeInterval(240))).equity == Decimal(9_990))
+}
+
+@Test
+func paperBrokerSameSideAdditionChargesFeeToAccountAndStrategyPool() async {
+    let risk = RiskEngine(limits: RiskLimits(minOrderIntervalSeconds: 0), initialEquity: 10_000)
+    let broker = PaperBroker(risk: risk, feeRate: 0.001, slippageBps: 0)
+    let strategyID = UUID()
+    let base = Date(timeIntervalSince1970: 1_700_110_000)
+    _ = await risk.registerStrategy(strategyID, allocationPercent: 100, now: base)
+
+    _ = await broker.submit(strategyID: strategyID, instrumentID: "BTC-USDT-SWAP", side: "long", quantity: 1, referencePrice: 100, requestedAt: base)
+    await broker.processNextOpen(instrumentID: "BTC-USDT-SWAP", candle: Candle(timestamp: base.addingTimeInterval(60), open: 100, high: 101, low: 99, close: 100))
+    _ = await broker.submit(strategyID: strategyID, instrumentID: "BTC-USDT-SWAP", side: "long", quantity: 1, referencePrice: 120, requestedAt: base.addingTimeInterval(120))
+    await broker.processNextOpen(instrumentID: "BTC-USDT-SWAP", candle: Candle(timestamp: base.addingTimeInterval(180), open: 120, high: 121, low: 119, close: 120))
+
+    // Entry fees are 0.10 and 0.12. The two-lot position is marked at 120
+    // against a blended 110 entry, so equity is 10,000 + 20 - 0.22.
+    let snapshot = await risk.snapshot(now: base.addingTimeInterval(180))
+    #expect(snapshot.equity == Decimal(string: "10019.78"))
+    let pool = await risk.strategyCapital(strategyID, now: base.addingTimeInterval(180))
+    #expect(pool.equity == Decimal(string: "9999.78"))
+    #expect(pool.realizedPnL == Decimal(string: "-0.22"))
 }
 
 @Test
@@ -258,49 +490,14 @@ func candleUpsertKeepsTimeOrderAndReplacesInPlace() {
 }
 
 @Test
-func strategyStatusIndicatorSeriesStayBounded() {
-    let engine = StrategyEngine()
-    let config = StrategyConfig(name: "趋势", instrumentID: "BTC-USDT-SWAP", interval: .oneHour, type: .trendFollowing, enabled: true)
-    let start = Date(timeIntervalSince1970: 1_700_000_000)
-    var candles: [Candle] = []
-    var price = 100.0
-    for index in 0..<300 {
-        price += Double((index % 7) - 3) * 0.1
-        candles.append(Candle(timestamp: start.addingTimeInterval(Double(index) * 3600), open: Decimal(price), high: Decimal(price + 1), low: Decimal(price - 1), close: Decimal(price), volume: 10, confirmed: true))
-    }
-    let status = engine.evaluate(config: config, candles: candles)
-    #expect(status.indicators["emaFast"]?.count == 120)
-    #expect(status.indicators["emaSlow"]?.count == 120)
-    #expect(status.indicators["rsi"]?.count == 120)
-    #expect(status.indicators["atr"]?.count == 120)
-}
+func runtimeLogsPersistAcrossBackendRestart() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-runtime-log-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
 
-@Test
-func strategyClampsInvalidIndicatorPeriods() {
-    let engine = StrategyEngine()
-    let config = StrategyConfig(name: "边界", instrumentID: "BTC-USDT-SWAP", interval: .oneHour, type: .trendFollowing, parameters: ["fastEMA": 0, "slowEMA": Double.greatestFiniteMagnitude, "atrPeriod": 0, "donchianPeriod": 0], enabled: true)
-    let start = Date(timeIntervalSince1970: 1_700_000_000)
-    let candles = (0..<3).map { index in
-        Candle(timestamp: start.addingTimeInterval(Double(index) * 3600), open: 100, high: 101, low: 99, close: 100, volume: 1)
-    }
-    let status = engine.evaluate(config: config, candles: candles)
-    #expect(status.indicators["emaFast"]?.count == 3)
-    #expect(status.indicators["emaSlow"]?.count == 3)
-    #expect(status.indicators["atr"]?.count == 3)
-}
+    let first = TradingBackend(paper: PaperTradingStore(directory: directory))
+    await first.appendLog("持久化策略日志", level: "signal")
 
-@Test
-func strategySignalUsesCandleTimeAndIsStableForRepeatedBar() {
-    let engine = StrategyEngine()
-    let config = StrategyConfig(name: "RSI", instrumentID: "BTC-USDT-SWAP", interval: .oneMinute, type: .rsiReversal, parameters: ["period": 2, "oversold": 30, "overbought": 70], enabled: true)
-    let start = Date(timeIntervalSince1970: 1_700_000_000)
-    let candles = [
-        Candle(timestamp: start, open: 100, high: 101, low: 99, close: 100),
-        Candle(timestamp: start.addingTimeInterval(60), open: 90, high: 91, low: 89, close: 90),
-        Candle(timestamp: start.addingTimeInterval(120), open: 95, high: 96, low: 94, close: 95)
-    ]
-    let first = engine.evaluate(config: config, candles: candles)
-    let second = engine.evaluate(config: config, candles: candles, previous: first)
-    #expect(first.lastSignal?.timestamp == candles.last?.timestamp)
-    #expect(second.lastSignal?.id == first.lastSignal?.id)
+    let second = TradingBackend(paper: PaperTradingStore(directory: directory))
+    let logs = await second.logs()
+    #expect(logs.contains { $0.level == "signal" && $0.message == "持久化策略日志" })
 }

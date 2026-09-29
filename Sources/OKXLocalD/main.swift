@@ -154,8 +154,17 @@ private final class StreamHub: @unchecked Sendable {
                 for config in configs where config.enabled {
                     for instrumentID in config.scope.resolvedInstrumentIDs(from: contracts) {
                         targets.insert(StrategyTarget(instrumentID: instrumentID, interval: config.interval))
+                        if config.type == .sweepReversalShort {
+                            // 1h establishes the structure; 15m is the only
+                            // execution confirmation stream for this rule.
+                            targets.insert(StrategyTarget(instrumentID: instrumentID, interval: .fifteenMinutes))
+                        }
                     }
-                    if config.type == .sweepReversalShort, (config.parameters["btcGateEnabled"] ?? 1) >= 1 {
+                    if config.type == .sweepReversalShort && (config.parameters["btcGateEnabled"] ?? 1) >= 1 {
+                        targets.insert(StrategyTarget(instrumentID: "BTC-USDT-SWAP", interval: .oneHour))
+                    }
+                    if config.type == .emaAltcoinLong {
+                        // 双均线多头同样需要 BTC 1h 做 regime 门控。
                         targets.insert(StrategyTarget(instrumentID: "BTC-USDT-SWAP", interval: .oneHour))
                     }
                 }

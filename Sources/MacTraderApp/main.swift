@@ -139,10 +139,11 @@ struct TradingStrategy: Identifiable {
     var rule: String
     var state: StrategyState
     var pnl: Double
-    var allocation: Int
+    var allocation: Double
+    var poolAllocation: Double
     var updatedAt: Date = .now
-    init(serviceID: UUID? = nil, name: String, symbol: String, rule: String, state: StrategyState, pnl: Double, allocation: Int) {
-        self.serviceID = serviceID; self.name = name; self.symbol = symbol; self.rule = rule; self.state = state; self.pnl = pnl; self.allocation = allocation
+    init(serviceID: UUID? = nil, name: String, symbol: String, rule: String, state: StrategyState, pnl: Double, allocation: Double, poolAllocation: Double = 100) {
+        self.serviceID = serviceID; self.name = name; self.symbol = symbol; self.rule = rule; self.state = state; self.pnl = pnl; self.allocation = allocation; self.poolAllocation = poolAllocation
     }
 }
 
@@ -151,9 +152,8 @@ final class DashboardModel: ObservableObject {
     /// 策略类型 → 界面规则描述
     nonisolated static func ruleLabel(_ type: StrategyType) -> String {
         switch type {
-        case .trendFollowing: return "EMA / 唐奇安趋势过滤"
-        case .rsiReversal: return "RSI 超买超卖回穿"
         case .sweepReversalShort: return "山寨币二次扫顶做空（1h）"
+        case .emaAltcoinLong: return "双均线交易山寨币多（1h）"
         }
     }
 
@@ -174,6 +174,7 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var fills: [PaperFill] = []
     @Published private(set) var runtimeLogs: [RuntimeLog] = []
     @Published private(set) var strategyStatuses: [StrategyStatus] = []
+    @Published private(set) var strategyCapitals: [StrategyCapitalSnapshot] = []
     @Published private(set) var strategyConfigs: [StrategyConfig] = []
     @Published private(set) var accountOverview = AccountOverview()
     @Published private(set) var liveTradingStatus = LiveTradingStatus()
@@ -234,10 +235,8 @@ final class DashboardModel: ObservableObject {
         case .mainstream:
             return source.filter(Self.isMainstream).sorted { compactVolume($0.volume) > compactVolume($1.volume) }
         case .hotAltcoins:
-            let altcoins = source.filter { !Self.isMainstream($0) }
-            let tagged = altcoins.filter { $0.category == "热门" }
-            let candidates = tagged.count >= 3 ? tagged : altcoins
-            return Array(candidates.sorted { compactVolume($0.volume) > compactVolume($1.volume) }.prefix(30))
+            let altcoins = source.filter(Self.isEligibleHotAltcoin)
+            return Array(altcoins.sorted { compactVolume($0.volume) > compactVolume($1.volume) }.prefix(20))
         case .highGain60:
             return source.filter { $0.change >= 60 }.sorted { $0.change > $1.change }
         case .highGain100:
@@ -252,6 +251,12 @@ final class DashboardModel: ObservableObject {
 
     private static func isMainstream(_ contract: PerpetualContract) -> Bool {
         mainstreamSymbols.contains(contract.shortName.uppercased())
+    }
+
+    private static func isEligibleHotAltcoin(_ contract: PerpetualContract) -> Bool {
+        let parts = contract.id.split(separator: "-")
+        let quote = parts.count > 1 ? String(parts[1]) : ""
+        return StrategyUniverseRules.isEligibleHotAltcoin(instrumentID: contract.id, baseCurrency: contract.shortName, quoteCurrency: quote)
     }
 
     private func compactVolume(_ value: String) -> Double {
@@ -369,10 +374,11 @@ final class DashboardModel: ObservableObject {
             fills = (try? await client.paperFills()) ?? fills
             runtimeLogs = (try? await client.runtimeLogs()) ?? runtimeLogs
             strategyStatuses = (try? await client.strategyStatuses()) ?? strategyStatuses
+            strategyCapitals = (try? await client.strategyCapital()) ?? strategyCapitals
             if let configs = try? await client.strategies() {
                 strategyConfigs = configs
                 strategies = configs.map { config in
-                    TradingStrategy(serviceID: config.id, name: config.displayName, symbol: config.scope.displayName, rule: DashboardModel.ruleLabel(config.type), state: config.enabled ? .running : .paused, pnl: 0, allocation: Int(config.riskPercent))
+                    TradingStrategy(serviceID: config.id, name: config.displayName, symbol: config.scope.displayName, rule: DashboardModel.ruleLabel(config.type), state: config.enabled ? .running : .paused, pnl: 0, allocation: config.riskPercent, poolAllocation: config.capitalPoolPercent)
                 }
             }
             guard generation == lifecycleGeneration, autoStartBackend else {
@@ -448,7 +454,15 @@ final class DashboardModel: ObservableObject {
                         await MainActor.run { self.strategyStatuses = statuses }
                     }
                     if event.type == "risk", let payload = event.payload, let data = payload.data(using: .utf8), let risk = try? JSONDecoder.iso8601.decode(RiskSnapshot.self, from: data) {
-                        await MainActor.run { self.riskSnapshot = risk }
+                        await MainActor.run {
+                            // The risk stream is the authoritative, atomic view
+                            // of account and per-strategy pool state. Keep the
+                            // card values in lockstep with the kill-switch and
+                            // daily PnL fields instead of waiting for a REST
+                            // refresh.
+                            self.riskSnapshot = risk
+                            self.strategyCapitals = risk.strategyCapitals
+                        }
                     }
                     if event.type == "log", let payload = event.payload, let data = payload.data(using: .utf8), let logs = try? JSONDecoder.iso8601.decode([RuntimeLog].self, from: data) {
                         await MainActor.run { self.runtimeLogs = logs }
@@ -553,7 +567,7 @@ final class DashboardModel: ObservableObject {
     func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig {
         let created = try await client.createStrategy(config)
         strategyConfigs.append(created)
-        strategies.insert(TradingStrategy(serviceID: created.id, name: created.displayName, symbol: created.scope.displayName, rule: DashboardModel.ruleLabel(created.type), state: .paused, pnl: 0, allocation: Int(created.riskPercent)), at: 0)
+        strategies.insert(TradingStrategy(serviceID: created.id, name: created.displayName, symbol: created.scope.displayName, rule: DashboardModel.ruleLabel(created.type), state: .paused, pnl: 0, allocation: created.riskPercent, poolAllocation: created.capitalPoolPercent), at: 0)
         return created
     }
 
@@ -619,7 +633,15 @@ final class DashboardModel: ObservableObject {
 
     func occupiedFunds(for strategy: TradingStrategy) -> Decimal? {
         guard let equity = accountOverview.equityUSD else { return nil }
-        return equity * Decimal(strategy.allocation) / 100
+        if let serviceID = strategy.serviceID, let pool = strategyCapitals.first(where: { $0.strategyID == serviceID }) {
+            return pool.reservedCapital
+        }
+        return equity * Decimal(strategy.poolAllocation) / 100
+    }
+
+    func strategyPool(for strategy: TradingStrategy) -> StrategyCapitalSnapshot? {
+        guard let serviceID = strategy.serviceID else { return nil }
+        return strategyCapitals.first(where: { $0.strategyID == serviceID })
     }
 
     func hasStrategyType(_ type: StrategyType) -> Bool {
@@ -1345,6 +1367,15 @@ struct StrategyCard: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingPositionDeleteConfirmation = false
 
+    private var poolEquityText: String {
+        guard let pool = model.strategyPool(for: strategy) else { return "--" }
+        return formatUSD(pool.equity)
+    }
+
+    private var occupiedFundsText: String {
+        model.occupiedFunds(for: strategy).map(formatUSD) ?? "--"
+    }
+
     private var openPositions: [PositionSnapshot] { model.strategyOpenPositions(for: strategy) }
 
     private func requestDelete() {
@@ -1382,8 +1413,9 @@ struct StrategyCard: View {
                 VStack(alignment: .leading, spacing: 4) { Text("累计收益").font(.caption2).foregroundStyle(.secondary); Text(String(format: "%+.2f USDT", strategy.pnl)).font(.headline.monospacedDigit()).foregroundStyle(strategy.pnl >= 0 ? .green : .red) }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text("占用资金 \(model.occupiedFunds(for: strategy).map(formatUSD) ?? "--")").font(.caption2).foregroundStyle(.secondary)
-                    Text("分配 \(strategy.allocation)%").font(.caption2).foregroundStyle(.secondary)
+                    Text("资金池 \(poolEquityText)").font(.caption2).foregroundStyle(.secondary)
+                    Text("已占用 \(occupiedFundsText)").font(.caption2).foregroundStyle(.secondary)
+                    Text(String(format: "单笔风险 %.1f%%", strategy.allocation)).font(.caption2).foregroundStyle(.secondary)
                     Button(strategy.state == .running ? "暂停" : "启动", action: toggle).buttonStyle(.bordered).controlSize(.mini)
                 }
             }
@@ -1500,134 +1532,64 @@ struct OperationsSection: View {
 struct NewStrategySheet: View {
     @ObservedObject var model: DashboardModel
     @Environment(\.dismiss) private var dismiss
-    @State private var scopeMode: StrategyScopeMode = .single
-    @State private var symbolCategory: StrategySymbolCategory = .mainstream
-    @State private var symbol = ""
-    @State private var selectedSymbols: Set<String> = []
-    @State private var selectedRule: StrategyType = .trendFollowing
-    @State private var allocation = 20.0
+    @State private var allocation = 1.0
+    @State private var capitalPoolPercent = 100.0
+    @State private var selectedRule: StrategyType = .sweepReversalShort
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack { Text("新建策略").font(.title2.weight(.bold)); Spacer(); Button("取消") { dismiss() }.buttonStyle(.plain).foregroundStyle(.secondary) }
-            Text("配置完成后可在策略中心启动，订单将发送到当前 OKX 模拟账户。").font(.caption).foregroundStyle(.secondary)
+            Text("启动后按信号向当前 OKX 模拟账户提交入场单，并按策略规则执行保护止损、止盈和时间离场。").font(.caption).foregroundStyle(.secondary)
             Form {
                 Picker("策略规则", selection: $selectedRule) {
-                    ForEach(StrategyType.allCases, id: \.self) { strategyType in
+                    ForEach(StrategyType.availableCases, id: \.self) { strategyType in
                         Text("\(strategyType.displayName)\(model.hasStrategyType(strategyType) ? "（已有实例）" : "")")
                             .tag(strategyType)
                     }
                 }
-                Picker("绑定范围", selection: $scopeMode) {
-                    Text("单币种").tag(StrategyScopeMode.single)
-                    Text("多币种").tag(StrategyScopeMode.multiple)
-                    Text("动态类别").tag(StrategyScopeMode.dynamicCategory)
+                LabeledContent("扫描范围") {
+                    Text(scopeDescription)
+                        .foregroundStyle(.secondary)
                 }
-                if scopeMode == .dynamicCategory {
-                    Picker("动态类别", selection: $symbolCategory) {
-                        ForEach(StrategySymbolCategory.allCases) { category in
-                            Text(category.rawValue).tag(category)
-                        }
-                    }
-                    Text("按最新 24h 行情动态更新成员，策略不会固定在当前命中的合约上；最多跟踪 50 个命中合约")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else {
-                    Picker("币种筛选", selection: $symbolCategory) {
-                        ForEach(StrategySymbolCategory.allCases) { category in
-                            Text(category.rawValue).tag(category)
-                        }
-                    }
-                    let choices = model.strategyContracts(for: symbolCategory)
-                    if scopeMode == .single {
-                        Picker("交易品种", selection: $symbol) {
-                            if choices.isEmpty {
-                                Text("当前无符合条件的合约").foregroundStyle(.secondary).tag("")
-                            } else {
-                                ForEach(choices) { contract in
-                                    Text("\(contract.id)  \(String(format: "%+.2f%%", contract.change))").tag(contract.id)
-                                }
-                            }
-                        }
-                    } else if choices.isEmpty {
-                        Text("当前无符合条件的合约").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Section("已选 \(selectedSymbols.count) 个币种") {
-                            ForEach(choices) { contract in
-                                Toggle(isOn: Binding(
-                                    get: { selectedSymbols.contains(contract.id) },
-                                    set: { selected in
-                                        if selected { selectedSymbols.insert(contract.id) }
-                                        else { selectedSymbols.remove(contract.id) }
-                                    }
-                                )) {
-                                    Text("\(contract.id)  \(String(format: "%+.2f%%", contract.change))")
-                                }
-                            }
-                        }
-                    }
+                Text("策略运行期间会定期刷新合规山寨币成交额榜，自动跟踪命中的合约，不需要手动指定币种。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading) {
+                    Text("单笔风险 \(String(format: "%.1f", effectiveRisk))%")
+                    Slider(value: $allocation, in: 0.1...maxRiskForRule, step: 0.1)
                 }
-                VStack(alignment: .leading) { Text("资金分配 \(Int(allocation))%"); Slider(value: $allocation, in: 5...80, step: 5) }
+                VStack(alignment: .leading) {
+                    Text("策略资金池 \(String(format: "%.0f", capitalPoolPercent))%")
+                    Slider(value: $capitalPoolPercent, in: 1...100, step: 1)
+                }
             }.formStyle(.grouped)
+        .onChange(of: selectedRule) { _, _ in allocation = min(allocation, maxRiskForRule) }
             Spacer(); HStack { Spacer(); Button("创建并保存") { create() }.buttonStyle(.borderedProminent).tint(.mint).disabled(!canCreate) }
         }
         .padding(24)
-        .frame(width: 560, height: scopeMode == .multiple ? 610 : 500)
+        .frame(width: 560, height: 480)
         .preferredColorScheme(.dark)
-        .onAppear { syncSymbol() }
-        .onChange(of: scopeMode) { _, _ in syncSymbol() }
-        .onChange(of: symbolCategory) { _, _ in syncSymbol() }
-        .onChange(of: model.contracts) { _, _ in syncSymbol() }
     }
 
     private var canCreate: Bool {
-        guard !model.hasStrategyType(selectedRule) else { return false }
-        switch scopeMode {
-        case .single: return !symbol.isEmpty
-        case .multiple: return !selectedSymbols.isEmpty
-        case .dynamicCategory: return true
-        }
+        !model.hasStrategyType(selectedRule)
     }
 
-    private func syncSymbol() {
-        let choices = model.strategyContracts(for: symbolCategory)
-        if let first = choices.first, !choices.contains(where: { $0.id == symbol }) { symbol = first.id }
-        if choices.isEmpty { symbol = "" }
-        let available = Set(choices.map(\.id))
-        selectedSymbols = selectedSymbols.intersection(available)
-        if scopeMode == .multiple, selectedSymbols.isEmpty, let first = choices.first { selectedSymbols = [first.id] }
-    }
+    private var effectiveRisk: Double { min(allocation, maxRiskForRule) }
+
+    /// 实验室规则给出的单笔风险上限：扫顶 1%，双均线多头 0.5%。
+    private var maxRiskForRule: Double { selectedRule == .emaAltcoinLong ? 0.5 : 1.0 }
+
+    private var scopeDescription: String { "动态扫描热门榜前 20 个山寨币" }
 
     private func create() {
-        let scope: StrategyScope
-        switch scopeMode {
-        case .single:
-            guard !symbol.isEmpty else { return }
-            scope = .single(symbol)
-        case .multiple:
-            let ids = selectedSymbols.sorted()
-            guard !ids.isEmpty else { return }
-            scope = .multiple(ids)
-        case .dynamicCategory:
-            scope = .dynamic(symbolCategory.domainValue)
-        }
-        let type = selectedRule
-        let parameters: [String: Double]
-        if type == .rsiReversal {
-            parameters = ["period": 14, "oversold": 30, "overbought": 70]
-        } else if type == .sweepReversalShort {
-            parameters = ["L": 10, "R": 5, "majorWindow": 288, "sweepWait": 96, "rejectWait": 5,
-                          "resweepWait": 12, "rsiMin": 62, "volMult": 1.5, "rsDeep": 0.2,
-                          "bufATR": 0.5, "tpMult": 2.2, "minATRPct": 0.5, "maxRiskATR": 5.0,
-                          "btcGateEnabled": 1]
-        } else {
-            parameters = ["fastEMA": 20, "slowEMA": 60]
-        }
-        let config = StrategyConfig(name: type.displayName, scope: scope, interval: .oneHour, type: type, parameters: parameters, enabled: false, riskPercent: allocation, cooldownBars: type == .sweepReversalShort ? 96 : 3)
+        // 参数默认值来自领域层（与实验室 config 对齐），不再在界面里重复一份。
+        let config = StrategyConfig(name: selectedRule.displayName, scope: .dynamic(.hotAltcoins), interval: .oneHour, type: selectedRule, parameters: selectedRule.defaultParameters, enabled: false, riskPercent: effectiveRisk, capitalPoolPercent: capitalPoolPercent, cooldownBars: 96)
         Task {
             do { _ = try await model.createStrategy(config); dismiss() }
             catch { model.errorMessage = error.localizedDescription }
         }
     }
-
 }
 
 private func formatPrice(_ value: Double) -> String {

@@ -22,12 +22,44 @@ public actor PaperTradingStore {
     private var statusesByInstrument: [UUID: [String: StrategyStatus]] = [:]
     /// BTC 1 小时 K 线缓存：供"扫顶反转"策略的 BTC<SMA200 门控使用
     private var btcHourlyCandles: [Candle] = []
+    /// Cross-timeframe execution caches. A 1h close only arms the structure;
+    /// a confirmed 15m close is the only event allowed to create an entry.
+    private var structureCandlesByInstrument: [String: [Candle]] = [:]
+    private var confirmationCandlesByInstrument: [String: [Candle]] = [:]
 
-    private static func normalizedName(for config: StrategyConfig) -> StrategyConfig {
-        guard config.type == .sweepReversalShort else { return config }
+    public nonisolated var stateDirectory: URL { directory }
+
+    private static func canonicalized(_ config: StrategyConfig) -> StrategyConfig {
         var normalized = config
-        normalized.name = config.type.displayName
+        // 参数默认值只有一份（StrategyType.defaultParameters），App 与后端共用；
+        // 调用方显式传入的键优先。
+        for (key, value) in config.type.defaultParameters where normalized.parameters[key] == nil {
+            normalized.parameters[key] = value
+        }
+        switch config.type {
+        case .sweepReversalShort:
+            normalized.name = config.type.displayName
+            normalized.interval = .oneHour
+            normalized.instrumentID = ""
+            normalized.scope = .dynamic(.hotAltcoins)
+            normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
+        case .emaAltcoinLong:
+            normalized.name = config.type.displayName
+            normalized.interval = .oneHour
+            normalized.instrumentID = ""
+            normalized.scope = .dynamic(.hotAltcoins)
+            // 实验室规则：每笔订单风险上限为资金池权益的 0.5%。
+            normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
+        }
+        normalized.capitalPoolPercent = min(max(normalized.capitalPoolPercent, 0.1), 100.0)
         return normalized
+    }
+
+    private static func supports(_ config: StrategyConfig) -> Bool {
+        switch config.type {
+        case .sweepReversalShort, .emaAltcoinLong:
+            return config.interval == .oneHour && config.scope == .dynamic(.hotAltcoins)
+        }
     }
 
     public init(directory: URL = PaperTradingStore.defaultDirectory()) {
@@ -39,7 +71,14 @@ public actor PaperTradingStore {
         self.orders = []
         self.fills = []
         if let file = Self.loadFile(directory: directory, decoder: decoder) {
-            self.strategies = file.strategies.map(Self.normalizedName(for:))
+            let loaded = file.strategies
+                .filter(Self.supports(_:))
+                .map(Self.canonicalized(_:))
+            var unique: [StrategyConfig] = []
+            for config in loaded where !unique.contains(where: { $0.type == config.type }) {
+                unique.append(config)
+            }
+            self.strategies = unique
             self.statuses = Dictionary(uniqueKeysWithValues: file.statuses.compactMap { entry in
                 guard let uuid = UUID(uuidString: entry.key) else { return nil }
                 return (uuid, entry.value)
@@ -80,16 +119,39 @@ public actor PaperTradingStore {
     public func allFills() -> [PaperFill] { fills }
     public func allStatuses() -> [StrategyStatus] { strategies.compactMap { statuses[$0.id] } }
     public func status(for id: UUID) -> StrategyStatus? { statuses[id] }
+    /// Returns the status for one instrument when a strategy runs over a
+    /// dynamic universe. The aggregate status is retained for the dashboard,
+    /// but exits must use the signal that belongs to the held instrument.
+    public func status(for id: UUID, instrumentID: String) -> StrategyStatus? {
+        if let perInstrument = statusesByInstrument[id]?[instrumentID] { return perInstrument }
+        // 没有该标的自己的记录时返回中性状态，绝不回退到汇总状态：汇总状态可能
+        // 属于另一个标的，会让止损/止盈取到别人的价位。
+        guard let aggregate = statuses[id] else { return nil }
+        return StrategyStatus(id: aggregate.id, state: aggregate.state)
+    }
 
     public func prewarm(_ snapshot: MarketSnapshot) {
         if snapshot.instrumentID == "BTC-USDT-SWAP", snapshot.interval == .oneHour {
             btcHourlyCandles = snapshot.candles
         }
+        switch snapshot.interval {
+        case .oneHour:
+            structureCandlesByInstrument[snapshot.instrumentID] = snapshot.candles
+        case .fifteenMinutes:
+            confirmationCandlesByInstrument[snapshot.instrumentID] = snapshot.candles
+        default:
+            break
+        }
     }
     public func riskSnapshot() -> RiskSnapshot { risk }
 
     public func create(_ config: StrategyConfig) throws -> StrategyConfig {
-        let normalized = Self.normalizedName(for: config)
+        guard Self.supports(config),
+              config.riskPercent > 0,
+              config.riskPercent <= 1,
+              config.capitalPoolPercent > 0,
+              config.capitalPoolPercent <= 100 else { throw StoreError.unsupported }
+        let normalized = Self.canonicalized(config)
         guard !strategies.contains(where: { $0.id == normalized.id }) else { throw StoreError.conflict }
         guard !strategies.contains(where: { $0.type == normalized.type }) else { throw StoreError.conflict }
         strategies.append(normalized)
@@ -99,7 +161,12 @@ public actor PaperTradingStore {
     }
 
     public func update(_ config: StrategyConfig) throws -> StrategyConfig {
-        let normalized = Self.normalizedName(for: config)
+        guard Self.supports(config),
+              config.riskPercent > 0,
+              config.riskPercent <= 1,
+              config.capitalPoolPercent > 0,
+              config.capitalPoolPercent <= 100 else { throw StoreError.unsupported }
+        let normalized = Self.canonicalized(config)
         guard let index = strategies.firstIndex(where: { $0.id == normalized.id }) else { throw StoreError.notFound }
         guard !strategies.contains(where: { $0.id != normalized.id && $0.type == normalized.type }) else { throw StoreError.conflict }
         let wasEnabled = strategies[index].enabled
@@ -134,6 +201,20 @@ public actor PaperTradingStore {
         return strategies[index]
     }
 
+    @discardableResult
+    public func stopAllStrategies() -> [StrategyConfig] {
+        var stopped: [StrategyConfig] = []
+        for index in strategies.indices where strategies[index].enabled {
+            strategies[index].enabled = false
+            let config = strategies[index]
+            stopped.append(config)
+            statuses[config.id] = StrategyStatus(id: config.id, state: .paused)
+            statusesByInstrument[config.id] = [:]
+        }
+        if !stopped.isEmpty { save() }
+        return stopped
+    }
+
     public func record(_ order: PaperOrder, fill: PaperFill? = nil) {
         orders.append(order)
         if let fill { fills.append(fill) }
@@ -158,9 +239,70 @@ public actor PaperTradingStore {
         if snapshot.instrumentID == "BTC-USDT-SWAP", snapshot.interval == .oneHour {
             btcHourlyCandles = snapshot.candles
         }
+        switch snapshot.interval {
+        case .oneHour:
+            structureCandlesByInstrument[snapshot.instrumentID] = snapshot.candles
+        case .fifteenMinutes:
+            confirmationCandlesByInstrument[snapshot.instrumentID] = snapshot.candles
+        default:
+            break
+        }
         var changed = false
         var evaluatedStatuses: [StrategyStatus] = []
-        for config in strategies where config.scope.matches(snapshot.instrumentID, contracts: contracts) && config.interval == snapshot.interval {
+        for config in strategies where config.scope.matches(snapshot.instrumentID, contracts: contracts) {
+            if config.type == .sweepReversalShort {
+                // The structure close is an arm-only event. It never submits
+                // an order and cannot be mistaken for a 1h market entry.
+                //
+                // 必须返回**该标的自己**的状态。此前返回全局汇总状态
+                // (`statuses[config.id]`，即最后被评估标的的状态)，会让 A 标的
+                // 未提交的信号在时间戳相同的 B 标的 1h 收盘时被当成 B 的信号下单。
+                guard snapshot.interval == .fifteenMinutes else {
+                    let current = statusesByInstrument[config.id]?[snapshot.instrumentID]
+                        ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+                    statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = current
+                    evaluatedStatuses.append(current)
+                    continue
+                }
+                guard let structure = structureCandlesByInstrument[snapshot.instrumentID] else {
+                    let current = statusesByInstrument[config.id]?[snapshot.instrumentID]
+                        ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+                    statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = current
+                    evaluatedStatuses.append(current)
+                    continue
+                }
+                let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
+                    ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+                let next = engine.evaluateWithConfirmation(config: config, structureCandles: structure, confirmationCandles: snapshot.candles, previous: previous, btcCandles: btcHourlyCandles)
+                statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
+                evaluatedStatuses.append(next)
+                if statuses[config.id] != next {
+                    statuses[config.id] = next
+                    changed = true
+                }
+                continue
+            }
+            if config.type == .emaAltcoinLong {
+                // 只在已确认 1h K 线上评估；BTC 门控用同一份 BTC 1h 缓存。
+                guard snapshot.interval == .oneHour else {
+                    let current = statusesByInstrument[config.id]?[snapshot.instrumentID]
+                        ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+                    statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = current
+                    evaluatedStatuses.append(current)
+                    continue
+                }
+                let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
+                    ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+                let next = engine.evaluateEmaAltcoinLong(config: config, candles: snapshot.candles, previous: previous, btcCandles: btcHourlyCandles)
+                statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
+                evaluatedStatuses.append(next)
+                if statuses[config.id] != next {
+                    statuses[config.id] = next
+                    changed = true
+                }
+                continue
+            }
+            guard config.interval == snapshot.interval else { continue }
             let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
                 ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
             let next = engine.evaluate(config: config, candles: snapshot.candles, previous: previous, btcCandles: config.type == .sweepReversalShort ? btcHourlyCandles : nil)
@@ -247,13 +389,14 @@ public actor PaperTradingStore {
     }
 
     public enum StoreError: LocalizedError {
-        case conflict, notFound, running
+        case conflict, notFound, running, unsupported
 
         public var errorDescription: String? {
             switch self {
             case .conflict: return "每种策略规则只允许创建一个实例"
             case .notFound: return "策略实例不存在"
             case .running: return "策略运行中，请先停止策略后再删除"
+            case .unsupported: return "当前仅支持 1 小时山寨币二次扫顶做空策略；范围必须是动态热门榜前 20 个山寨币，单笔风险不得超过 1%"
         }
         }
     }
@@ -476,6 +619,10 @@ public actor MarketDataService {
 
     public func placeLiveOrder(_ request: LiveOrderRequest) async throws -> LiveOrderCommandResult { try await client.placeSwapOrder(request) }
     public func placeDemoOrder(_ request: LiveOrderRequest) async throws -> LiveOrderCommandResult { try await client.placeDemoSwapOrder(request) }
+    public func cancelLiveOrder(instrumentID: String, orderID: String) async throws { try await client.cancelLiveSwapOrder(instrumentID: instrumentID, orderID: orderID); invalidateAccountState() }
+    public func cancelDemoOrder(instrumentID: String, orderID: String) async throws { try await client.cancelDemoSwapOrder(instrumentID: instrumentID, orderID: orderID); invalidateAccountState() }
+    public func closeLivePosition(instrumentID: String, positionSide: String?) async throws { try await client.closeLiveSwapPosition(instrumentID: instrumentID, positionSide: positionSide); invalidateAccountState() }
+    public func closeDemoPosition(instrumentID: String, positionSide: String?) async throws { try await client.closeDemoSwapPosition(instrumentID: instrumentID, positionSide: positionSide); invalidateAccountState() }
 
     public func privatePositions() async throws -> [PositionSnapshot] {
         if let cached = positionsCache, cached.isValid(ttl: ttl.positions) { return cached.value }
@@ -554,18 +701,27 @@ public actor TradingBackend {
     /// so the dedupe set cannot grow without bound over long sessions.
     private var submittedSignalOrder: [UUID] = []
     private var runtimeLogs: [RuntimeLog] = []
+    private let runtimeLogURL: URL
     private var loggedSignalIDs: Set<UUID> = []
     private var loggedFillIDs: Set<UUID> = []
     private var liveTradingEnabled = false
     private var contractUniverse: [ContractMarket] = []
+    private var globalRiskTripHandled = false
+    private var globalRiskRemoteCleanupComplete = false
+    private var submittedExitPositionIDs: Set<String> = []
+    private var riskRestored = false
 
     private static let submittedSignalLimit = 500
+    private static let runtimeLogMemoryLimit = 1_000
 
-    public init(market: MarketDataService = MarketDataService(), paper: PaperTradingStore = PaperTradingStore(), riskEngine: RiskEngine = RiskEngine()) {
+    public init(market: MarketDataService = MarketDataService(), paper: PaperTradingStore = PaperTradingStore(), riskEngine: RiskEngine = RiskEngine(), logDirectory: URL? = nil) {
         self.market = market
         self.paper = paper
         self.riskEngine = riskEngine
         self.broker = PaperBroker(risk: riskEngine)
+        let directory = logDirectory ?? paper.stateDirectory
+        self.runtimeLogURL = directory.appendingPathComponent("runtime-log.jsonl")
+        self.runtimeLogs = Self.loadRuntimeLogs(from: self.runtimeLogURL)
     }
 
     private func recordSubmittedSignal(_ id: UUID) {
@@ -577,47 +733,95 @@ public actor TradingBackend {
         }
     }
 
+    private func restoreRiskIfNeeded() async {
+        guard !riskRestored else { return }
+        riskRestored = true
+        await riskEngine.restore(await paper.riskSnapshot())
+        // Recreate pools for persisted strategy instances before the first
+        // capital/status request. Pool state itself is runtime-owned, while
+        // the strategy allocation is persisted with the instance.
+        for config in await paper.allStrategies() {
+            _ = await riskEngine.registerStrategy(config.id, allocationPercent: Decimal(config.capitalPoolPercent))
+        }
+    }
+
     public func health() -> ServiceHealth { ServiceHealth() }
 
     public func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig {
+        await restoreRiskIfNeeded()
         let created = try await paper.create(config)
+        _ = await riskEngine.registerStrategy(created.id, allocationPercent: Decimal(created.capitalPoolPercent))
+        await paper.setRisk(await riskEngine.snapshot())
         appendLog("策略已创建：\(created.name)，规则 \(Self.strategyRuleName(created.type))")
         return created
     }
 
     public func updateStrategy(_ config: StrategyConfig) async throws -> StrategyConfig {
+        await restoreRiskIfNeeded()
         let updated = try await paper.update(config)
+        _ = await riskEngine.registerStrategy(updated.id, allocationPercent: Decimal(updated.capitalPoolPercent))
+        await paper.setRisk(await riskEngine.snapshot())
         appendLog("策略已更新：\(updated.name)")
         return updated
     }
 
     public func deleteStrategy(_ id: UUID) async throws -> StrategyConfig {
+        await restoreRiskIfNeeded()
         let removed = try await paper.delete(id)
+        await riskEngine.removeStrategy(id)
+        // Persist the pool removal so a later service restart cannot recreate
+        // an orphaned capital card from the previous risk snapshot.
+        await paper.setRisk(await riskEngine.snapshot())
         appendLog("策略已删除：\(removed.name)")
         return removed
     }
 
     public func startStrategy(_ id: UUID) async throws -> StrategyConfig {
+        await restoreRiskIfNeeded()
+        let riskSnapshot = await riskEngine.snapshot()
+        guard !riskSnapshot.killSwitch else {
+            appendLog("策略启动被拒绝：账户风控已熔断，需新日手动复位后才能启动", level: "warning")
+            throw ATKError.unavailable("账户风控已熔断，请在新日复位后再启动策略")
+        }
         let config = try await paper.setState(id, running: true)
+        _ = await riskEngine.registerStrategy(config.id, allocationPercent: Decimal(config.capitalPoolPercent))
+        await paper.setRisk(await riskEngine.snapshot())
         appendLog("策略已启动：\(config.name)")
         return config
     }
 
     public func pauseStrategy(_ id: UUID) async throws -> StrategyConfig {
+        await restoreRiskIfNeeded()
         let config = try await paper.setState(id, running: false)
         appendLog("策略已停止：\(config.name)")
         return config
     }
 
+    public func strategyCapital() async -> [StrategyCapitalSnapshot] {
+        await restoreRiskIfNeeded()
+        return await riskEngine.strategyCapitals()
+    }
+
+    public func resetRisk() async -> RiskSnapshot {
+        await restoreRiskIfNeeded()
+        let snapshot = await riskEngine.resetKillSwitch()
+        if !snapshot.killSwitch {
+            globalRiskTripHandled = false
+            globalRiskRemoteCleanupComplete = false
+        }
+        await paper.setRisk(snapshot)
+        appendLog(snapshot.killSwitch ? "账户风控仍锁存：只能在新日历日手动复位" : "账户风控已手动复位", level: snapshot.killSwitch ? "warning" : "risk")
+        return snapshot
+    }
+
     public func recordLog(_ log: RuntimeLog) {
-        appendLog(log.message, level: log.level)
+        appendLog(log)
     }
 
     private static func strategyRuleName(_ type: StrategyType) -> String {
         switch type {
-        case .trendFollowing: return "EMA / 唐奇安趋势过滤"
-        case .rsiReversal: return "RSI 超买超卖回穿"
         case .sweepReversalShort: return "山寨币二次扫顶做空（1h）"
+        case .emaAltcoinLong: return "双均线交易山寨币多（1h）"
         }
     }
 
@@ -635,9 +839,157 @@ public actor TradingBackend {
         }
     }
 
+    /// Executes the account-level circuit breaker exactly once per backend
+    /// lifetime. Strategy rules remain responsible for ordinary exits; this
+    /// path is reserved for the daily mark-to-market loss limit.
+    private func enforceGlobalRiskIfNeeded(now: Date = .now) async {
+        let snapshot = await riskEngine.snapshot(now: now)
+        guard snapshot.killSwitch else { return }
+
+        // Local strategy stop/flatten is idempotent and only needs to be
+        // announced once. Remote cleanup has its own latch below because a
+        // transient REST/CLI failure must be retried on the next heartbeat.
+        if !globalRiskTripHandled {
+            globalRiskTripHandled = true
+            let stopped = await paper.stopAllStrategies()
+            appendLog("账户日损熔断：当日亏损 \(snapshot.dailyPnLPercent)%，已停止 \(stopped.count) 个策略", level: "risk")
+            await broker.cancelPendingOrders()
+            let localClosed = await broker.flattenAll(at: now)
+            if !localClosed.isEmpty {
+                appendLog("账户日损熔断：本地模拟持仓已平仓 \(localClosed.count) 个", level: "risk")
+            }
+        }
+        guard !globalRiskRemoteCleanupComplete else { return }
+
+        guard let account = try? await market.account() else {
+            appendLog("账户日损熔断：无法读取交易账户，远端处置将在下次心跳重试", level: "warning")
+            await paper.setRisk(snapshot)
+            return
+        }
+        guard account.mode != .readOnly else {
+            // A read-only profile cannot have remotely actionable orders.
+            globalRiskRemoteCleanupComplete = true
+            await paper.setRisk(snapshot)
+            return
+        }
+
+        var cleanupSucceeded = true
+        do {
+            let orders = try await market.privateOrders()
+            for order in orders where !["filled", "canceled", "cancelled", "closed"].contains(order.status.lowercased()) {
+                do {
+                    if account.mode == .paper {
+                        try await market.cancelDemoOrder(instrumentID: order.instrumentID, orderID: order.id)
+                    } else {
+                        try await market.cancelLiveOrder(instrumentID: order.instrumentID, orderID: order.id)
+                    }
+                    appendLog("账户日损熔断：已撤销开仓挂单 \(order.id)", level: "risk")
+                } catch {
+                    cleanupSucceeded = false
+                    appendLog("账户日损熔断：撤单失败 \(order.id)：\(error.localizedDescription)", level: "warning")
+                }
+            }
+        } catch {
+            cleanupSucceeded = false
+            appendLog("账户日损熔断：读取远端挂单失败，下一次心跳重试：\(error.localizedDescription)", level: "warning")
+        }
+
+        do {
+            let positions = try await market.privatePositions()
+            for position in positions where abs(position.quantity) > 0 {
+                do {
+                    if account.mode == .paper {
+                        try await market.closeDemoPosition(instrumentID: position.instrumentID, positionSide: position.side)
+                    } else {
+                        try await market.closeLivePosition(instrumentID: position.instrumentID, positionSide: position.side)
+                    }
+                    appendLog("账户日损熔断：已提交平仓 \(position.instrumentID) \(position.side)", level: "risk")
+                } catch {
+                    cleanupSucceeded = false
+                    appendLog("账户日损熔断：平仓失败 \(position.instrumentID)：\(error.localizedDescription)", level: "warning")
+                }
+            }
+        } catch {
+            cleanupSucceeded = false
+            appendLog("账户日损熔断：读取远端持仓失败，下一次心跳重试：\(error.localizedDescription)", level: "warning")
+        }
+
+        globalRiskRemoteCleanupComplete = cleanupSucceeded
+        await paper.setRisk(await riskEngine.snapshot(now: now))
+    }
+
+    /// Strategy-level protection is evaluated independently of the account
+    /// circuit breaker. Entry signals attach exchange-native SL/TP orders; this
+    /// monitor supplies the time exit and retries protection when a remote
+    /// position is visible without an attached exit.
+    private func enforceStrategyExits(at timestamp: Date, fallbackPrice: Decimal? = nil) async {
+        guard !globalRiskTripHandled else { return }
+        let configs = await paper.allStrategies()
+        guard !configs.isEmpty, let positions = try? await market.privatePositions(), !positions.isEmpty else { return }
+        let orders = await paper.allOrders()
+        guard let account = try? await market.account(), account.mode != .readOnly else { return }
+        for position in positions where abs(position.quantity) > 0 {
+            guard let order = orders.reversed().first(where: { order in
+                order.instrumentID == position.instrumentID &&
+                    ["submitted", "filled", "pending"].contains(order.status.lowercased())
+            }),
+                  let config = configs.first(where: { $0.id == order.strategyID }) else { continue }
+            let status = await paper.status(for: config.id, instrumentID: position.instrumentID)
+            let signal = status?.lastSignal
+            let price = position.markPrice ?? fallbackPrice ?? order.fillPrice
+            guard let price else { continue }
+            let normalizedSide = position.side.lowercased()
+            // OKX net-mode rows use a signed `pos` value and report side as
+            // "net". Infer direction from quantity before applying SL/TP.
+            let isShort = normalizedSide == "short" || (normalizedSide == "net" && position.quantity < 0)
+            let stopHit: Bool
+            let takeHit: Bool
+            if isShort {
+                stopHit = signal?.stopPrice.map { price >= $0 } ?? false
+                takeHit = signal?.takePrice.map { price <= $0 } ?? false
+            } else {
+                stopHit = signal?.stopPrice.map { price <= $0 } ?? false
+                takeHit = signal?.takePrice.map { price >= $0 } ?? false
+            }
+            let timedOut = timestamp.timeIntervalSince(order.requestedAt) >= 96 * 3600
+            guard stopHit || takeHit || timedOut else { continue }
+            let positionKey = "\(position.id):\(position.instrumentID)"
+            guard submittedExitPositionIDs.insert(positionKey).inserted else { continue }
+            let side = isShort ? "buy" : "sell"
+            let request = LiveOrderRequest(instrumentID: position.instrumentID, side: side, orderType: "market", quantity: abs(position.quantity), marginMode: "cross", reduceOnly: true)
+            do {
+                if account.mode == .paper {
+                    _ = try await market.placeDemoOrder(request)
+                } else {
+                    _ = try await market.placeLiveOrder(request)
+                }
+                // The exchange accepts the reduce-only exit asynchronously.
+                // Credit an estimated realized result to this pool now so the
+                // next entry can compound it; account equity itself is left to
+                // the next authenticated snapshot for exact reconciliation.
+                let direction: Decimal = isShort ? -1 : 1
+                let exitNotional = abs(price * position.quantity)
+                let estimatedRealized = (price - position.entryPrice) * abs(position.quantity) * direction - exitNotional * broker.feeRate
+                await riskEngine.recordStrategyRealized(estimatedRealized, strategyID: config.id, now: timestamp)
+                // 平仓同时释放资金池占用、该笔的开放止损风险与一个并发名额。
+                let exitRisk = signal?.stopPrice.map { abs(position.entryPrice - $0) * abs(position.quantity) } ?? 0
+                await riskEngine.release(instrumentID: position.instrumentID, notional: abs(position.quantity * position.entryPrice), strategyID: config.id, margin: abs(position.quantity * position.entryPrice), riskAmount: exitRisk, closedPosition: true)
+                await paper.setRisk(await riskEngine.snapshot(now: timestamp))
+                appendLog("策略平仓：\(config.name) / \(position.instrumentID) / \(stopHit ? "止损" : takeHit ? "止盈" : "96根时间离场")", level: "exit")
+                await market.invalidateAccountState()
+            } catch {
+                submittedExitPositionIDs.remove(positionKey)
+                appendLog("策略平仓失败：\(config.name) / \(position.instrumentID)：\(error.localizedDescription)", level: "warning")
+            }
+        }
+    }
+
     public func contracts(forceRefresh: Bool = false) async throws -> [ContractMarket] {
         let all = try await market.contracts(forceRefresh: forceRefresh)
-        let byVolume = Set(all.sorted { $0.volume24h > $1.volume24h }.prefix(12).map(\.id))
+        let byVolume = Set(all.filter(StrategyUniverseRules.isEligibleHotAltcoin)
+            .sorted { $0.volume24h > $1.volume24h }
+            .prefix(20)
+            .map(\.id))
         let gainers = Set(all.sorted { $0.changePercent > $1.changePercent }.prefix(12).map(\.id))
         let losers = Set(all.sorted { $0.changePercent < $1.changePercent }.prefix(12).map(\.id))
         let enriched = all.map { item in
@@ -651,8 +1003,13 @@ public actor TradingBackend {
     public func cachedContracts() -> [ContractMarket] { contractUniverse }
 
     public func account() async throws -> AccountOverview {
+        await restoreRiskIfNeeded()
         let value = try await market.account()
         if let equity = value.equityUSD { await riskEngine.synchronizeEquity(equity) }
+        await enforceGlobalRiskIfNeeded()
+        // Persist the latest daily baseline/equity even when the loss limit
+        // has not tripped, so a service restart cannot silently forget it.
+        await paper.setRisk(await riskEngine.snapshot())
         return value
     }
 
@@ -740,24 +1097,29 @@ public actor TradingBackend {
         await paper.prewarm(snapshot)
     }
     public func marketSnapshot(instrumentID: String, interval: KlineInterval) async throws -> MarketSnapshot {
+        await restoreRiskIfNeeded()
         let snapshot = try await market.snapshot(instrumentID: instrumentID, interval: interval)
         await candles.ingest(snapshot.candles, instrumentID: instrumentID, interval: interval)
         let statuses = await paper.evaluate(snapshot, contracts: contractUniverse)
+        let latestTimestamp = snapshot.candles.last(where: { $0.confirmed })?.timestamp
         if let latest = snapshot.candles.last(where: { $0.confirmed }) {
             await broker.processNextOpen(instrumentID: instrumentID, candle: latest)
             // Orders fill at this bar's open. Mark the resulting position at
             // the snapshot close so REST refreshes expose current unrealized PnL
             // just like the realtime candle path.
-            await broker.mark(instrumentID: instrumentID, price: latest.close, at: latest.timestamp)
-            await logNewFills()
+        await broker.mark(instrumentID: instrumentID, price: latest.close, at: latest.timestamp)
+        await logNewFills()
         }
+        await enforceGlobalRiskIfNeeded(now: latestTimestamp ?? .now)
+        await enforceStrategyExits(at: latestTimestamp ?? .now, fallbackPrice: snapshot.candles.last(where: { $0.confirmed })?.close)
         let configs = await paper.allStrategies()
         logSignals(statuses, configs: configs, instrumentID: instrumentID)
         let latestConfirmedTimestamp = snapshot.candles.last(where: { $0.confirmed })?.timestamp
         for status in statuses {
             guard status.state == .running, let signal = status.lastSignal, signal.type.hasPrefix("entry_"), signal.timestamp == latestConfirmedTimestamp, !submittedSignals.contains(signal.id), let config = configs.first(where: { $0.id == status.id }), config.enabled else { continue }
-            let quantity = max(Decimal(string: "0.001") ?? 0, Decimal(config.riskPercent) / 100)
-            if await submitDemoStrategyOrder(config: config, signal: signal, instrumentID: instrumentID, quantity: quantity) {
+            // 防御：信号必须就是本标的当前记录的那一个，跨标的信号一律不下单。
+            guard await paper.status(for: config.id, instrumentID: instrumentID)?.lastSignal?.id == signal.id else { continue }
+            if await submitDemoStrategyOrder(config: config, signal: signal, instrumentID: instrumentID) {
                 recordSubmittedSignal(signal.id)
             }
         }
@@ -765,30 +1127,89 @@ public actor TradingBackend {
         return snapshot
     }
 
-    private func submitDemoStrategyOrder(config: StrategyConfig, signal: StrategySignal, instrumentID: String, quantity: Decimal) async -> Bool {
-        guard config.enabled, quantity > 0 else { return false }
+    /// 统计某个策略实例当前在远端持有的仓位数量。
+    /// 远端持仓不带策略归属，因此用"该标的最近一笔入场订单"反查（与
+    /// `enforceStrategyExits` 的归属判断保持同一口径）。
+    private func openPositionCount(strategyID: UUID) async -> Int {
+        guard let positions = try? await market.privatePositions(), !positions.isEmpty else { return 0 }
+        let orders = await paper.allOrders()
+        var count = 0
+        for position in positions where abs(position.quantity) > 0 {
+            guard let order = orders.reversed().first(where: { order in
+                order.instrumentID == position.instrumentID &&
+                    ["submitted", "filled", "pending"].contains(order.status.lowercased())
+            }) else { continue }
+            if order.strategyID == strategyID { count += 1 }
+        }
+        return count
+    }
+
+    private func submitDemoStrategyOrder(config: StrategyConfig, signal: StrategySignal, instrumentID: String) async -> Bool {
+        guard config.enabled else { return false }
+        // 每标的单仓：两个策略的实验室规则都要求同一品种最多一笔持仓。
+        if let positions = try? await market.privatePositions(),
+           positions.contains(where: { $0.instrumentID == instrumentID && abs($0.quantity) > 0 }) {
+            appendLog("策略 \(config.name) 未发送：\(instrumentID) 已有持仓，同一标的只允许一笔", level: "warning")
+            return false
+        }
+        // 组合上限：同一策略的并发持仓数（实验室：扫顶 ≤20、双均线多头 ≤6）。
+        // 每笔订单的风险预算固定为池权益的固定比例，因此"并发数上限"与
+        // "开放止损风险上限"（双均线多头 6 × 0.5% = 3%）是同一个约束。
+        let maxConcurrent = Int(config.parameters["maxConcurrentPositions"] ?? (config.type == .emaAltcoinLong ? 6 : 20))
+        guard await openPositionCount(strategyID: config.id) < maxConcurrent else {
+            appendLog("策略 \(config.name) 未发送：并发持仓已达上限 \(maxConcurrent)", level: "warning")
+            return false
+        }
         guard let account = try? await account(), account.mode == .paper else {
             appendLog("策略 \(config.name) 未发送：当前不是 OKX 模拟账户", level: "warning")
             return false
         }
         guard let ticker = try? await market.ticker(instrumentID: instrumentID) else { return false }
+        let pool = await riskEngine.strategyCapital(config.id, allocationPercent: Decimal(config.capitalPoolPercent))
+        let entry = signal.price
+        let riskDistance = signal.stopPrice.map { abs($0 - entry) } ?? 0
+        let riskBudget = pool.equity * Decimal(config.riskPercent) / 100
+        let targetNotional: Decimal
+        if riskDistance > 0, entry > 0 {
+            targetNotional = min(pool.availableCapital, riskBudget * entry / riskDistance)
+        } else {
+            targetNotional = pool.availableCapital
+        }
+        let minimumQuantity = Decimal(string: "0.001") ?? 0
+        guard targetNotional >= minimumQuantity * ticker.last, ticker.last > 0 else {
+            appendLog("策略 \(config.name) 未发送：资金池无可用余额", level: "warning")
+            return false
+        }
+        let quantity = max(minimumQuantity, targetNotional / ticker.last)
         let notional = abs(quantity * ticker.last)
-        let decision = await riskEngine.authorize(instrumentID: instrumentID, notional: notional, margin: notional)
+        // 本单的止损风险，用于执行策略资金池的"开放风险 ≤ 池权益比例"上限
+        // （双均线多头：3% = 6 并发 × 每笔 0.5%）。
+        let orderRisk = riskDistance > 0 ? quantity * riskDistance : 0
+        let maxOpenRiskPercent: Decimal? = config.type == .emaAltcoinLong ? Decimal(string: "3.0") : nil
+        let decision = await riskEngine.authorize(
+            instrumentID: instrumentID, notional: notional, margin: notional,
+            strategyID: config.id, poolAllocationPercent: Decimal(config.capitalPoolPercent),
+            riskAmount: orderRisk, maxOpenRiskPercent: maxOpenRiskPercent,
+            maxConcurrentPositions: maxConcurrent
+        )
         guard decision.allowed else {
             appendLog("策略 \(config.name) 被风控拒绝：\(decision.reason ?? "未知原因")", level: "warning")
             return false
         }
         let side = signal.type == "entry_short" ? "sell" : "buy"
-        let request = LiveOrderRequest(instrumentID: instrumentID, side: side, orderType: "market", quantity: quantity, marginMode: "cross")
+        let request = LiveOrderRequest(instrumentID: instrumentID, side: side, orderType: "market", quantity: quantity, marginMode: "cross", takeProfitTriggerPrice: signal.takePrice, stopLossTriggerPrice: signal.stopPrice)
         do {
             let result = try await market.placeDemoOrder(request)
             await market.invalidateAccountState()
             let order = PaperOrder(strategyID: config.id, instrumentID: instrumentID, side: side == "sell" ? "short" : "long", quantity: quantity, requestedAt: signal.timestamp, status: "submitted", remoteOrderID: result.orderID)
             await paper.record(order)
+            await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
             appendLog("挂单：策略 \(config.name) / \(instrumentID) / \(side) \(quantity)，订单 \(result.orderID)", level: "order")
+            if signal.stopPrice != nil || signal.takePrice != nil { appendLog("策略 \(config.name) 已附带条件止损/止盈；时间离场由策略监控处理", level: "info") }
             return true
         } catch {
-            await riskEngine.release(instrumentID: instrumentID, notional: notional)
+            await riskEngine.release(instrumentID: instrumentID, notional: notional, strategyID: config.id, margin: notional, riskAmount: orderRisk, closedPosition: true)
+            await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
             appendLog("策略 \(config.name) OKX 模拟下单失败：\(error.localizedDescription)", level: "warning")
             return false
         }
@@ -801,6 +1222,7 @@ public actor TradingBackend {
 
     @discardableResult
     public func ingestRealtimeCandle(_ candle: Candle, instrumentID: String, interval: KlineInterval) async -> [StrategyStatus] {
+        await restoreRiskIfNeeded()
         await market.cacheRealtimeCandle(candle, instrumentID: instrumentID, interval: interval)
         await candles.ingest(candle, instrumentID: instrumentID, interval: interval)
         // A pending order is filled at the next bar's open. WSS publishes an
@@ -809,6 +1231,9 @@ public actor TradingBackend {
         await broker.processNextOpen(instrumentID: instrumentID, candle: candle)
         await broker.mark(instrumentID: instrumentID, price: candle.close, at: candle.timestamp)
         await logNewFills()
+        await enforceGlobalRiskIfNeeded(now: candle.timestamp)
+        await enforceStrategyExits(at: candle.timestamp, fallbackPrice: candle.close)
+        await paper.setRisk(await broker.riskSnapshot())
         if candle.confirmed {
             let current = await candles.values(instrumentID: instrumentID, interval: interval)
             let snapshot = MarketSnapshot(instrumentID: instrumentID, interval: interval, candles: current)
@@ -817,8 +1242,9 @@ public actor TradingBackend {
             logSignals(statuses, configs: configs, instrumentID: instrumentID)
             for status in statuses {
             guard status.state == .running, let signal = status.lastSignal, signal.type.hasPrefix("entry_"), signal.timestamp == candle.timestamp, !submittedSignals.contains(signal.id), let config = configs.first(where: { $0.id == status.id }), config.enabled else { continue }
-                let quantity = max(Decimal(string: "0.001") ?? 0, Decimal(config.riskPercent) / 100)
-                if await submitDemoStrategyOrder(config: config, signal: signal, instrumentID: instrumentID, quantity: quantity) { recordSubmittedSignal(signal.id) }
+            // 防御：信号必须就是本标的当前记录的那一个，跨标的信号一律不下单。
+            guard await paper.status(for: config.id, instrumentID: instrumentID)?.lastSignal?.id == signal.id else { continue }
+                if await submitDemoStrategyOrder(config: config, signal: signal, instrumentID: instrumentID) { recordSubmittedSignal(signal.id) }
             }
             appendLog("\(instrumentID) \(interval.rawValue) K 线收盘，策略状态已更新")
             return statuses
@@ -827,8 +1253,50 @@ public actor TradingBackend {
     }
 
     public func appendLog(_ message: String, level: String = "info") {
-        runtimeLogs.append(RuntimeLog(level: level, message: message))
-        if runtimeLogs.count > 300 { runtimeLogs.removeFirst(runtimeLogs.count - 300) }
+        appendLog(RuntimeLog(level: level, message: message))
+    }
+
+    private func appendLog(_ log: RuntimeLog) {
+        runtimeLogs.append(log)
+        if runtimeLogs.count > Self.runtimeLogMemoryLimit {
+            runtimeLogs.removeFirst(runtimeLogs.count - Self.runtimeLogMemoryLimit)
+        }
+        Self.persistRuntimeLog(log, to: runtimeLogURL)
+    }
+
+    private static func loadRuntimeLogs(from url: URL) -> [RuntimeLog] {
+        guard let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let logs = text.split(separator: "\n").compactMap { line -> RuntimeLog? in
+            guard let lineData = line.data(using: .utf8) else { return nil }
+            return try? decoder.decode(RuntimeLog.self, from: lineData)
+        }
+        return logs.count > runtimeLogMemoryLimit ? Array(logs.suffix(runtimeLogMemoryLimit)) : logs
+    }
+
+    private static func persistRuntimeLog(_ log: RuntimeLog, to url: URL) {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(log) else { return }
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: url.path) {
+                guard let handle = try? FileHandle(forWritingTo: url) else { return }
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+                try handle.write(contentsOf: Data([0x0A]))
+                try handle.close()
+            } else {
+                var line = Data()
+                line.append(data)
+                line.append(0x0A)
+                try line.write(to: url, options: .atomic)
+            }
+        } catch {
+            // Runtime logging must never interrupt market-data or order handling.
+        }
     }
 }
 
@@ -889,6 +1357,7 @@ public struct TradingHTTPServer {
         }
         app.router.get("api/v1/strategies") { [backend] request in try request.application.encoder.encode(await backend.strategies(), from: request) }
         app.router.get("api/v1/strategies/status") { [backend] request in try request.application.encoder.encode(await backend.statuses(), from: request) }
+        app.router.get("api/v1/strategies/capital") { [backend] request in try request.application.encoder.encode(await backend.strategyCapital(), from: request) }
         app.router.get("api/v1/paper/positions") { [backend] request in try request.application.encoder.encode(await backend.positions(), from: request) }
         app.router.get("api/v1/paper/orders") { [backend] request in try request.application.encoder.encode(await backend.orders(), from: request) }
         app.router.get("api/v1/paper/fills") { [backend] request in try request.application.encoder.encode(await backend.fills(), from: request) }
@@ -927,6 +1396,7 @@ public struct TradingHTTPServer {
             try request.application.encoder.encode(try await backend.privateOrders(), from: request)
         }
         app.router.get("api/v1/risk") { [backend] request in try request.application.encoder.encode(await backend.broker.riskSnapshot(), from: request) }
+        app.router.post("api/v1/risk/reset") { [backend] request in try request.application.encoder.encode(await backend.resetRisk(), from: request) }
         app.router.get("api/v1/paper/ledger") { [backend] _ in
             PaperLedger(orders: await backend.paper.allOrders(), fills: await backend.paper.allFills())
         }

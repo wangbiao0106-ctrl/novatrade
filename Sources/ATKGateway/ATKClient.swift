@@ -285,6 +285,37 @@ public struct ATKClient: Sendable {
         try await placeSwapOrder(request, mode: .demo)
     }
 
+    public func cancelDemoSwapOrder(instrumentID: String, orderID: String) async throws {
+        try await mutateSwap(["--demo", "swap", "cancel", instrumentID, "--ordId", orderID])
+    }
+
+    public func cancelLiveSwapOrder(instrumentID: String, orderID: String) async throws {
+        try await mutateSwap(["--live", "swap", "cancel", instrumentID, "--ordId", orderID])
+    }
+
+    public func closeDemoSwapPosition(instrumentID: String, positionSide: String? = nil) async throws {
+        try await closeSwapPosition(instrumentID: instrumentID, positionSide: positionSide, demo: true)
+    }
+
+    public func closeLiveSwapPosition(instrumentID: String, positionSide: String? = nil) async throws {
+        try await closeSwapPosition(instrumentID: instrumentID, positionSide: positionSide, demo: false)
+    }
+
+    private func closeSwapPosition(instrumentID: String, positionSide: String?, demo: Bool) async throws {
+        var arguments = [demo ? "--demo" : "--live", "swap", "close", "--instId", instrumentID, "--mgnMode", "cross", "--autoCxl"]
+        if let positionSide, !positionSide.isEmpty, positionSide != "net" { arguments += ["--posSide", positionSide] }
+        _ = try await mutateSwap(arguments)
+    }
+
+    @discardableResult
+    private func mutateSwap(_ arguments: [String]) async throws -> Any {
+        let root = try await runJSON(arguments)
+        if let row = Self.firstJSONObject(root), let code = row["sCode"] as? String, !code.isEmpty, code != "0" {
+            throw ATKError.commandFailed(code: Int32(code) ?? -1, message: (row["sMsg"] as? String) ?? "OKX 拒绝风控处置")
+        }
+        return root
+    }
+
     private enum SwapOrderMode { case live, demo }
 
     private func placeSwapOrder(_ request: LiveOrderRequest, mode: SwapOrderMode) async throws -> LiveOrderCommandResult {
@@ -311,6 +342,12 @@ public struct ATKClient: Sendable {
         if let positionSide = request.positionSide, !positionSide.isEmpty { arguments += ["--posSide", positionSide] }
         if request.reduceOnly { arguments.append("--reduceOnly") }
         if let price = request.price { arguments += ["--px", Self.decimalText(price)] }
+        if let takeProfit = request.takeProfitTriggerPrice {
+            arguments += ["--tpTriggerPx", Self.decimalText(takeProfit), "--tpOrdPx", "-1", "--tpOrdKind", "condition", "--tpTriggerPxType", "mark"]
+        }
+        if let stopLoss = request.stopLossTriggerPrice {
+            arguments += ["--slTriggerPx", Self.decimalText(stopLoss), "--slOrdPx", "-1", "--slTriggerPxType", "mark"]
+        }
         let root = try await runJSON(arguments)
         let row = Self.firstJSONObject(root) ?? [:]
         let code = row["sCode"] as? String ?? row["code"] as? String

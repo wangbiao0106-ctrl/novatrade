@@ -249,8 +249,10 @@ public struct LiveOrderRequest: Codable, Equatable, Sendable {
     public let marginMode: String
     public let reduceOnly: Bool
     public let price: Decimal?
+    public let takeProfitTriggerPrice: Decimal?
+    public let stopLossTriggerPrice: Decimal?
 
-    public init(instrumentID: String, side: String, orderType: String = "market", quantity: Decimal, positionSide: String? = nil, marginMode: String = "cross", reduceOnly: Bool = false, price: Decimal? = nil) {
+    public init(instrumentID: String, side: String, orderType: String = "market", quantity: Decimal, positionSide: String? = nil, marginMode: String = "cross", reduceOnly: Bool = false, price: Decimal? = nil, takeProfitTriggerPrice: Decimal? = nil, stopLossTriggerPrice: Decimal? = nil) {
         self.instrumentID = instrumentID
         self.side = side
         self.orderType = orderType
@@ -259,6 +261,41 @@ public struct LiveOrderRequest: Codable, Equatable, Sendable {
         self.marginMode = marginMode
         self.reduceOnly = reduceOnly
         self.price = price
+        self.takeProfitTriggerPrice = takeProfitTriggerPrice
+        self.stopLossTriggerPrice = stopLossTriggerPrice
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case instrumentID, side, orderType, quantity, positionSide, marginMode, reduceOnly, price
+        case takeProfitTriggerPrice, stopLossTriggerPrice
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        instrumentID = try container.decode(String.self, forKey: .instrumentID)
+        side = try container.decode(String.self, forKey: .side)
+        orderType = try container.decodeIfPresent(String.self, forKey: .orderType) ?? "market"
+        quantity = try container.decode(Decimal.self, forKey: .quantity)
+        positionSide = try container.decodeIfPresent(String.self, forKey: .positionSide)
+        marginMode = try container.decodeIfPresent(String.self, forKey: .marginMode) ?? "cross"
+        reduceOnly = try container.decodeIfPresent(Bool.self, forKey: .reduceOnly) ?? false
+        price = try container.decodeIfPresent(Decimal.self, forKey: .price)
+        takeProfitTriggerPrice = try container.decodeIfPresent(Decimal.self, forKey: .takeProfitTriggerPrice)
+        stopLossTriggerPrice = try container.decodeIfPresent(Decimal.self, forKey: .stopLossTriggerPrice)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(instrumentID, forKey: .instrumentID)
+        try container.encode(side, forKey: .side)
+        try container.encode(orderType, forKey: .orderType)
+        try container.encode(quantity, forKey: .quantity)
+        try container.encodeIfPresent(positionSide, forKey: .positionSide)
+        try container.encode(marginMode, forKey: .marginMode)
+        try container.encode(reduceOnly, forKey: .reduceOnly)
+        try container.encodeIfPresent(price, forKey: .price)
+        try container.encodeIfPresent(takeProfitTriggerPrice, forKey: .takeProfitTriggerPrice)
+        try container.encodeIfPresent(stopLossTriggerPrice, forKey: .stopLossTriggerPrice)
     }
 }
 
@@ -292,16 +329,70 @@ public struct LiveTradingStatus: Codable, Equatable, Sendable {
 }
 
 public enum StrategyType: String, Codable, CaseIterable, Sendable {
-    case trendFollowing, rsiReversal, sweepReversalShort
+    case sweepReversalShort
+    case emaAltcoinLong
+
+    public static var availableCases: [StrategyType] { [.sweepReversalShort, .emaAltcoinLong] }
 
     /// Stable machine-readable identifier. Keep this independent from UI copy.
     public var identifier: String { rawValue }
 
+    /// The lab directory that owns this rule's STRATEGY.md / config.
+    public var labDirectory: String {
+        switch self {
+        case .sweepReversalShort: return "strategies/sweep_reversal_short"
+        case .emaAltcoinLong: return "strategies/ema_altcoin_long"
+        }
+    }
+
     public var displayName: String {
         switch self {
-        case .trendFollowing: return "EMA 20 / EMA 60 金叉"
-        case .rsiReversal: return "RSI < 28 买入"
         case .sweepReversalShort: return "山寨币二次扫顶做空（1h）"
+        case .emaAltcoinLong: return "双均线交易山寨币多（1h）"
+        }
+    }
+
+    /// 运行时参数默认值，逐项复制自各自实验室 `config/strategy.json` 的
+    /// `signal_parameters`（机器参数真源）。领域层持有它是为了让 App 与
+    /// TradingService 共用同一份默认值，避免两处漂移；
+    /// `scripts/validate_strategy_sync.py` 会比对这里的值与实验室文件。
+    public var defaultParameters: [String: Double] {
+        switch self {
+        case .sweepReversalShort:
+            return [
+                "L": 10, "R": 5, "majorWindow": 288, "sweepWait": 96, "rejectWait": 5,
+                "resweepWait": 12, "rsiMin": 62, "volMult": 1.5, "rsDeep": 0.2,
+                "atrPeriod": 14, "bufATR": 0.5, "tpMult": 2.2, "minATRPct": 0.5,
+                "maxRiskATR": 5.0, "btcGateEnabled": 1,
+                "entryTimeframeMinutes": 60, "confirmationTimeframeMinutes": 15,
+                "confirmationWindowMinutes": 60,
+            ]
+        case .emaAltcoinLong:
+            return [
+                "emaFast": 20, "emaSlow": 60, "emaTrend": 120, "atrPeriod": 14,
+                "clusterATR": 0.75, "breakoutBars": 4, "pullbackBars": 6, "pullbackATR": 0.35,
+                "minATRPct": 0.4, "minBreakoutATR": 0.3, "minSpreadATR": 0.5,
+                "stopATR": 1.25, "targetR": 2.5, "maxHoldBars": 96,
+                "minimumHistoryBars": 120, "gateSlopeBars": 6,
+                // 组合上限：6 个并发 × 每笔 0.5% 风险 = 池权益 3% 的开放止损风险。
+                "maxConcurrentPositions": 6,
+            ]
+        }
+    }
+
+    /// 实验室给出的单笔风险上限（%），运行时会按此值收敛用户输入。
+    public var maxRiskPercent: Double {
+        switch self {
+        case .sweepReversalShort: return 1.0
+        case .emaAltcoinLong: return 0.5
+        }
+    }
+
+    /// 实验室给出的单笔风险默认值（%）。
+    public var defaultRiskPercent: Double {
+        switch self {
+        case .sweepReversalShort: return 1.0
+        case .emaAltcoinLong: return 0.5
         }
     }
 }
@@ -322,7 +413,7 @@ public enum StrategyUniverseCategory: String, Codable, CaseIterable, Sendable {
     public var displayName: String {
         switch self {
         case .mainstream: return "主流币"
-        case .hotAltcoins: return "热门山寨币"
+        case .hotAltcoins: return "热门榜前 20 个山寨币"
         case .highGain60: return "高涨幅币（24h +60%）"
         case .highGain100: return "高涨幅币（24h +100%）"
         }
@@ -361,7 +452,7 @@ public struct StrategyScope: Codable, Equatable, Sendable {
             return instrumentIDs.filter { available.isEmpty || available.contains($0) }
         case .dynamicCategory:
             guard let category else { return [] }
-            return Self.contracts(for: category, in: contracts).prefix(50).map(\.id)
+            return Self.contracts(for: category, in: contracts).prefix(20).map(\.id)
         }
     }
 
@@ -369,20 +460,13 @@ public struct StrategyScope: Codable, Equatable, Sendable {
         resolvedInstrumentIDs(from: contracts).contains(instrumentID)
     }
 
-    private static let mainstreamSymbols: Set<String> = [
-        "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "TON", "AVAX",
-        "LINK", "DOT", "LTC", "BCH", "ETC", "UNI", "ATOM", "NEAR", "APT", "SUI"
-    ]
-
     private static func contracts(for category: StrategyUniverseCategory, in contracts: [ContractMarket]) -> [ContractMarket] {
         switch category {
         case .mainstream:
-            return contracts.filter { mainstreamSymbols.contains($0.baseCurrency.uppercased()) }
+            return contracts.filter { StrategyUniverseRules.mainstreamSymbols.contains($0.baseCurrency.uppercased()) }
         case .hotAltcoins:
-            let altcoins = contracts.filter { !mainstreamSymbols.contains($0.baseCurrency.uppercased()) }
-            let tagged = altcoins.filter { $0.category == "热门" }
-            let candidates = tagged.count >= 3 ? tagged : altcoins
-            return Array(candidates.sorted { $0.volume24h > $1.volume24h }.prefix(30))
+            let altcoins = contracts.filter(StrategyUniverseRules.isEligibleHotAltcoin)
+            return altcoins.sorted { $0.volume24h > $1.volume24h }
         case .highGain60:
             return contracts.filter { $0.changePercent >= 60 }.sorted { $0.changePercent > $1.changePercent }
         case .highGain100:
@@ -402,6 +486,9 @@ public struct StrategyConfig: Codable, Equatable, Sendable, Identifiable {
     public var stopLossPercent: Double
     public var takeProfitPercent: Double
     public var riskPercent: Double
+    /// Percentage of account equity assigned to this strategy instance's
+    /// isolated capital pool. This is separate from the per-trade risk cap.
+    public var capitalPoolPercent: Double
     public var cooldownBars: Int
     public var trailingStopPercent: Double
     public var scope: StrategyScope
@@ -412,14 +499,89 @@ public struct StrategyConfig: Codable, Equatable, Sendable, Identifiable {
     /// User-facing strategy name. This may change without changing `type`.
     public var displayName: String { name }
 
-    public init(id: UUID = UUID(), name: String, instrumentID: String, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, stopLossPercent: Double = 1.5, takeProfitPercent: Double = 3, riskPercent: Double = 1, cooldownBars: Int = 3, trailingStopPercent: Double = 1) {
+    public init(id: UUID = UUID(), name: String, instrumentID: String, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, stopLossPercent: Double = 1.5, takeProfitPercent: Double = 3, riskPercent: Double = 1, capitalPoolPercent: Double = 100, cooldownBars: Int = 3, trailingStopPercent: Double = 1) {
         self.id = id; self.name = name; self.instrumentID = instrumentID; self.interval = interval; self.type = type; self.parameters = parameters; self.enabled = enabled
-        self.stopLossPercent = stopLossPercent; self.takeProfitPercent = takeProfitPercent; self.riskPercent = riskPercent; self.cooldownBars = cooldownBars; self.trailingStopPercent = trailingStopPercent; self.scope = .single(instrumentID)
+        self.stopLossPercent = stopLossPercent; self.takeProfitPercent = takeProfitPercent; self.riskPercent = riskPercent; self.capitalPoolPercent = capitalPoolPercent; self.cooldownBars = cooldownBars; self.trailingStopPercent = trailingStopPercent; self.scope = .single(instrumentID)
     }
 
-    public init(id: UUID = UUID(), name: String, scope: StrategyScope, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, stopLossPercent: Double = 1.5, takeProfitPercent: Double = 3, riskPercent: Double = 1, cooldownBars: Int = 3, trailingStopPercent: Double = 1) {
+    public init(id: UUID = UUID(), name: String, scope: StrategyScope, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, stopLossPercent: Double = 1.5, takeProfitPercent: Double = 3, riskPercent: Double = 1, capitalPoolPercent: Double = 100, cooldownBars: Int = 3, trailingStopPercent: Double = 1) {
         self.id = id; self.name = name; self.instrumentID = scope.instrumentIDs.first ?? ""; self.interval = interval; self.type = type; self.parameters = parameters; self.enabled = enabled
-        self.stopLossPercent = stopLossPercent; self.takeProfitPercent = takeProfitPercent; self.riskPercent = riskPercent; self.cooldownBars = cooldownBars; self.trailingStopPercent = trailingStopPercent; self.scope = scope
+        self.stopLossPercent = stopLossPercent; self.takeProfitPercent = takeProfitPercent; self.riskPercent = riskPercent; self.capitalPoolPercent = capitalPoolPercent; self.cooldownBars = cooldownBars; self.trailingStopPercent = trailingStopPercent; self.scope = scope
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, instrumentID, interval, type, parameters, enabled
+        case stopLossPercent, takeProfitPercent, riskPercent, capitalPoolPercent
+        case cooldownBars, trailingStopPercent, scope
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        instrumentID = try container.decodeIfPresent(String.self, forKey: .instrumentID) ?? ""
+        interval = try container.decode(KlineInterval.self, forKey: .interval)
+        type = try container.decode(StrategyType.self, forKey: .type)
+        parameters = try container.decodeIfPresent([String: Double].self, forKey: .parameters) ?? [:]
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        stopLossPercent = try container.decodeIfPresent(Double.self, forKey: .stopLossPercent) ?? 1.5
+        takeProfitPercent = try container.decodeIfPresent(Double.self, forKey: .takeProfitPercent) ?? 3
+        riskPercent = try container.decodeIfPresent(Double.self, forKey: .riskPercent) ?? 1
+        capitalPoolPercent = try container.decodeIfPresent(Double.self, forKey: .capitalPoolPercent) ?? 100
+        cooldownBars = try container.decodeIfPresent(Int.self, forKey: .cooldownBars) ?? 3
+        trailingStopPercent = try container.decodeIfPresent(Double.self, forKey: .trailingStopPercent) ?? 1
+        scope = try container.decodeIfPresent(StrategyScope.self, forKey: .scope) ?? .single(instrumentID)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(instrumentID, forKey: .instrumentID)
+        try container.encode(interval, forKey: .interval)
+        try container.encode(type, forKey: .type)
+        try container.encode(parameters, forKey: .parameters)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(stopLossPercent, forKey: .stopLossPercent)
+        try container.encode(takeProfitPercent, forKey: .takeProfitPercent)
+        try container.encode(riskPercent, forKey: .riskPercent)
+        try container.encode(capitalPoolPercent, forKey: .capitalPoolPercent)
+        try container.encode(cooldownBars, forKey: .cooldownBars)
+        try container.encode(trailingStopPercent, forKey: .trailingStopPercent)
+        try container.encode(scope, forKey: .scope)
+    }
+}
+
+public struct StrategyCapitalSnapshot: Codable, Equatable, Sendable, Identifiable {
+    public let strategyID: UUID
+    public var id: UUID { strategyID }
+    public let allocationPercent: Decimal
+    public let initialCapital: Decimal
+    public let equity: Decimal
+    public let reservedCapital: Decimal
+    public let availableCapital: Decimal
+    public let realizedPnL: Decimal
+    public let unrealizedPnL: Decimal
+    public let rolloverCount: Int
+    public let updatedAt: Date
+    /// 未平仓订单的止损风险合计（|入场价 − 止损价| × 数量）。
+    public let openRisk: Decimal
+    /// 未平仓订单数。
+    public let openPositions: Int
+
+    public init(strategyID: UUID, allocationPercent: Decimal = 100, initialCapital: Decimal = 0, equity: Decimal = 0, reservedCapital: Decimal = 0, availableCapital: Decimal? = nil, realizedPnL: Decimal = 0, unrealizedPnL: Decimal = 0, rolloverCount: Int = 0, updatedAt: Date = .now, openRisk: Decimal = 0, openPositions: Int = 0) {
+        self.strategyID = strategyID
+        self.allocationPercent = allocationPercent
+        self.initialCapital = initialCapital
+        self.equity = equity
+        self.reservedCapital = reservedCapital
+        self.availableCapital = availableCapital ?? max(0, equity - reservedCapital)
+        self.realizedPnL = realizedPnL
+        self.unrealizedPnL = unrealizedPnL
+        self.rolloverCount = rolloverCount
+        self.updatedAt = updatedAt
+        self.openRisk = openRisk
+        self.openPositions = openPositions
     }
 }
 
@@ -462,9 +624,19 @@ public struct StrategyStatus: Codable, Equatable, Sendable, Identifiable {
     public let pnl: Decimal
     public let lastSignal: StrategySignal?
     public let indicators: [String: [Double]]
+    /// 最近一次真正被处理的已确认 K 线时间戳。评估必须按 bar 幂等：同一根 K 线
+    /// 被重复评估（REST 刷新图表、重复收盘事件）时不得再推进冷却或指标状态。
+    public let lastEvaluatedBar: Date?
 
-    public init(id: UUID, state: StrategyState, direction: String? = nil, cooldown: Int = 0, pnl: Decimal = 0, lastSignal: StrategySignal? = nil, indicators: [String: [Double]] = [:]) {
-        self.id = id; self.state = state; self.direction = direction; self.cooldown = cooldown; self.pnl = pnl; self.lastSignal = lastSignal; self.indicators = indicators
+    public init(id: UUID, state: StrategyState, direction: String? = nil, cooldown: Int = 0, pnl: Decimal = 0, lastSignal: StrategySignal? = nil, indicators: [String: [Double]] = [:], lastEvaluatedBar: Date? = nil) {
+        self.id = id; self.state = state; self.direction = direction; self.cooldown = cooldown; self.pnl = pnl; self.lastSignal = lastSignal; self.indicators = indicators; self.lastEvaluatedBar = lastEvaluatedBar
+    }
+
+    /// Returns the same status re-marked as evaluated at `bar`. Every status the
+    /// engine returns goes through this, so the idempotency guard cannot be
+    /// reset to "never evaluated" by accident.
+    public func evaluated(at bar: Date?) -> StrategyStatus {
+        StrategyStatus(id: id, state: state, direction: direction, cooldown: cooldown, pnl: pnl, lastSignal: lastSignal, indicators: indicators, lastEvaluatedBar: bar)
     }
 }
 
@@ -472,13 +644,50 @@ public struct RiskSnapshot: Codable, Equatable, Sendable {
     public let equity: Decimal
     public let equityPeak: Decimal
     public let dayStartEquity: Decimal
+    /// Calendar-day boundary used for `dayStartEquity`. Optional for decoding
+    /// snapshots written before the boundary was persisted.
+    public let dayStartAt: Date?
     public let dailyPnLPercent: Decimal
     public let drawdownPercent: Decimal
     public let killSwitch: Bool
     public let reason: String?
+    /// Persisted pool state lets a service restart continue compounding each
+    /// strategy instance from its own realized equity.
+    public let strategyCapitals: [StrategyCapitalSnapshot]
 
-    public init(equity: Decimal = 0, equityPeak: Decimal = 0, dayStartEquity: Decimal = 0, dailyPnLPercent: Decimal = 0, drawdownPercent: Decimal = 0, killSwitch: Bool = false, reason: String? = nil) {
-        self.equity = equity; self.equityPeak = equityPeak; self.dayStartEquity = dayStartEquity; self.dailyPnLPercent = dailyPnLPercent; self.drawdownPercent = drawdownPercent; self.killSwitch = killSwitch; self.reason = reason
+    private enum CodingKeys: String, CodingKey {
+        case equity, equityPeak, dayStartEquity, dayStartAt, dailyPnLPercent
+        case drawdownPercent, killSwitch, reason, strategyCapitals
+    }
+
+    public init(equity: Decimal = 0, equityPeak: Decimal = 0, dayStartEquity: Decimal = 0, dayStartAt: Date? = nil, dailyPnLPercent: Decimal = 0, drawdownPercent: Decimal = 0, killSwitch: Bool = false, reason: String? = nil, strategyCapitals: [StrategyCapitalSnapshot] = []) {
+        self.equity = equity; self.equityPeak = equityPeak; self.dayStartEquity = dayStartEquity; self.dayStartAt = dayStartAt; self.dailyPnLPercent = dailyPnLPercent; self.drawdownPercent = drawdownPercent; self.killSwitch = killSwitch; self.reason = reason; self.strategyCapitals = strategyCapitals
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        equity = try container.decodeIfPresent(Decimal.self, forKey: .equity) ?? 0
+        equityPeak = try container.decodeIfPresent(Decimal.self, forKey: .equityPeak) ?? 0
+        dayStartEquity = try container.decodeIfPresent(Decimal.self, forKey: .dayStartEquity) ?? 0
+        dayStartAt = try container.decodeIfPresent(Date.self, forKey: .dayStartAt)
+        dailyPnLPercent = try container.decodeIfPresent(Decimal.self, forKey: .dailyPnLPercent) ?? 0
+        drawdownPercent = try container.decodeIfPresent(Decimal.self, forKey: .drawdownPercent) ?? 0
+        killSwitch = try container.decodeIfPresent(Bool.self, forKey: .killSwitch) ?? false
+        reason = try container.decodeIfPresent(String.self, forKey: .reason)
+        strategyCapitals = try container.decodeIfPresent([StrategyCapitalSnapshot].self, forKey: .strategyCapitals) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(equity, forKey: .equity)
+        try container.encode(equityPeak, forKey: .equityPeak)
+        try container.encode(dayStartEquity, forKey: .dayStartEquity)
+        try container.encodeIfPresent(dayStartAt, forKey: .dayStartAt)
+        try container.encode(dailyPnLPercent, forKey: .dailyPnLPercent)
+        try container.encode(drawdownPercent, forKey: .drawdownPercent)
+        try container.encode(killSwitch, forKey: .killSwitch)
+        try container.encodeIfPresent(reason, forKey: .reason)
+        try container.encode(strategyCapitals, forKey: .strategyCapitals)
     }
 }
 

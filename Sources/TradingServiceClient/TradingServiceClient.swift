@@ -75,6 +75,7 @@ public actor TradingServiceClient {
     public func appendLog(_ log: RuntimeLog) async throws -> RuntimeLog { try await post("/api/v1/logs", body: log) }
     public func strategies() async throws -> [StrategyConfig] { try await get(path: "/api/v1/strategies") }
     public func strategyStatuses() async throws -> [StrategyStatus] { try await get(path: "/api/v1/strategies/status") }
+    public func strategyCapital() async throws -> [StrategyCapitalSnapshot] { try await get(path: "/api/v1/strategies/capital") }
     public func risk() async throws -> RiskSnapshot { try await get(path: "/api/v1/risk") }
     public func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig { try await post("/api/v1/strategies", body: config) }
     public func updateStrategy(_ config: StrategyConfig) async throws -> StrategyConfig { try await request(path: "/api/v1/strategies/\(config.id.uuidString)", method: "PATCH", body: config) }
