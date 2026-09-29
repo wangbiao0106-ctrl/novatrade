@@ -38,19 +38,12 @@ SPLIT_TS = int(pd.Timestamp("2026-07-29", tz="UTC").value // 1e6)
 HOUR_MS = 3_600_000
 MINUTE15_MS = 900_000
 
-BASE_CFG = {
-    "L": 10, "R": 5, "sweep_wait": 96, "reject_wait": 5,
-    "retest_entry": 1, "retest_wait": 12, "retest_mode": "resweep",
-    "major_wins": (288,), "mom_wins": (96,), "sma_lens": (200,),
-    "eqh_wins": (96,),
-}
-BASE_FILTER = {
-    "major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.2,
-    "btc_down": 1, "rsi_s_min": 62, "vol_mult": 1.5,
-}
-BUF_ATR = 0.5
-TP_R = 2.2
-FEE = 0.0005
+# 检测/过滤/成本参数全部来自实验室机器真源 config/strategy.json：
+# 研究对照不得各写一套参数，否则改了规则而证据不跟着变。
+BASE_CFG, BASE_FILTER, _COSTS = E.lab_parameters()
+BUF_ATR = _COSTS["buf_atr"]
+TP_R = _COSTS["tp_mult"]
+FEE = _COSTS["fee"]
 
 
 @dataclass

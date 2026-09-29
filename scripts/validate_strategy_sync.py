@@ -367,6 +367,16 @@ def main() -> int:
         fail(errors, "实验室实时扫描器默认池不是 hot20")
     if "universe.json" not in live_signal or "EXCLUDED_BASES" not in live_signal:
         fail(errors, "实验室实时扫描器未复用 universe.json 的排除清单")
+    # 研究脚本不得各自硬编码一套参数：必须从 config/strategy.json 派生，否则改了
+    # 规则而对照实验不跟着变，证据会与规则脱钩。
+    for script in ("engine.py", "tune_execution.py", "report_live_rule.py", "final_report.py",
+                   "liquidity_tiers.py", "fusion.py"):
+        source = (LAB / "research" / script).read_text()
+        if script == "engine.py":
+            if "def lab_parameters" not in source:
+                fail(errors, "engine.py 缺少 lab_parameters 参数真源入口")
+        elif "E.lab_parameters()" not in source:
+            fail(errors, f"research/{script} 未从 config/strategy.json 派生参数")
     # 上线规则的绩效证据必须存在，门控必须 fail-closed（唯一实现在 engine.py 里），
     # 且文档口径要与报告一致。
     evidence_path = LAB / "research" / "report_live_rule.py"

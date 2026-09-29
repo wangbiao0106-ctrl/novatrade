@@ -38,20 +38,14 @@ CONFIG = os.path.join(ROOT, "config")
 RESULTS = os.path.join(ROOT, "results")
 SPLIT_TS = int(pd.Timestamp("2026-07-29", tz="UTC").value // 1e6)
 
-# 与 config/strategy.json 的 signal_parameters 一致。
-DETECT = {
-    "L": 10, "R": 5, "sweep_wait": 96, "reject_wait": 5,
-    "retest_entry": 1, "retest_wait": 12, "retest_mode": "resweep",
-    "major_wins": (288,), "mom_wins": (96,), "sma_lens": (200,), "eqh_wins": (96,),
-}
-FILTER = {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.2,
-          "btc_down": 1, "rsi_s_min": 62, "vol_mult": 1.5}
-BUF_ATR = 0.5
-TP_R = 2.2
-MAX_HOLD_15M = 384          # 96 根 1h
-FEE = 0.0005
-MIN_ATR_PCT = 0.5 / 100     # config: min_atr_pct
-MAX_RISK_ATR = 5.0          # config: max_risk_atr
+# 参数全部来自实验室机器真源 config/strategy.json（唯一真源）。
+DETECT, FILTER, COSTS = E.lab_parameters()
+BUF_ATR = COSTS["buf_atr"]
+TP_R = COSTS["tp_mult"]
+MAX_HOLD_15M = COSTS["max_hold_bars"] * 4   # 96 根 1h = 384 根 15m
+FEE = COSTS["fee"]
+MIN_ATR_PCT = COSTS["min_atr_pct"] / 100    # config 里是百分数
+MAX_RISK_ATR = COSTS["max_risk_atr"]
 
 
 def btc_flags(ev, btc):

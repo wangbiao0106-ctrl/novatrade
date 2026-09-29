@@ -9,7 +9,7 @@
   5. 止损：扫顶期间最高价 ext + buf_atr*ATR ；止盈：入场价 - tp_mult*风险
   6. 最多持有 max_hold 根 K 线，超时以收盘价离场
 """
-import os, glob
+import os, glob, json
 import numpy as np
 import pandas as pd
 from numpy.lib.stride_tricks import sliding_window_view
@@ -67,6 +67,40 @@ def rolling_min(l, w):
 def sma(x, n):
     # 前 n 根用扩展均值（因果，无未来函数）
     return pd.Series(x).rolling(n, min_periods=1).mean().to_numpy()
+
+LAB_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "strategy.json")
+
+def lab_parameters(config_path=LAB_CONFIG_PATH):
+    """从实验室机器参数真源派生 (detect, filter, costs)。
+
+    研究脚本不得各自硬编码一套参数：`config/strategy.json` 是唯一机器真源，改了它
+    所有对照实验必须跟着走，否则证据会和已上线规则脱钩（曾经因此出现过确认窗口、
+    门控口径与参数三处不一致）。只有纯研究用的特征窗口（`mom_wins`/`sma_lens`/
+    `eqh_wins`）留在代码里，它们不参与信号过滤。
+    """
+    with open(config_path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+    signal = payload["signal_parameters"]
+    costs = payload.get("costs", {})
+    detect = {
+        "L": int(signal["L"]), "R": int(signal["R"]),
+        "sweep_wait": int(signal["sweep_wait"]), "reject_wait": int(signal["reject_wait"]),
+        "retest_entry": 1, "retest_wait": int(signal["resweep_wait"]), "retest_mode": "resweep",
+        "major_wins": (int(signal["major_window"]),), "mom_wins": (96,),
+        "sma_lens": (200,), "eqh_wins": (96,),
+    }
+    filters = {
+        "major_win": int(signal["major_window"]), "rs_lower_ext": 1,
+        "rs_deep": float(signal["resweep_deep_atr"]), "btc_down": 1,
+        "rsi_s_min": float(signal["rsi_min"]), "vol_mult": float(signal["volume_multiple"]),
+    }
+    costs_out = {
+        "atr_period": int(signal["atr_period"]), "buf_atr": float(signal["buffer_atr"]),
+        "tp_mult": float(signal["take_profit_r"]), "min_atr_pct": float(signal["min_atr_pct"]),
+        "max_risk_atr": float(signal["max_risk_atr"]), "max_hold_bars": int(payload.get("position_management", {}).get("time_exit_bars", 96)),
+        "fee": float(costs.get("fee_rate_one_way", 0.0005)),
+    }
+    return detect, filters, costs_out
 
 def btc_gate_flags(ev, btc, min_history=200):
     """BTC 门控标记的唯一实现，fail-closed，与运行时 `btcGateAllows` 一致。

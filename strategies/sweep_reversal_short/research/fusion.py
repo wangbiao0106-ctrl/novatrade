@@ -11,12 +11,8 @@ import engine as E
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results")
 CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config")
 SPLIT_TS = int(pd.Timestamp("2026-07-29", tz="UTC").value // 1e6)
-CFG = {"L": 10, "R": 5, "sweep_wait": 96, "reject_wait": 5,
-       "retest_entry": 1, "retest_wait": 12, "retest_mode": "resweep",
-       "major_wins": (288,), "mom_wins": (96,), "sma_lens": (200,),
-       "eqh_wins": (96,)}
-FILT = {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.2,
-        "btc_down": 1, "rsi_s_min": 62, "vol_mult": 1.5}
+# 参数来自实验室机器真源 config/strategy.json。
+CFG, FILT, _COSTS = E.lab_parameters()
 
 
 def collect_events():

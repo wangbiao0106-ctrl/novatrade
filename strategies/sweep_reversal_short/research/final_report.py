@@ -10,13 +10,9 @@ CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config"
 SPLIT_TS = int(pd.Timestamp("2026-07-29", tz="UTC").value // 1e6)
 
 # 推荐配置：BTC 熊市门控 + 二次扫顶 + 2.2R
-CFG = {"L": 10, "R": 5, "sweep_wait": 96, "reject_wait": 5,
-       "retest_entry": 1, "retest_wait": 12, "retest_mode": "resweep",
-       "major_wins": (288,), "mom_wins": (96,), "sma_lens": (200,),
-       "eqh_wins": (96,)}
-FILT = {"major_win": 288, "rs_lower_ext": 1, "rs_deep": 0.2,
-        "btc_down": 1, "rsi_s_min": 62, "vol_mult": 1.5}
-BUF, TP, MAX_HOLD, FEE = 0.5, 2.2, 96, 0.0005
+# 参数来自实验室机器真源 config/strategy.json。
+CFG, FILT, _COSTS = E.lab_parameters()
+BUF, TP, MAX_HOLD, FEE = _COSTS["buf_atr"], _COSTS["tp_mult"], _COSTS["max_hold_bars"], _COSTS["fee"]
 
 
 def main(pool="lowmid"):
