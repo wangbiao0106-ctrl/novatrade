@@ -26,6 +26,7 @@ from typing import Any
 API_BASE = "https://www.okx.com/api/v5"
 UTC = timezone.utc
 PAGE_SIZE = 300
+BAR_MILLISECONDS = {"5m": 5 * 60 * 1000}
 
 
 def utc_now() -> datetime:
@@ -168,25 +169,33 @@ def output_filename(symbol: str, bar: str, start: datetime, end: datetime) -> st
 
 
 def existing_result(symbol: str, filename: str, destination: Path) -> ContractResult | None:
-    count = 0
-    first: str | None = None
-    last: str | None = None
     try:
-        with gzip.open(destination, "rt", encoding="utf-8") as stream:
-            for line in stream:
-                if not line.strip():
-                    continue
-                candle = json.loads(line)
-                timestamp = candle.get("timestamp")
-                if first is None:
-                    first = timestamp
-                last = timestamp
-                count += 1
-        return ContractResult(symbol, filename, count, first, last, "skipped_existing")
+        candles = read_candles(destination)
+        timestamps = sorted(candles)
+        return ContractResult(
+            symbol,
+            filename,
+            len(timestamps),
+            candles[timestamps[0]]["timestamp"] if timestamps else None,
+            candles[timestamps[-1]]["timestamp"] if timestamps else None,
+            "skipped_existing",
+        )
     except Exception:
         # A corrupt or truncated prior file is never treated as complete; the
         # caller will fetch into a temporary file and replace it atomically.
         return None
+
+
+def read_candles(path: Path) -> dict[int, dict[str, Any]]:
+    candles: dict[int, dict[str, Any]] = {}
+    with gzip.open(path, "rt", encoding="utf-8") as stream:
+        for line in stream:
+            if not line.strip():
+                continue
+            candle = json.loads(line)
+            timestamp_ms = int(candle["timestamp_ms"])
+            candles[timestamp_ms] = candle
+    return candles
 
 
 def export_symbol(
@@ -198,14 +207,25 @@ def export_symbol(
     bar: str,
     limiter: RequestLimiter,
     force: bool,
+    update_from: Path | None = None,
 ) -> ContractResult:
     destination = output_dir / filename
-    if destination.exists() and not force:
+    if update_from is None and destination.exists() and not force:
         if existing := existing_result(symbol, filename, destination):
             return existing
     temporary = destination.with_suffix(destination.suffix + ".part")
     try:
-        candles = fetch_candles(symbol, start_ms, end_ms, bar, limiter)
+        previous: dict[int, dict[str, Any]] = {}
+        fetch_start_ms = start_ms
+        if update_from is not None and update_from.exists():
+            previous = read_candles(update_from)
+            if previous:
+                interval_ms = BAR_MILLISECONDS[bar]
+                fetch_start_ms = max(start_ms, max(previous) - interval_ms)
+        fetched = fetch_candles(symbol, fetch_start_ms, end_ms, bar, limiter)
+        merged = previous
+        merged.update({candle["timestamp_ms"]: candle for candle in fetched})
+        candles = [merged[key] for key in sorted(merged) if start_ms <= key <= end_ms]
         with gzip.open(temporary, "wt", encoding="utf-8", newline="\n") as stream:
             for candle in candles:
                 stream.write(json.dumps(candle, ensure_ascii=False, separators=(",", ":")))
@@ -217,7 +237,7 @@ def export_symbol(
             len(candles),
             candles[0]["timestamp"] if candles else None,
             candles[-1]["timestamp"] if candles else None,
-            "exported",
+            "updated" if update_from is not None else "exported",
         )
     except Exception as error:
         temporary.unlink(missing_ok=True)
@@ -233,6 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--symbols", nargs="+", help="optional instrument IDs; defaults to every live USDT linear swap")
     parser.add_argument("--start", help="UTC ISO-8601 start; overrides --days")
     parser.add_argument("--end", help="UTC ISO-8601 end; defaults to now")
+    parser.add_argument("--update", action="store_true", help="extend the existing manifest to the latest time without redownloading history")
     parser.add_argument("--force", action="store_true", help="redownload files that already exist")
     return parser
 
@@ -247,10 +268,29 @@ def main() -> int:
         raise SystemExit("start must be earlier than end")
     output_dir = args.output.expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_dir / "manifest.json"
+    previous_manifest: dict[str, Any] | None = None
+    if args.update:
+        if not manifest_path.exists():
+            raise SystemExit(f"--update requires an existing manifest: {manifest_path}")
+        previous_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if args.start:
+            raise SystemExit("--update uses the existing manifest start; remove --start")
+        if args.symbols:
+            raise SystemExit("--update refreshes the complete manifest; remove --symbols")
     limiter = RequestLimiter()
     symbols = sorted(set(args.symbols)) if args.symbols else live_swap_symbols(limiter)
     if not symbols:
         raise SystemExit("no live USDT linear swap contracts found")
+    if args.update:
+        start = parse_utc(previous_manifest["start"])
+    if start >= end:
+        raise SystemExit("update end must be later than the existing manifest start")
+    previous_files = {
+        entry["instrument_id"]: entry["file"]
+        for entry in (previous_manifest or {}).get("contracts", [])
+        if entry.get("instrument_id") and entry.get("file")
+    }
     filename_by_symbol = {symbol: output_filename(symbol, args.bar, start, end) for symbol in symbols}
     print(f"exporting {len(symbols)} contracts, {start.isoformat()} .. {end.isoformat()}, bar={args.bar}")
     results: list[ContractResult] = []
@@ -266,6 +306,7 @@ def main() -> int:
                 args.bar,
                 limiter,
                 args.force,
+                output_dir / previous_files[symbol] if args.update and symbol in previous_files else None,
             )
             for symbol in symbols
         ]
@@ -289,17 +330,23 @@ def main() -> int:
         "contracts": [asdict(result) for result in results],
         "summary": {
             "requested_contracts": len(results),
-            "exported_contracts": sum(result.status == "exported" for result in results),
+            "exported_contracts": sum(result.status in {"exported", "updated"} for result in results),
+            "updated_contracts": sum(result.status == "updated" for result in results),
             "skipped_contracts": sum(result.status == "skipped_existing" for result in results),
             "failed_contracts": sum(result.status == "failed" for result in results),
             "total_candles": sum(max(result.candle_count, 0) for result in results),
         },
     }
-    manifest_path = output_dir / "manifest.json"
     temporary_manifest = manifest_path.with_suffix(".json.part")
     temporary_manifest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(temporary_manifest, manifest_path)
     failed = manifest["summary"]["failed_contracts"]
+    if args.update and not failed:
+        current_files = {result.file for result in results if result.file}
+        old_files = {entry.get("file") for entry in (previous_manifest or {}).get("contracts", [])}
+        for old_file in old_files - current_files:
+            if old_file:
+                (output_dir / old_file).unlink(missing_ok=True)
     print(f"manifest: {manifest_path} ({len(results)} contracts, failed={failed})")
     return 1 if failed else 0
 
