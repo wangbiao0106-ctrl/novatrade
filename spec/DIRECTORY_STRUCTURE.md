@@ -58,7 +58,7 @@ spec/                               稳定的工程规范和接口约定
 
 | 目录 | 用途 | 状态 |
 | --- | --- | --- |
-| `strategies/hlsr/` | 高位流动性扫顶反转及其 15 分钟回测 | 研究中，可生成信号；回测数字在 2026-09 修正拒绝评分与选币口径后重跑 |
+| `strategies/hlsr/` | 高位流动性扫顶反转及其 15 分钟回测 | 研究中，可生成信号；`STRATEGY.md` 是人类规则真源、`config/strategy.json` 是机器参数真源（四个参数块都被源码读取） |
 | `strategies/sweep_reversal_short/` | 山寨币二次扫顶做空（1h） | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.3）|
 | `strategies/ema_altcoin_long/` | 双均线交易山寨币多（1h） | 已集成 `Sources/TradingService/StrategyEngine.swift`（`evaluateEmaAltcoinLong`），仅纸面/模拟盘 |
 | `strategies/ema_3line_pullback/` | EMA 20/60/120 回踩策略族历史研究（四方向） | 研究归档，不是规则真源，未接入运行时 |

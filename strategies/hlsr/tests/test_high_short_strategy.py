@@ -104,6 +104,52 @@ class SourceIntegrityTests(unittest.TestCase):
                 for index in range(400)]
         self.assertEqual(generator.generate_signals("TEST-USDT-SWAP", bars), [])
 
+    def test_lab_config_is_the_single_source_for_hard_filters(self):
+        """配置真源化：改 config 必须改行为，不能再有代码内阈值。"""
+        import json
+        import tempfile
+
+        import hlsr_signal_generator as generator
+
+        payload = {
+            "signal_parameters": {"swing_lookback": 6, "wick_ratio": 0.6, "volume_multiple": 1.0,
+                                  "minimum_rejection_score": 2, "confirmation_window": 4,
+                                  "stop_atr": 0.25, "trail_bars": 2, "allow_range": True,
+                                  "zone_required": "any"},
+            "hard_filters": {"gain_24h_gt": 0.9, "quote_volume_24h_gt": 5_000_000},
+            "position_management": {"leverage": 3.0, "partial_targets": [0.5, 0.5], "cooldown_bars": 4},
+            "costs": {"fee_rate_one_way": 0.001, "slippage": 0.0005},
+        }
+        handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump(payload, handle)
+        handle.close()
+        path = Path(handle.name)
+        self.addCleanup(path.unlink)
+
+        config = generator.LabConfig.load(path)
+        self.assertEqual(config.min_gain_24h, 0.9)
+        self.assertEqual(config.min_quote_volume_24h, 5_000_000)
+        self.assertEqual(config.leverage, 3.0)
+        self.assertEqual(config.partial_fractions, (0.5, 0.5))
+        self.assertEqual(config.partial_plan, "TP1:50%,TP2:50%")
+        self.assertEqual(config.slippage, 0.0005)
+        # Params 也跟随配置（网格搜索之外、但影响判定的字段）。
+        self.assertEqual(config.params.min_gain_24h, 0.9)
+        self.assertEqual(config.params.cooldown_bars, 4)
+        self.assertEqual(config.params.partial_fractions, (0.5, 0.5))
+
+    def test_acceptance_criteria_requires_all_five_conditions(self):
+        import high_short_strategy
+
+        oos = {"trades": 30, "wins": 15, "win_rate": 0.5, "total_r": 5.0, "avg_net_r": 0.2}
+        self.assertFalse(all(high_short_strategy.acceptance_criteria(oos, 2.0, 0.6).values()))  # 胜率未严格大于 50%
+        passed = high_short_strategy.acceptance_criteria({"trades": 31, "wins": 17, "win_rate": 0.55,
+                                                          "total_r": 6.0, "avg_net_r": 0.3}, 2.5, 0.7)
+        self.assertTrue(all(passed.values()))
+        self.assertFalse(passed["sample_sufficient_30_trades"] == False)
+        self.assertFalse(all(high_short_strategy.acceptance_criteria({"trades": 9, "wins": 6, "win_rate": 0.67,
+                                                                     "total_r": 4.0, "avg_net_r": 0.44}, 3.0, 0.8).values()))
+
     def test_number_treats_missing_values_as_missing(self):
         import altcoin_backtest
 

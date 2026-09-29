@@ -84,7 +84,7 @@ python3 -m unittest strategies/hlsr/tests/test_high_short_strategy.py
 HLSR 的标准策略说明、参数配置和只读信号生成器分别位于：
 
 - `strategies/hlsr/STRATEGY.md`
-- `strategies/hlsr/config/signal.json`
+- `strategies/hlsr/config/strategy.json`
 - `strategies/hlsr/src/hlsr_signal_generator.py`
 
 信号生成器读取已确认的 5 分钟或 15 分钟 OHLCV 文件，自动聚合到 15 分钟，输出最近或全部历史信号；它不会连接交易所，也不会提交订单：
@@ -93,7 +93,7 @@ HLSR 的标准策略说明、参数配置和只读信号生成器分别位于：
 python3 strategies/hlsr/src/hlsr_signal_generator.py \
   --input data/kline/okx/swap/5m/BEAT_USDT_SWAP_5m_20260331T065300Z_20260927T065300Z.jsonl.gz \
   --symbol BEAT-USDT-SWAP \
-  --config strategies/hlsr/config/signal.json
+  --config strategies/hlsr/config/strategy.json
 ```
 
 回测的 `--days` 至少为 180 天，以覆盖三个 60/30/30 天 walk-forward 折；`--end` 支持带时区的 ISO-8601 时间，也支持 `Z` 结尾。

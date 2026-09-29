@@ -365,6 +365,26 @@ def main() -> int:
         fail(errors, "后台未为扫顶策略订阅 15m 确认 K 线")
     if not re.search(r"--pool.*default=\"hot20\"", live_signal):
         fail(errors, "实验室实时扫描器默认池不是 hot20")
+    # HLSR 的机器参数必须来自 config/strategy.json：此前 generator/backtest 各自
+    # 硬编码 40%/3000万/冷却16/杠杆2.0/分批30-30-40，改配置没有任何效果。
+    hlsr_lab = ROOT / "strategies" / "hlsr"
+    if not (hlsr_lab / "config" / "strategy.json").is_file():
+        fail(errors, "HLSR 缺少 config/strategy.json 机器参数真源")
+    for name in ("high_short_strategy.py", "hlsr_signal_generator.py", "hlsr_market_export.py"):
+        source = (hlsr_lab / "src" / name).read_text()
+        if "load_lab_config" not in source:
+            fail(errors, f"hlsr/src/{name} 未读取 config/strategy.json")
+        # 只针对"判定/记账处"的硬编码：兜底默认值集中在 high_short_strategy 里，
+        # 不参与任何判定。
+        for literal in ("<= 30_000_000", "> 30_000_000", "<= 0.40", "* 1.40",
+                        "cooldown = confirmation_index + 16", "leverage=2.0"):
+            if literal in source:
+                fail(errors, f"hlsr/src/{name} 仍在判定处硬编码 {literal}（应取自配置）")
+    if "def acceptance_criteria" not in (hlsr_lab / "src" / "high_short_strategy.py").read_text():
+        fail(errors, "HLSR 缺少唯一的接受标准实现 acceptance_criteria")
+    market = (hlsr_lab / "src" / "hlsr_market_export.py").read_text()
+    if "parameter_grid(" not in market or "export_grid" in market:
+        fail(errors, "HLSR 的市场导出与回测未共用同一套参数网格")
     if "universe.json" not in live_signal or "EXCLUDED_BASES" not in live_signal:
         fail(errors, "实验室实时扫描器未复用 universe.json 的排除清单")
     # 研究脚本不得各自硬编码一套参数：必须从 config/strategy.json 派生，否则改了

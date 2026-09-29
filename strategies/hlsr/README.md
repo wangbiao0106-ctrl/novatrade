@@ -2,9 +2,9 @@
 
 高位流动性扫顶反转策略，当前处于研究和信号生成阶段。
 
-- 规则：[`STRATEGY.md`](STRATEGY.md)
-- 设计：[`DESIGN.md`](DESIGN.md)
-- 配置：[`config/signal.json`](config/signal.json)（历史命名；`signal_parameters` 是机器参数块）
+- 规则：[`STRATEGY.md`](STRATEGY.md)（**唯一人类规则真源**）
+- 设计：[`DESIGN.md`](DESIGN.md)（架构与流程；不重复定义规则）
+- 配置：[`config/strategy.json`](config/strategy.json)（**唯一机器参数真源**：`signal_parameters`、`hard_filters`、`position_management`、`costs` 四个块都被源码读取）
 - 回测与信号源码：`src/`
 - Python 测试：`tests/`
 - 报告、参数网格和标的缓存：`results/`

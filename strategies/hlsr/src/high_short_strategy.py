@@ -7,7 +7,7 @@ import argparse
 import csv
 import itertools
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -34,6 +34,38 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "strategies/hlsr/results"
 # 选币只允许使用窗口前 60 天（第一折训练期）的成交额；用窗口末尾或整段数据
 # 排名会把测试期信息带进样本外结果。
 SELECTION_DAYS = 60
+# 机器参数真源：strategy.json 的 signal_parameters / hard_filters /
+# position_management / costs 都由代码读取，不再是装饰字段。
+LAB_CONFIG = PROJECT_ROOT / "strategies" / "hlsr" / "config" / "strategy.json"
+# 配置缺键时的兜底默认值（全仓库唯一副本；配置存在时一律以它为准）。
+DEFAULT_MIN_GAIN_24H = 0.40
+DEFAULT_MIN_QUOTE_VOLUME_24H = 30_000_000.0
+DEFAULT_COOLDOWN_BARS = 16
+DEFAULT_PARTIAL_FRACTIONS = (0.30, 0.30, 0.40)
+
+
+def load_lab_config(path: Path | None = None) -> dict:
+    """读取实验室机器参数真源，返回 {signal, hard, position, costs}。"""
+    payload = json.loads(Path(path or LAB_CONFIG).read_text())
+    return {
+        "signal": payload.get("signal_parameters", {}),
+        "hard": payload.get("hard_filters", {}),
+        "position": payload.get("position_management", {}),
+        "costs": payload.get("costs", {}),
+    }
+
+
+def fixed_parameters(config: dict | None = None) -> dict:
+    """不参与搜索、但必须在网格里保持一致、且来自配置的参数。"""
+    config = config or load_lab_config()
+    hard = config["hard"]
+    position = config["position"]
+    return {
+        "min_gain_24h": float(hard.get("gain_24h_gt", DEFAULT_MIN_GAIN_24H)),
+        "min_quote_volume_24h": float(hard.get("quote_volume_24h_gt", DEFAULT_MIN_QUOTE_VOLUME_24H)),
+        "cooldown_bars": int(position.get("cooldown_bars", DEFAULT_COOLDOWN_BARS)),
+        "partial_fractions": tuple(float(value) for value in position.get("partial_targets", DEFAULT_PARTIAL_FRACTIONS)),
+    }
 
 
 @dataclass(frozen=True)
@@ -77,6 +109,12 @@ class Params:
     # 拒绝评分第 4 项"失败突破"的深度阈值（× ATR14）。必须大于 0，否则第 4 项
     # 会退化成与"扫顶"前置条件重复的恒真项。
     reject_depth_atr: float = 0.1
+    # 以下字段来自 config/strategy.json，不参与网格搜索；默认值与配置文件一致，
+    # 保证不读配置时行为不变。
+    min_gain_24h: float = DEFAULT_MIN_GAIN_24H
+    min_quote_volume_24h: float = DEFAULT_MIN_QUOTE_VOLUME_24H
+    cooldown_bars: int = DEFAULT_COOLDOWN_BARS
+    partial_fractions: tuple[float, ...] = DEFAULT_PARTIAL_FRACTIONS
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -173,13 +211,13 @@ def aggregate_result(params: Params, trades: list[HighShortTrade]) -> Result:
 def backtest(symbol: str, bars: list[Bar], params: Params, fee: float, slippage: float, funding: float) -> tuple[Result, list[HighShortTrade]]:
     if len(bars) < 300:
         return aggregate_result(params, []), []
-    hourly = resample(bars, 60)
+    # 市场状态只用 4H：此前额外算了一条 1H 序列，但只用于 `h1_index < 20` 这个
+    # 恒真 guard，1H 从未参与任何判定。文档已同步为"15m 入场 + 4H 状态"。
     four_hour = resample(bars, 240)
     closes = [bar.close for bar in bars]
     highs = [bar.high for bar in bars]
     lows = [bar.low for bar in bars]
     volumes = [bar.quote_volume for bar in bars]
-    fast = ema(closes, 16)
     ranges = atr(bars, 14)
     trades: list[HighShortTrade] = []
     cooldown = -1
@@ -191,17 +229,16 @@ def backtest(symbol: str, bars: list[Bar], params: Params, fee: float, slippage:
         gain24 = closes[index] / closes[index - 96] - 1 if closes[index - 96] else 0.0
         quote24 = rolling_sum(volumes, index, 96)
         # The user's >40% requirement is a hard filter, not an optimized hint.
-        if gain24 <= 0.40 or quote24 <= 30_000_000:
+        # 阈值来自 config/strategy.json 的 hard_filters。
+        if gain24 <= params.min_gain_24h or quote24 <= params.min_quote_volume_24h:
             index += 1
             continue
         # A resampled HTF bar contains all of its 15m children.  At the
         # current 15m close, the bucket containing that bar is still forming;
         # only completed buckets may influence a historical signal.
         htf_interval = 240 * 60_000
-        h1_interval = 60 * 60_000
         htf_index = latest_completed_index(four_hour, bars[index].ts, htf_interval)
-        h1_index = latest_completed_index(hourly, bars[index].ts, h1_interval)
-        if htf_index < 0 or h1_index < 20:
+        if htf_index < 0:
             index += 1
             continue
         regime, recent_high, resistance, midpoint, major_low, htf_atr = regime_at(four_hour, htf_index)
@@ -291,7 +328,7 @@ def backtest(symbol: str, bars: list[Bar], params: Params, fee: float, slippage:
                 invalidated = True
                 remaining = 0.0
                 break
-            for target_index, (price, fraction) in enumerate(zip(targets, (0.30, 0.30, 0.40)), 1):
+            for target_index, (price, fraction) in enumerate(zip(targets, params.partial_fractions), 1):
                 if target_index not in hit_targets and remaining + 1e-9 >= fraction and future.low <= price:
                     net_r += (entry - price) / risk * fraction
                     remaining = max(0.0, remaining - fraction)
@@ -317,13 +354,50 @@ def backtest(symbol: str, bars: list[Bar], params: Params, fee: float, slippage:
         # one-way slip on the eventual buy-to-cover exit.
         net_r -= (fee * 2 + slippage + funding) * entry / risk
         trades.append(HighShortTrade(symbol, entry_bar.ts, exit_ts, entry, highs[index], stop, *targets, net_r, regime, zone, confirmation, ",".join(partials), invalidated, outcome))
-        cooldown = confirmation_index + 16
+        cooldown = confirmation_index + max(0, int(params.cooldown_bars))
         index = confirmation_index + 1
     return aggregate_result(params, trades), trades
 
 
-def parameter_grid() -> list[Params]:
-    return [Params(*values) for values in itertools.product((6, 12), (0.4, 0.6), (1.0, 1.5), (1, 2), (4, 8), (0.25, 0.5), (2,), (False, True), ("any", "primary_sweep", "extreme_sweep"))]
+def acceptance_criteria(oos: dict, actual_reward_risk: float, positive_probability: float,
+                        minimum_trades: int = 30) -> dict:
+    """研究接受标准（唯一实现，两个报告脚本共用；DESIGN.md 记录同一份定义）。
+
+    此前 `high_short_strategy` 只判 3 项、`hlsr_market_export` 判 5 项，同一策略
+    在不同脚本里可能一个 PASS 一个 FAIL。
+    """
+    return {
+        "win_rate_gt_50pct": oos["win_rate"] > 0.50,
+        "positive_mean_probability_gt_50pct": positive_probability > 0.50,
+        "actual_reward_risk_gte_2": actual_reward_risk >= 2.0,
+        "average_net_r_positive": oos["avg_net_r"] > 0,
+        "sample_sufficient_30_trades": oos["trades"] >= minimum_trades,
+    }
+
+
+def reward_risk_ratio(net_values: list[float]) -> float:
+    """实际平均收益/风险：正 R 均值 ÷ 亏损 R 的绝对值均值。
+
+    与 `aggregate_result` 里 `negative = [-value ...]` 的口径一致；直接用负值相加
+    会得到负数比值。
+    """
+    positive = [value for value in net_values if value > 0]
+    negative = [-value for value in net_values if value < 0]
+    return (sum(positive) / len(positive)) / (sum(negative) / len(negative)) if positive and negative else 0.0
+
+
+def parameter_grid(fixed: dict | None = None) -> list[Params]:
+    """唯一的参数搜索空间（384 组），回测与市场导出共用。
+
+    `fixed` 用来注入不参与搜索、但必须来自 config/strategy.json 的字段
+    （硬过滤阈值、冷却、分批比例）。
+    """
+    grid = [Params(*values) for values in itertools.product(
+        (6, 12), (0.4, 0.6), (1.0, 1.5), (1, 2), (4, 8), (0.25, 0.5), (2,), (False, True),
+        ("any", "primary_sweep", "extreme_sweep"))]
+    if fixed:
+        grid = [replace(item, **fixed) for item in grid]
+    return grid
 
 
 def load_period(symbols: list[str], start_ms: int, end_ms: int, data_dir: Path) -> dict[str, list[Bar]]:
@@ -418,10 +492,17 @@ def main() -> None:
     parser.add_argument("--end", help="固定结束时间，ISO-8601，例如 2026-09-26T19:00:00+00:00")
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--fee-rate", type=float, default=0.0006)
-    parser.add_argument("--slippage", type=float, default=0.0002)
-    parser.add_argument("--funding-rate", type=float, default=0.0)
+    parser.add_argument("--config", type=Path, default=LAB_CONFIG, help="实验室机器参数真源")
+    parser.add_argument("--fee-rate", type=float, default=None, help="默认取 config 的 costs.fee_rate_one_way")
+    parser.add_argument("--slippage", type=float, default=None, help="默认取 config 的 costs.slippage")
+    parser.add_argument("--funding-rate", type=float, default=None, help="默认取 config 的 costs.funding_rate")
     args = parser.parse_args()
+    lab = load_lab_config(args.config)
+    costs = lab["costs"]
+    if args.fee_rate is None: args.fee_rate = float(costs.get("fee_rate_one_way", 0.0006))
+    if args.slippage is None: args.slippage = float(costs.get("slippage", 0.0002))
+    if args.funding_rate is None: args.funding_rate = float(costs.get("funding_rate", 0.0))
+    fixed = fixed_parameters(lab)
     if args.symbols < 1:
         parser.error("--symbols must be at least 1")
     if args.days < 180:
@@ -435,7 +516,7 @@ def main() -> None:
     data_dir, output_dir = args.data_dir, args.output_dir
     symbols = select_symbols(data_dir, start_ms, end_ms, args.symbols, output_dir)
     data = load_period(symbols, start_ms, end_ms, data_dir)
-    params_list = parameter_grid()
+    params_list = parameter_grid(fixed)
     folds = []
     for fold, offset in enumerate((0, 30, 60), 1):
         train_start, train_end = start + timedelta(days=offset), start + timedelta(days=offset + 60)
@@ -456,8 +537,14 @@ def main() -> None:
     oos_values = [trade["net_r"] for trade in all_trades]
     oos_wins = sum(value > 0 for value in oos_values)
     oos_result = {"trades": len(oos_values), "wins": oos_wins, "win_rate": oos_wins / len(oos_values) if oos_values else 0, "total_r": sum(oos_values), "avg_net_r": sum(oos_values) / len(oos_values) if oos_values else 0}
-    passed = oos_result["trades"] >= 30 and oos_result["win_rate"] >= 0.50 and oos_result["avg_net_r"] > 0
-    report = {"strategy": "HLSR", "strategy_name_en": "High-Level Liquidity Sweep Reversal", "strategy_name_zh": "高位流动性扫顶反转策略", "core_formula": "high_value_zone + liquidity_sweep + rejection + structure_break + right_side_confirmation = short", "window": {"start": start.isoformat(), "end": end.isoformat()}, "market": "OKX Perpetual", "entry_timeframe": "15m", "htf": ["1H", "4H"], "leverage": 2.0, "hard_filters": {"gain_24h_gt": 0.40, "quote_volume_24h_gt": 30_000_000}, "symbols": symbols, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": oos_result, "passed": passed, "survivorship_bias": "current live USDT swaps are used because historical listing metadata is unavailable", "core_entry_module": ["value_zone", "liquidity_sweep", "rejection", "structure_confirmation"], "risk_management_module": ["position_size", "leverage", "stop_distance", "volatility", "funding_rate", "open_interest", "liquidation_data"], "assumptions": {"same_bar_priority": "stop_first", "fee_rate_one_way": args.fee_rate, "slippage_one_way": args.slippage, "funding_rate_per_trade": args.funding_rate, "reentry": "cooldown after exit; no averaging down"}}
+    oos_probability = bootstrap_positive_probability([
+        Trade(trade["symbol"], trade["entry_ts"], trade["exit_ts"], trade["entry"], trade["stop"],
+              trade["tp3"], trade["net_r"], "win" if trade["net_r"] > 0 else "loss", trade["partials"], 0.0)
+        for trade in all_trades])
+    criteria = acceptance_criteria(oos_result, reward_risk_ratio(oos_values),
+                                   oos_probability["positive_mean_probability"])
+    passed = all(criteria.values())
+    report = {"strategy": "HLSR", "strategy_name_en": "High-Level Liquidity Sweep Reversal", "strategy_name_zh": "高位流动性扫顶反转策略", "core_formula": "high_value_zone + liquidity_sweep + rejection + structure_break + right_side_confirmation = short", "window": {"start": start.isoformat(), "end": end.isoformat()}, "market": "OKX Perpetual", "entry_timeframe": "15m", "htf": ["4H"], "leverage": float(lab["position"].get("leverage", 2.0)), "hard_filters": dict(lab["hard"]), "symbols": symbols, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": oos_result, "acceptance": criteria, "actual_reward_risk": reward_risk_ratio(oos_values), "passed": passed, "survivorship_bias": "current live USDT swaps are used because historical listing metadata is unavailable", "core_entry_module": ["value_zone", "liquidity_sweep", "rejection", "structure_confirmation"], "risk_management_module": ["position_size", "leverage", "stop_distance", "volatility", "funding_rate", "open_interest", "liquidation_data"], "assumptions": {"same_bar_priority": "stop_first", "fee_rate_one_way": args.fee_rate, "slippage_one_way": args.slippage, "funding_rate_per_trade": args.funding_rate, "reentry": "cooldown after exit; no averaging down"}}
     output_dir.mkdir(parents=True, exist_ok=True)
     prefix = f"high_short_{args.days}d"
     (output_dir / f"{prefix}_report.json").write_text(json.dumps(report, indent=2))

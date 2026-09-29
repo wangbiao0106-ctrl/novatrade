@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import Iterable
 
 from altcoin_backtest import Bar, atr, ema, rolling_sum, short_entry_price
-from high_short_strategy import Params, rejection_reasons, resample
+from high_short_strategy import (DEFAULT_COOLDOWN_BARS, DEFAULT_MIN_GAIN_24H,
+                                 DEFAULT_MIN_QUOTE_VOLUME_24H, DEFAULT_PARTIAL_FRACTIONS,
+                                 Params, rejection_reasons, resample)
 
 
 STANDARD_PARAMS = Params(
@@ -33,12 +35,49 @@ STANDARD_PARAMS = Params(
 )
 
 
-def load_params(path: Path | None) -> Params:
-    """Load signal parameters from the standard JSON config when provided."""
-    if path is None:
-        return STANDARD_PARAMS
-    payload = json.loads(path.read_text())
-    values = payload.get("signal_parameters", payload)
+@dataclass(frozen=True)
+class LabConfig:
+    """实验室机器参数真源的整体视图（生成器不再硬编码任何阈值）。"""
+    params: Params
+    min_gain_24h: float
+    min_quote_volume_24h: float
+    cooldown_bars: int
+    leverage: float
+    partial_fractions: tuple[float, ...]
+    slippage: float = 0.0002
+
+    @property
+    def partial_plan(self) -> str:
+        labels = ("TP1", "TP2", "TP3", "TP4")
+        return ",".join(f"{labels[index]}:{fraction:.0%}" for index, fraction in enumerate(self.partial_fractions))
+
+    @staticmethod
+    def load(path: Path | None = None) -> "LabConfig":
+        import high_short_strategy as base
+
+        if path is None:
+            raw = base.load_lab_config()
+        else:
+            raw = base.load_lab_config(Path(path))
+        hard, position, costs = raw["hard"], raw["position"], raw["costs"]
+        merged = dict(raw["signal"])
+        merged.setdefault("gain_24h_gt", hard.get("gain_24h_gt", base.DEFAULT_MIN_GAIN_24H))
+        merged.setdefault("quote_volume_24h_gt", hard.get("quote_volume_24h_gt", base.DEFAULT_MIN_QUOTE_VOLUME_24H))
+        merged.setdefault("cooldown_bars", position.get("cooldown_bars", base.DEFAULT_COOLDOWN_BARS))
+        merged.setdefault("partial_targets", position.get("partial_targets", base.DEFAULT_PARTIAL_FRACTIONS))
+        return LabConfig(
+            params=load_params_values(merged),
+            slippage=float(costs.get("slippage", 0.0002)),
+            min_gain_24h=float(hard.get("gain_24h_gt", 0.40)),
+            min_quote_volume_24h=float(hard.get("quote_volume_24h_gt", 30_000_000)),
+            cooldown_bars=int(position.get("cooldown_bars", 16)),
+            leverage=float(position.get("leverage", 2.0)),
+            partial_fractions=tuple(float(value) for value in position.get("partial_targets", (0.3, 0.3, 0.4))),
+        )
+
+
+def load_params_values(values: dict) -> Params:
+    """由 config 的 signal_parameters 构造 Params。"""
     return Params(
         swing_lookback=int(values["swing_lookback"]),
         wick_ratio=float(values["wick_ratio"]),
@@ -50,7 +89,24 @@ def load_params(path: Path | None) -> Params:
         allow_range=bool(values["allow_range"]),
         zone_required=str(values["zone_required"]),
         reject_depth_atr=float(values.get("reject_depth_atr", STANDARD_PARAMS.reject_depth_atr)),
+        min_gain_24h=float(values.get("gain_24h_gt", DEFAULT_MIN_GAIN_24H)),
+        min_quote_volume_24h=float(values.get("quote_volume_24h_gt", DEFAULT_MIN_QUOTE_VOLUME_24H)),
+        cooldown_bars=int(values.get("cooldown_bars", DEFAULT_COOLDOWN_BARS)),
+        partial_fractions=tuple(float(value) for value in values.get("partial_targets", DEFAULT_PARTIAL_FRACTIONS)),
     )
+
+
+def load_params(path: Path | None) -> Params:
+    """Load signal parameters from the standard JSON config when provided."""
+    if path is None:
+        return STANDARD_PARAMS
+    payload = json.loads(path.read_text())
+    values = dict(payload.get("signal_parameters", payload))
+    values.setdefault("gain_24h_gt", payload.get("hard_filters", {}).get("gain_24h_gt", DEFAULT_MIN_GAIN_24H))
+    values.setdefault("quote_volume_24h_gt", payload.get("hard_filters", {}).get("quote_volume_24h_gt", DEFAULT_MIN_QUOTE_VOLUME_24H))
+    values.setdefault("cooldown_bars", payload.get("position_management", {}).get("cooldown_bars", DEFAULT_COOLDOWN_BARS))
+    values.setdefault("partial_targets", payload.get("position_management", {}).get("partial_targets", DEFAULT_PARTIAL_FRACTIONS))
+    return load_params_values(values)
 
 
 @dataclass(frozen=True)
@@ -156,7 +212,6 @@ def _candidate_signal(
     highs: list[float],
     lows: list[float],
     volumes: list[float],
-    h1_indices: list[int],
     htf_indices: list[int],
     ranges: list[float],
     regimes: list[tuple[str, float, float, float, float, float]],
@@ -164,17 +219,18 @@ def _candidate_signal(
     confirmation_index: int,
     params: Params,
     slippage: float,
+    leverage: float,
+    partial_plan: str,
 ) -> Signal | None:
     if sweep_index < max(150, params.swing_lookback + 20):
         return None
     gain_24h = closes[sweep_index] / closes[sweep_index - 96] - 1 if closes[sweep_index - 96] else 0.0
     quote_volume_24h = rolling_sum(volumes, sweep_index, 96)
-    if gain_24h <= 0.40 or quote_volume_24h <= 30_000_000:
+    if gain_24h <= params.min_gain_24h or quote_volume_24h <= params.min_quote_volume_24h:
         return None
 
     htf_index = htf_indices[sweep_index]
-    h1_index = h1_indices[sweep_index]
-    if htf_index < 0 or h1_index < 20:
+    if htf_index < 0:
         return None
     regime, _, resistance, midpoint, major_low, htf_atr = regimes[htf_index]
     if regime not in ({"bearish", "range"} if params.allow_range else {"bearish"}):
@@ -239,7 +295,7 @@ def _candidate_signal(
         tp1=targets[0],
         tp2=targets[1],
         tp3=targets[2],
-        partial_plan="TP1:30%,TP2:30%,TP3:40%",
+        partial_plan=partial_plan,
         regime=regime,
         zone=zone,
         confirmation=confirmation,
@@ -248,18 +304,21 @@ def _candidate_signal(
         rejection_score=len(rejection_reasons),
         rejection_reasons=rejection_reasons,
         invalidation="close_above_sweep_high_or_stop",
-        leverage=2.0,
+        leverage=leverage,
         params={**params.as_dict(), "entry_reference": entry_source},
     )
 
 
-def generate_signals(symbol: str, bars: list[Bar], params: Params = STANDARD_PARAMS, slippage: float = 0.0002) -> list[dict]:
+def generate_signals(symbol: str, bars: list[Bar], params: Params = STANDARD_PARAMS,
+                     slippage: float | None = None, config: LabConfig | None = None) -> list[dict]:
     """Return confirmed HLSR signals in chronological order."""
     if len(bars) < 180:
         return []
-    hourly = resample(bars, 60)
+    config = config or LabConfig.load()
+    if slippage is None:
+        slippage = config.slippage
+    partial_plan = config.partial_plan
     four_hour = resample(bars, 240)
-    h1_indices = _completed_index_map(bars, hourly, 60 * 60_000)
     htf_indices = _completed_index_map(bars, four_hour, 240 * 60_000)
     ranges = atr(bars, 14)
     closes = [bar.close for bar in bars]
@@ -299,10 +358,10 @@ def generate_signals(symbol: str, bars: list[Bar], params: Params = STANDARD_PAR
         if confirmation_index <= cooldown:
             continue
         for sweep_index in range(max(150, confirmation_index - params.confirmation_window), confirmation_index):
-            signal = _candidate_signal(symbol, bars, closes, highs, lows, volumes, h1_indices, htf_indices, ranges, regimes, sweep_index, confirmation_index, params, slippage)
+            signal = _candidate_signal(symbol, bars, closes, highs, lows, volumes, htf_indices, ranges, regimes, sweep_index, confirmation_index, params, slippage, config.leverage, partial_plan)
             if signal is not None:
                 signals.append(signal)
-                cooldown = confirmation_index + 16
+                cooldown = confirmation_index + max(0, int(params.cooldown_bars))
                 break
     return [asdict(signal) for signal in signals]
 
@@ -313,12 +372,15 @@ def main() -> None:
     parser.add_argument("--symbol", default="UNKNOWN-USDT-SWAP")
     parser.add_argument("--source-minutes", type=int, choices=(5, 15), default=5)
     parser.add_argument("--config", type=Path, help="策略 JSON 配置文件")
-    parser.add_argument("--slippage", type=float, default=0.0002)
+    parser.add_argument("--slippage", type=float, default=None, help="默认取 config 的 costs.slippage")
     parser.add_argument("--all", action="store_true", help="输出全部历史信号，而不是最近一个")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     bars = load_bars(args.input, args.source_minutes)
-    signals = generate_signals(args.symbol, bars, params=load_params(args.config), slippage=args.slippage)
+    config = LabConfig.load(args.config) if args.config else LabConfig.load()
+    if args.slippage is None:
+        args.slippage = config.slippage
+    signals = generate_signals(args.symbol, bars, params=config.params, slippage=args.slippage, config=config)
     payload = signals if args.all else (signals[-1] if signals else None)
     encoded = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.output:

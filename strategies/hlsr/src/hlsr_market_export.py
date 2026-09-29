@@ -6,13 +6,14 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
-import itertools
 import json
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from high_short_strategy import Params, aggregate_data, aggregate_result, backtest
+from high_short_strategy import (LAB_CONFIG, Params, acceptance_criteria, aggregate_data,
+                                aggregate_result, backtest, fixed_parameters, load_lab_config,
+                                parameter_grid, reward_risk_ratio)
 from altcoin_backtest import Bar, Trade as BaseTrade, beta_interval, bootstrap_positive_probability, rolling_sum
 
 UTC = timezone.utc
@@ -49,22 +50,18 @@ def symbol_from_path(path: Path) -> str:
     return stem.replace("_", "-") + "-USDT-SWAP"
 
 
-def hard_filter_stats(bars: list[Bar]) -> dict[str, int]:
+def hard_filter_stats(bars: list[Bar], min_gain: float, min_quote_volume: float) -> dict[str, int]:
+    """硬筛选命中统计；阈值来自 config/strategy.json 的 hard_filters。"""
     closes = [bar.close for bar in bars]
     quotes = [bar.quote_volume for bar in bars]
     gain_hits = volume_hits = composite_hits = 0
     for index in range(96, len(bars)):
-        gain_ok = closes[index] > closes[index - 96] * 1.40
-        volume_ok = rolling_sum(quotes, index, 96) > 30_000_000
+        gain_ok = closes[index] > closes[index - 96] * (1 + min_gain)
+        volume_ok = rolling_sum(quotes, index, 96) > min_quote_volume
         gain_hits += int(gain_ok)
         volume_hits += int(volume_ok)
         composite_hits += int(gain_ok and volume_ok)
     return {"bars": len(bars), "gain_hits": gain_hits, "volume_hits": volume_hits, "composite_hits": composite_hits}
-
-
-def export_grid() -> list[Params]:
-    values = itertools.product((6, 12), (0.4, 0.6), (1.0, 1.5), (1, 2), (4, 8), (0.25, 0.5), (2,), (True,), ("any", "primary_sweep"))
-    return [Params(*value) for value in values]
 
 
 def main() -> None:
@@ -73,10 +70,17 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--max-symbols", type=int, default=50)
     parser.add_argument("--min-events", type=int, default=3)
-    parser.add_argument("--fee-rate", type=float, default=0.0006)
-    parser.add_argument("--slippage", type=float, default=0.0002)
-    parser.add_argument("--funding-rate", type=float, default=0.0)
+    parser.add_argument("--config", type=Path, default=LAB_CONFIG, help="实验室机器参数真源")
+    parser.add_argument("--fee-rate", type=float, default=None, help="默认取 config 的 costs.fee_rate_one_way")
+    parser.add_argument("--slippage", type=float, default=None, help="默认取 config 的 costs.slippage")
+    parser.add_argument("--funding-rate", type=float, default=None, help="默认取 config 的 costs.funding_rate")
     args = parser.parse_args()
+    lab = load_lab_config(args.config)
+    lab_fixed = fixed_parameters(lab)
+    costs = lab["costs"]
+    if args.fee_rate is None: args.fee_rate = float(costs.get("fee_rate_one_way", 0.0006))
+    if args.slippage is None: args.slippage = float(costs.get("slippage", 0.0002))
+    if args.funding_rate is None: args.funding_rate = float(costs.get("funding_rate", 0.0))
     root = args.market_export
     paths = sorted(root.glob("*_USDT_SWAP_5m_*.jsonl.gz"))
     loaded: dict[str, list[Bar]] = {}
@@ -91,7 +95,8 @@ def main() -> None:
     data_start = min(bar.ts for bars in loaded.values() for bar in bars[:1])
     selection_end = data_start + int(SELECTION_DAYS * 86_400_000)
     for symbol, bars in loaded.items():
-        stats[symbol] = hard_filter_stats([bar for bar in bars if bar.ts < selection_end])
+        stats[symbol] = hard_filter_stats([bar for bar in bars if bar.ts < selection_end],
+                                          lab_fixed["min_gain_24h"], lab_fixed["min_quote_volume_24h"])
     eligible = sorted((value["composite_hits"], symbol) for symbol, value in stats.items() if value["composite_hits"] >= args.min_events)
     selected = [symbol for _, symbol in eligible[-args.max_symbols:]]
     selected.sort()
@@ -102,7 +107,9 @@ def main() -> None:
     timestamps = [bar.ts for symbol in selected for bar in loaded[symbol]]
     start = datetime.fromtimestamp(min(timestamps) / 1000, UTC)
     end = datetime.fromtimestamp(max(timestamps) / 1000, UTC) + timedelta(minutes=15)
-    params_list = export_grid()
+    # 与 high_short_strategy 共用同一套 384 组搜索空间（此前这里只有 128 组，
+    # 与 DESIGN.md 声明的范围不符）。
+    params_list = parameter_grid(lab_fixed)
     folds = []
     for fold, offset in enumerate((0, 30, 60), 1):
         train_start, train_end = start + timedelta(days=offset), start + timedelta(days=offset + 60)
@@ -124,9 +131,7 @@ def main() -> None:
     values = [trade["net_r"] for trade in all_trades]
     wins = sum(value > 0 for value in values)
     oos = {"trades": len(values), "wins": wins, "win_rate": wins / len(values) if values else 0, "total_r": sum(values), "avg_net_r": sum(values) / len(values) if values else 0}
-    positive = [value for value in values if value > 0]
-    negative = [-value for value in values if value < 0]
-    actual_rr = (sum(positive) / len(positive)) / (sum(negative) / len(negative)) if positive and negative else 0
+    actual_rr = reward_risk_ratio(values)
     oos_beta = beta_interval(wins, len(values) - wins)
     oos_positive_probability = bootstrap_positive_probability([
         BaseTrade(
@@ -139,18 +144,13 @@ def main() -> None:
     # Interpret “risk:reward <= 1:2” as reward/risk >= 2.0 in the report.
     # DESIGN.md:79 的接受标准包含"样本外至少 30 笔"；此前只把样本量放进
     # acceptance 字典、没有参与 passed，导致 9 笔样本也能被判通过。
-    sample_sufficient = oos["trades"] >= 30
-    criteria = {
-        "win_rate_gt_50pct": oos["win_rate"] > 0.50,
-        "positive_mean_probability_gt_50pct": oos_positive_probability["positive_mean_probability"] > 0.50,
-        "actual_reward_risk_gte_2": actual_rr >= 2.0,
-        "average_net_r_positive": oos["avg_net_r"] > 0,
-        "sample_sufficient_30_trades": sample_sufficient,
-    }
+    # 接受标准与 high_short_strategy 共用同一实现（此前这边判 5 项、那边判 3 项，
+    # 同一策略可能一个 PASS 一个 FAIL）。
+    criteria = acceptance_criteria(oos, actual_rr, oos_positive_probability["positive_mean_probability"])
     passed = all(criteria.values())
     output = args.output_dir
     output.mkdir(parents=True, exist_ok=True)
-    report = {"strategy": "HLSR", "source": str(root), "timeframe": "5m source -> 15m entry", "window": {"start": start.isoformat(), "end": end.isoformat()}, "source_files": len(paths), "eligible_symbols": len(eligible), "selected_symbols": selected, "hard_filters": {"gain_24h_gt": 0.40, "quote_volume_24h_gt": 30_000_000}, "screening_stats": {symbol: stats[symbol] for symbol in selected}, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": {**oos, "beta": oos_beta, "positive_probability": oos_positive_probability}, "actual_reward_risk": actual_rr, "risk_reward_requirement": "reward/risk >= 2.0 (interpreted from risk:reward <= 1:2)", "acceptance": criteria, "passed": passed}
+    report = {"strategy": "HLSR", "source": str(root), "timeframe": "5m source -> 15m entry", "window": {"start": start.isoformat(), "end": end.isoformat()}, "source_files": len(paths), "eligible_symbols": len(eligible), "selected_symbols": selected, "hard_filters": dict(lab["hard"]), "screening_stats": {symbol: stats[symbol] for symbol in selected}, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": {**oos, "beta": oos_beta, "positive_probability": oos_positive_probability}, "actual_reward_risk": actual_rr, "risk_reward_requirement": "reward/risk >= 2.0 (interpreted from risk:reward <= 1:2)", "acceptance": criteria, "passed": passed}
     (output / "hlsr_market_export_report.json").write_text(json.dumps(report, indent=2))
     with (output / "hlsr_market_export_trades.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(all_trades[0]) if all_trades else ["symbol", "entry_ts", "net_r"], lineterminator="\n")
