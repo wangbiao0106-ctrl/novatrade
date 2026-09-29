@@ -404,16 +404,16 @@
           "lower_95": 0.17786420782602969,
           "upper_95": 0.6463063987256682
         },
-        "total_r": 5.720651611609605,
-        "avg_net_r": 0.4400501239699696,
-        "average_win_loss_ratio": 2.7167056315356564,
-        "profit_factor": 1.6979410197097853,
+        "total_r": 6.315834379860783,
+        "avg_net_r": 0.48583341383544487,
+        "average_win_loss_ratio": 2.926199853981304,
+        "profit_factor": 1.828874908738315,
         "max_drawdown_r": 4.1088746583200075,
         "max_consecutive_losses": 4,
         "positive_probability": {
-          "positive_mean_probability": 0.7945,
-          "mean_lower_95": -0.5301964310494452,
-          "mean_upper_95": 1.57975390899315
+          "positive_mean_probability": 0.8185,
+          "mean_lower_95": -0.4554164426149838,
+          "mean_upper_95": 1.6023020865787685
         },
         "leverage": 2.0
       },
@@ -439,16 +439,16 @@
           "lower_95": 0.05277400423237758,
           "upper_95": 0.7225824497610095
         },
-        "total_r": -2.5491298415291075,
-        "avg_net_r": -0.6372824603822769,
-        "average_win_loss_ratio": 0.538807733013007,
-        "profit_factor": 0.17960257767100235,
-        "max_drawdown_r": 3.1071889941980455,
+        "total_r": -2.096623767931182,
+        "avg_net_r": -0.5241559419827955,
+        "average_win_loss_ratio": 0.6306506306328848,
+        "profit_factor": 0.2102168768776283,
+        "max_drawdown_r": 2.65468292060012,
         "max_consecutive_losses": 3,
         "positive_probability": {
           "positive_mean_probability": 0.047,
-          "mean_lower_95": -1.0366983742070426,
-          "mean_upper_95": 0.15946696873708646
+          "mean_lower_95": -0.9765909955452401,
+          "mean_upper_95": 0.18869692817507377
         },
         "leverage": 2.0
       },
@@ -474,15 +474,15 @@
           "lower_95": 0.3905647911728861,
           "upper_95": 0.993641717666417
         },
-        "total_r": 12.76374054102466,
-        "avg_net_r": 4.254580180341553,
+        "total_r": 13.125424777990169,
+        "avg_net_r": 4.37514159266339,
         "average_win_loss_ratio": 0.0,
         "profit_factor": 0.0,
         "max_drawdown_r": 0.0,
         "max_consecutive_losses": 0,
         "positive_probability": {
           "positive_mean_probability": 1.0,
-          "mean_lower_95": 2.9560820508140915,
+          "mean_lower_95": 3.3177662877796004,
           "mean_upper_95": 5.21370253504529
         },
         "leverage": 2.0
@@ -503,24 +503,26 @@
           "zone": "normal_extension",
           "confirmation": "failed_retest",
           "partials": "TP1,TP2,TP3",
-          "invalidated": false
+          "invalidated": false,
+          "exit_reason": "targets"
         },
         {
           "symbol": "BSB-USDT-SWAP",
           "entry_ts": 1784048400000,
-          "exit_ts": 1784124000000,
+          "exit_ts": 1784123100000,
           "entry": 0.1704659,
           "sweep_high": 0.1743,
           "stop": 0.17776508456538032,
           "tp1": 0.155867530869,
           "tp2": 0.1371,
           "tp3": 0.1137,
-          "net_r": 2.956082050814092,
+          "net_r": 3.317766287779601,
           "regime": "range",
           "zone": "normal_extension",
           "confirmation": "failed_retest",
           "partials": "TP1,TP2",
-          "invalidated": false
+          "invalidated": false,
+          "exit_reason": "stop"
         },
         {
           "symbol": "PIEVERSE-USDT-SWAP",
@@ -537,7 +539,8 @@
           "zone": "extreme_sweep",
           "confirmation": "failed_retest",
           "partials": "TP1",
-          "invalidated": false
+          "invalidated": false,
+          "exit_reason": "window_end"
         }
       ]
     },
@@ -547,7 +550,7 @@
         "swing_lookback": 6,
         "wick_ratio": 0.4,
         "volume_multiple": 1.0,
-        "minimum_rejection_score": 2,
+        "minimum_rejection_score": 1,
         "confirmation_window": 4,
         "stop_atr": 0.5,
         "trail_bars": 2,
@@ -560,7 +563,7 @@
           "swing_lookback": 6,
           "wick_ratio": 0.4,
           "volume_multiple": 1.0,
-          "minimum_rejection_score": 2,
+          "minimum_rejection_score": 1,
           "confirmation_window": 4,
           "stop_atr": 0.5,
           "trail_bars": 2,
@@ -577,16 +580,16 @@
           "lower_95": 0.2254703277697646,
           "upper_95": 0.7045310348145452
         },
-        "total_r": 6.843469114852337,
-        "avg_net_r": 0.5264207011424875,
-        "average_win_loss_ratio": 2.275740711552968,
-        "profit_factor": 1.9506348956168298,
-        "max_drawdown_r": 3.0970552322107334,
+        "total_r": 7.873621614076309,
+        "avg_net_r": 0.605663201082793,
+        "average_win_loss_ratio": 2.6531128299262154,
+        "profit_factor": 2.2740967113653276,
+        "max_drawdown_r": 2.65468292060012,
         "max_consecutive_losses": 3,
         "positive_probability": {
-          "positive_mean_probability": 0.879,
-          "mean_lower_95": -0.29220150165298436,
-          "mean_upper_95": 1.4614910625054762
+          "positive_mean_probability": 0.921,
+          "mean_lower_95": -0.21950365204267297,
+          "mean_upper_95": 1.5191511262245005
         },
         "leverage": 2.0
       },
@@ -595,7 +598,7 @@
           "swing_lookback": 6,
           "wick_ratio": 0.4,
           "volume_multiple": 1.0,
-          "minimum_rejection_score": 2,
+          "minimum_rejection_score": 1,
           "confirmation_window": 4,
           "stop_atr": 0.5,
           "trail_bars": 2,
@@ -612,15 +615,15 @@
           "lower_95": 0.3905647911728861,
           "upper_95": 0.993641717666417
         },
-        "total_r": 12.76374054102466,
-        "avg_net_r": 4.254580180341553,
+        "total_r": 13.125424777990169,
+        "avg_net_r": 4.37514159266339,
         "average_win_loss_ratio": 0.0,
         "profit_factor": 0.0,
         "max_drawdown_r": 0.0,
         "max_consecutive_losses": 0,
         "positive_probability": {
           "positive_mean_probability": 1.0,
-          "mean_lower_95": 2.9560820508140915,
+          "mean_lower_95": 3.3177662877796004,
           "mean_upper_95": 5.21370253504529
         },
         "leverage": 2.0
@@ -630,7 +633,7 @@
           "swing_lookback": 6,
           "wick_ratio": 0.4,
           "volume_multiple": 1.0,
-          "minimum_rejection_score": 2,
+          "minimum_rejection_score": 1,
           "confirmation_window": 4,
           "stop_atr": 0.5,
           "trail_bars": 2,
@@ -647,16 +650,16 @@
           "lower_95": 0.1156365073014497,
           "upper_95": 0.7800239810838755
         },
-        "total_r": -0.936816818734103,
-        "avg_net_r": -0.1873633637468206,
-        "average_win_loss_ratio": 1.047721542515616,
-        "profit_factor": 0.6984810283437438,
+        "total_r": -0.9222997615478863,
+        "avg_net_r": -0.18445995230957726,
+        "average_win_loss_ratio": 1.0547301188990619,
+        "profit_factor": 0.7031534125993746,
         "max_drawdown_r": 2.9068408774962866,
         "max_consecutive_losses": 2,
         "positive_probability": {
           "positive_mean_probability": 0.3025,
           "mean_lower_95": -1.0355603390143244,
-          "mean_upper_95": 0.4670767233483903
+          "mean_upper_95": 0.47433525194149856
         },
         "leverage": 2.0
       },
@@ -676,7 +679,8 @@
           "zone": "normal_extension",
           "confirmation": "failed_retest",
           "partials": "",
-          "invalidated": true
+          "invalidated": false,
+          "exit_reason": "stop"
         },
         {
           "symbol": "BEAT-USDT-SWAP",
@@ -693,7 +697,8 @@
           "zone": "normal_extension",
           "confirmation": "failed_retest",
           "partials": "",
-          "invalidated": true
+          "invalidated": false,
+          "exit_reason": "stop"
         },
         {
           "symbol": "BEAT-USDT-SWAP",
@@ -710,7 +715,8 @@
           "zone": "normal_extension",
           "confirmation": "break_of_local_low",
           "partials": "TP1",
-          "invalidated": false
+          "invalidated": false,
+          "exit_reason": "stop"
         },
         {
           "symbol": "BEAT-USDT-SWAP",
@@ -727,7 +733,8 @@
           "zone": "normal_extension",
           "confirmation": "failed_retest",
           "partials": "",
-          "invalidated": true
+          "invalidated": false,
+          "exit_reason": "stop"
         },
         {
           "symbol": "BEAT-USDT-SWAP",
@@ -739,12 +746,13 @@
           "tp1": 0.133790208708,
           "tp2": 0.1309,
           "tp3": 0.111,
-          "net_r": 1.9700240587621836,
+          "net_r": 1.9845411159484003,
           "regime": "bearish",
           "zone": "normal_extension",
           "confirmation": "break_of_local_low",
           "partials": "TP1,TP2",
-          "invalidated": false
+          "invalidated": false,
+          "exit_reason": "stop"
         }
       ]
     },
@@ -784,16 +792,16 @@
           "lower_95": 0.18238010514692146,
           "upper_95": 0.8173889109016703
         },
-        "total_r": 10.3840673154348,
-        "avg_net_r": 1.7306778859058,
-        "average_win_loss_ratio": 4.363516744423136,
-        "profit_factor": 4.363516744423136,
+        "total_r": 10.858320889839831,
+        "avg_net_r": 1.8097201483066385,
+        "average_win_loss_ratio": 4.517132836283675,
+        "profit_factor": 4.517132836283675,
         "max_drawdown_r": 3.0872649385950153,
         "max_consecutive_losses": 3,
         "positive_probability": {
           "positive_mean_probability": 0.923,
           "mean_lower_95": -0.33408745038256216,
-          "mean_upper_95": 4.193740722289321
+          "mean_upper_95": 4.240480553347827
         },
         "leverage": 2.0
       },
@@ -819,16 +827,16 @@
           "lower_95": 0.06815170744111852,
           "upper_95": 0.800232852606306
         },
-        "total_r": 0.055080206992411895,
-        "avg_net_r": 0.01836006899747063,
-        "average_win_loss_ratio": 2.0521564944253523,
-        "profit_factor": 1.0260782472126762,
+        "total_r": 0.07168650992292092,
+        "avg_net_r": 0.023895503307640304,
+        "average_win_loss_ratio": 2.06788131815995,
+        "profit_factor": 1.033940659079975,
         "max_drawdown_r": 2.1121130781227637,
         "max_consecutive_losses": 2,
         "positive_probability": {
           "positive_mean_probability": 0.757,
           "mean_lower_95": -1.0560565390613819,
-          "mean_upper_95": 2.1671932851151756
+          "mean_upper_95": 2.1837995880456846
         },
         "leverage": 2.0
       },
@@ -883,7 +891,8 @@
           "zone": "normal_extension",
           "confirmation": "failed_retest",
           "partials": "",
-          "invalidated": true
+          "invalidated": false,
+          "exit_reason": "stop"
         },
         {
           "symbol": "LAB-USDT-SWAP",
@@ -900,7 +909,8 @@
           "zone": "normal_extension",
           "confirmation": "break_of_local_low",
           "partials": "",
-          "invalidated": false
+          "invalidated": false,
+          "exit_reason": "stop"
         }
       ]
     }
@@ -909,8 +919,8 @@
     "trades": 10,
     "wins": 5,
     "win_rate": 0.5,
-    "total_r": 9.77781250947853,
-    "avg_net_r": 0.977781250947853,
+    "total_r": 10.154013803630257,
+    "avg_net_r": 1.0154013803630257,
     "beta": {
       "posterior_mean": 0.5,
       "lower_95": 0.2297905028429285,
@@ -919,10 +929,10 @@
     "positive_probability": {
       "positive_mean_probability": 0.923,
       "mean_lower_95": -0.29310886691853794,
-      "mean_upper_95": 3.0406811838012233
+      "mean_upper_95": 3.1026856153810405
     }
   },
-  "actual_reward_risk": 2.896357278383735,
+  "actual_reward_risk": 2.96931961649468,
   "risk_reward_requirement": "reward/risk >= 2.0 (interpreted from risk:reward <= 1:2)",
   "acceptance": {
     "win_rate_gt_50pct": false,

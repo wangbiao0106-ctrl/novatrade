@@ -54,11 +54,19 @@ def http_json(path: str, params: dict[str, str], attempts: int = 5) -> dict:
     raise RuntimeError(f"request failed after {attempts} attempts: {url}: {last}")
 
 
-def number(value: str | float | int | None) -> float:
+def number(value: str | float | int | None, default: float | None = 0.0) -> float | None:
+    """把交易所返回值转成 float；缺失或解析失败返回 `default`。
+
+    `None` / 空字符串必须视为缺失：`float(value or 0)` 会把它们悄悄变成 0.0，
+    让"没有价格"的 K 线以 0 价进入 ATR、最高价等指标。调用方传
+    `default=None` 时表示要丢弃这根 K 线。
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return default
     try:
-        return float(value or 0)
+        return float(value)
     except (TypeError, ValueError):
-        return 0.0
+        return default
 
 
 def short_entry_price(open_price: float, slippage: float) -> float:
@@ -80,8 +88,12 @@ class Bar:
 def decode_bar(row: list[str]) -> Bar | None:
     if len(row) < 8 or (len(row) >= 9 and row[8] != "1"):
         return None
+    # 任何一个价格字段解析失败就丢弃这根 K 线，不能以 0 价进入指标。
+    values = [number(row[column], default=None) for column in (1, 2, 3, 4, 5, 7)]
+    if any(value is None for value in values):
+        return None
     try:
-        return Bar(int(row[0]), number(row[1]), number(row[2]), number(row[3]), number(row[4]), number(row[5]), number(row[7]))
+        return Bar(int(row[0]), *values)
     except (TypeError, ValueError):
         return None
 
@@ -90,7 +102,13 @@ def load_bars(symbol: str, start_ms: int, end_ms: int, cache_dir: Path) -> list[
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache = cache_dir / f"{symbol.replace('-', '_')}_15m_{start_ms}_{end_ms}.json"
     if cache.exists():
-        return [Bar(**row) for row in json.loads(cache.read_text())]
+        try:
+            cached = json.loads(cache.read_text())
+        except ValueError:
+            cached = []
+        # 空缓存视为缺失：瞬时故障写下的 [] 不能永久变成"这个标的没有 K 线"。
+        if cached:
+            return [Bar(**row) for row in cached]
     cursor = str(end_ms)
     result: dict[int, Bar] = {}
     while True:
@@ -108,7 +126,9 @@ def load_bars(symbol: str, start_ms: int, end_ms: int, cache_dir: Path) -> list[
         cursor = str(oldest)
         time.sleep(0.08)
     bars = sorted(result.values(), key=lambda bar: bar.ts)
-    cache.write_text(json.dumps([asdict(bar) for bar in bars], separators=(",", ":")))
+    # 只在确实取到覆盖请求区间的数据时写缓存，避免把空结果或半截结果持久化。
+    if bars and bars[0].ts <= start_ms + 86_400_000 and bars[-1].ts >= end_ms - 86_400_000:
+        cache.write_text(json.dumps([asdict(bar) for bar in bars], separators=(",", ":")))
     return bars
 
 
@@ -408,7 +428,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     prefix = f"15m_{args.days}d"
     with (output_dir / f"{prefix}_parameter_grid.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(parameters[0].as_dict()))
+        writer = csv.DictWriter(handle, fieldnames=list(parameters[0].as_dict()), lineterminator="\n")
         writer.writeheader()
         writer.writerows(parameter.as_dict() for parameter in parameters)
     cut = lambda values, lo, hi: [bar for bar in values if lo <= bar.ts < hi]
@@ -436,7 +456,7 @@ def main() -> None:
     report = {"window": {"start": start.isoformat(), "end": end.isoformat()}, "interval": "15m", "leverage": 2.0, "symbols": list(data), "skips": skips, "screening_stats": {symbol: screening_stats(bars) for symbol, bars in data.items()}, "survivorship_bias": "current live USDT swaps are used when historical listing data is unavailable", "assumptions": {"gain_window_bars": 96, "min_gain": 0.40, "min_quote_volume_24h": 30_000_000, "fee_rate_one_way": args.fee_rate, "slippage_one_way": args.slippage, "funding_rate_per_trade": args.funding_rate, "same_bar_priority": "stop_first", "risk_fraction": 0.005}, "selected_params": chosen.as_dict(), "final_all_period": asdict(final), "folds": folds, "sample_out_of_sample_trades": oos_trades, "sample_out_of_sample_win_rate": oos_wins / max(oos_trades, 1), "sample_out_of_sample_total_r": oos_r, "passed": passed}
     (output_dir / f"{prefix}_optimization_report.json").write_text(json.dumps(report, indent=2))
     with (output_dir / f"{prefix}_trades_test.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(Trade.__dataclass_fields__))
+        writer = csv.DictWriter(handle, fieldnames=list(Trade.__dataclass_fields__), lineterminator="\n")
         writer.writeheader()
         writer.writerows(trade for fold in folds for trade in fold["trades"])
     print(f"selected={chosen.as_dict()}")

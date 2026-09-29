@@ -99,6 +99,7 @@ class HighShortTrade:
     confirmation: str
     partials: str
     invalidated: bool
+    exit_reason: str = "managed"
 
 
 def regime_at(bars: list[HTFBar], index: int) -> tuple[str, float, float, float, float, float]:
@@ -271,14 +272,23 @@ def backtest(symbol: str, bars: list[Bar], params: Params, fee: float, slippage:
             if future.open >= current_stop:
                 net_r += (entry - future.open) / risk * remaining
                 exit_ts = future.ts
-                outcome = "loss"
+                outcome = "stop_gap"
                 remaining = 0.0
                 break
-            if future.close > highs[index] or future.high >= current_stop:
+            if future.high >= current_stop:
+                # 真实触价：按止损价成交。
                 net_r += (entry - current_stop) / risk * remaining
                 exit_ts = future.ts
+                outcome = "stop"
+                remaining = 0.0
+                break
+            if future.close > highs[index]:
+                # 收盘重新站上扫顶高点即失效退出，但该 bar 并未触及止损价，
+                # 不能按从未成交的止损价记账：按该 bar 收盘价离场。
+                net_r += (entry - future.close) / risk * remaining
+                exit_ts = future.ts
                 outcome = "invalidation"
-                invalidated = future.close > highs[index]
+                invalidated = True
                 remaining = 0.0
                 break
             for target_index, (price, fraction) in enumerate(zip(targets, (0.30, 0.30, 0.40)), 1):
@@ -290,19 +300,23 @@ def backtest(symbol: str, bars: list[Bar], params: Params, fee: float, slippage:
                     if target_index == 1:
                         current_stop = min(current_stop, entry)
                     elif target_index >= 2:
-                        current_stop = min(current_stop, max(highs[max(confirmation_index + 1, future_index - 2):future_index + 1]))
+                        # 跟踪窗口长度取自配置的 trail_bars（含当根）。
+                        trail = max(1, int(params.trail_bars))
+                        current_stop = min(current_stop, max(highs[max(confirmation_index + 1, future_index - trail + 1):future_index + 1]))
                     if remaining <= 1e-9:
-                        exit_ts, outcome = future.ts, "win"
+                        exit_ts, outcome = future.ts, "targets"
                         break
             if remaining <= 1e-9:
                 break
         if remaining > 0:
+            # 窗口末端的强制标记离场：单独记原因，避免混进正常离场统计。
             net_r += (entry - bars[-1].close) / risk * remaining
             exit_ts = bars[-1].ts
+            outcome = "window_end"
         # Entry slippage is already reflected in `entry`; charge the second
         # one-way slip on the eventual buy-to-cover exit.
         net_r -= (fee * 2 + slippage + funding) * entry / risk
-        trades.append(HighShortTrade(symbol, entry_bar.ts, exit_ts, entry, highs[index], stop, *targets, net_r, regime, zone, confirmation, ",".join(partials), invalidated))
+        trades.append(HighShortTrade(symbol, entry_bar.ts, exit_ts, entry, highs[index], stop, *targets, net_r, regime, zone, confirmation, ",".join(partials), invalidated, outcome))
         cooldown = confirmation_index + 16
         index = confirmation_index + 1
     return aggregate_result(params, trades), trades
@@ -448,7 +462,7 @@ def main() -> None:
     prefix = f"high_short_{args.days}d"
     (output_dir / f"{prefix}_report.json").write_text(json.dumps(report, indent=2))
     with (output_dir / f"{prefix}_trades.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(HighShortTrade.__dataclass_fields__))
+        writer = csv.DictWriter(handle, fieldnames=list(HighShortTrade.__dataclass_fields__), lineterminator="\n")
         writer.writeheader()
         writer.writerows(all_trades)
     print(f"out_of_sample={oos_result} status={'PASS' if passed else 'FAIL'}")

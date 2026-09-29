@@ -153,7 +153,7 @@ def main() -> None:
     report = {"strategy": "HLSR", "source": str(root), "timeframe": "5m source -> 15m entry", "window": {"start": start.isoformat(), "end": end.isoformat()}, "source_files": len(paths), "eligible_symbols": len(eligible), "selected_symbols": selected, "hard_filters": {"gain_24h_gt": 0.40, "quote_volume_24h_gt": 30_000_000}, "screening_stats": {symbol: stats[symbol] for symbol in selected}, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": {**oos, "beta": oos_beta, "positive_probability": oos_positive_probability}, "actual_reward_risk": actual_rr, "risk_reward_requirement": "reward/risk >= 2.0 (interpreted from risk:reward <= 1:2)", "acceptance": criteria, "passed": passed}
     (output / "hlsr_market_export_report.json").write_text(json.dumps(report, indent=2))
     with (output / "hlsr_market_export_trades.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(all_trades[0]) if all_trades else ["symbol", "entry_ts", "net_r"])
+        writer = csv.DictWriter(handle, fieldnames=list(all_trades[0]) if all_trades else ["symbol", "entry_ts", "net_r"], lineterminator="\n")
         writer.writeheader()
         writer.writerows(all_trades)
     print(f"source_files={len(paths)} eligible={len(eligible)} selected={len(selected)} out_of_sample={oos} actual_RR={actual_rr:.2f} status={'PASS' if passed else 'FAIL'}")

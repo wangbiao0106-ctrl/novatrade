@@ -53,11 +53,65 @@ class HighShortStrategyTests(unittest.TestCase):
         self.assertNotIn("failed_breakout", reasons(100.05))  # 收盘仍在前高上方
 
     def test_symbol_from_path_builds_a_valid_instrument_id(self):
-        sys.path.insert(0, str(SRC))
         import hlsr_market_export
 
         path = Path("BEAT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz")
         self.assertEqual(hlsr_market_export.symbol_from_path(path), "BEAT-USDT-SWAP")
+
+
+class SourceIntegrityTests(unittest.TestCase):
+    """源数据完整性：不完整桶必须丢弃，暖机不足不得给出信号。"""
+
+    def _write_source(self, rows):
+        import gzip
+        import json
+        import tempfile
+
+        handle = tempfile.NamedTemporaryFile(suffix=".jsonl.gz", delete=False)
+        handle.close()
+        path = Path(handle.name)
+        with gzip.open(path, "wt") as stream:
+            for row in rows:
+                stream.write(json.dumps(row) + "\n")
+        self.addCleanup(path.unlink)
+        return path
+
+    def _row(self, ts, price, confirmed=True):
+        return {"timestamp_ms": ts, "open": price, "high": price + 0.5, "low": price - 0.5,
+                "close": price, "volume": 1, "quote_volume": 1, "confirmed": confirmed}
+
+    def test_incomplete_source_bucket_is_dropped(self):
+        import hlsr_signal_generator as generator
+
+        base = 1_700_000_000_000 // 900_000 * 900_000
+        rows = []
+        for bucket in range(3):
+            # 前两个桶各 3 根 5m，最后一个桶只有 2 根（不完整）。
+            children = 3 if bucket < 2 else 2
+            for child in range(children):
+                rows.append(self._row(base + bucket * 900_000 + child * 300_000, 100 + bucket + child * 0.1))
+        bars = generator.load_bars(self._write_source(rows), source_minutes=5)
+        self.assertEqual(len(bars), 2)
+        self.assertEqual([bar.ts for bar in bars], [base, base + 900_000])
+
+    def test_generate_signals_needs_enough_four_hour_history(self):
+        import hlsr_signal_generator as generator
+
+        base = 1_700_000_000_000 // 900_000 * 900_000
+        # 400 根 15m ≈ 25 根 4H，少于 regime 需要的 55 根 → 不得给出信号。
+        bars = [generator.Bar(base + index * 900_000, 100 + index * 0.01, 100.2 + index * 0.01,
+                              99.8 + index * 0.01, 100 + index * 0.01, 1, 1_000_000)
+                for index in range(400)]
+        self.assertEqual(generator.generate_signals("TEST-USDT-SWAP", bars), [])
+
+    def test_number_treats_missing_values_as_missing(self):
+        import altcoin_backtest
+
+        for missing in (None, "", "  ", "x"):
+            self.assertIsNone(altcoin_backtest.number(missing, default=None))
+        self.assertEqual(altcoin_backtest.number("1.25", default=None), 1.25)
+        self.assertEqual(altcoin_backtest.number(None), 0.0)
+        self.assertIsNone(altcoin_backtest.decode_bar(["1700000000000", "", "2", "0.5", "1.5", "10", "0", "15", "1"]))
 
 
 if __name__ == "__main__":

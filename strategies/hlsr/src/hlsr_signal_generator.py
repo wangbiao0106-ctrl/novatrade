@@ -97,8 +97,15 @@ def _rows(path: Path) -> Iterable[dict]:
 
 
 def load_bars(path: Path, source_minutes: int = 5) -> list[Bar]:
-    groups: dict[int, Bar] = {}
+    """把源 K 线聚合为 15 分钟 Bar。
+
+    `source_minutes` 决定"一个完整 15m 桶需要几根源 K 线"（5 → 3 根）。
+    桶内源 K 线数量不足时整根丢弃：否则导出末尾那根只含 1-2 根 5m 的"幽灵 bar"
+    会被当成已收盘 15m K 线参与确认判断。
+    """
+    groups: dict[int, list[Bar]] = {}
     interval = 15 * 60_000
+    expected_children = max(1, interval // (max(1, int(source_minutes)) * 60_000))
     for row in _rows(path):
         if not row.get("confirmed", True):
             continue
@@ -113,20 +120,22 @@ def load_bars(path: Path, source_minutes: int = 5) -> list[Bar]:
             quote_volume=float(row.get("quote_volume", row.get("volCcyQuote", row.get("volume", 0.0)))),
         )
         bucket = ts // interval * interval
-        previous = groups.get(bucket)
-        if previous is None:
-            groups[bucket] = Bar(bucket, bar.open, bar.high, bar.low, bar.close, bar.volume, bar.quote_volume)
-        else:
-            groups[bucket] = Bar(
-                bucket,
-                previous.open,
-                max(previous.high, bar.high),
-                min(previous.low, bar.low),
-                bar.close,
-                previous.volume + bar.volume,
-                previous.quote_volume + bar.quote_volume,
-            )
-    return sorted(groups.values(), key=lambda value: value.ts)
+        groups.setdefault(bucket, []).append(bar)
+    bars: list[Bar] = []
+    for bucket in sorted(groups):
+        children = sorted(groups[bucket], key=lambda value: value.ts)
+        if len(children) < expected_children:
+            continue
+        bars.append(Bar(
+            bucket,
+            children[0].open,
+            max(child.high for child in children),
+            min(child.low for child in children),
+            children[-1].close,
+            sum(child.volume for child in children),
+            sum(child.quote_volume for child in children),
+        ))
+    return bars
 
 
 def _completed_index_map(bars: list[Bar], higher_bars, interval_ms: int) -> list[int]:
