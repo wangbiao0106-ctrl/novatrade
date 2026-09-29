@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-29T19:48:19.896182+00:00",
+  "generated_at": "2026-09-29T20:39:48.561575+00:00",
   "data_start": "2026-03-31T07:00:00+00:00",
   "data_end": "2026-09-28T11:00:00+00:00",
   "summary": [
@@ -199,12 +199,12 @@
       "symbols": 50
     },
     {
-      "trades": 76,
-      "wins": 28,
-      "win_rate": 0.3684,
-      "total_r": 1.7006,
-      "avg_r": 0.0224,
-      "profit_factor": 1.0328,
+      "trades": 77,
+      "wins": 29,
+      "win_rate": 0.3766,
+      "total_r": 1.9404,
+      "avg_r": 0.0252,
+      "profit_factor": 1.0374,
       "max_drawdown_r": 8.9987,
       "max_consecutive_losses": 8,
       "variant": "alt_short",

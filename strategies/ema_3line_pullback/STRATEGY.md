@@ -4,7 +4,7 @@
 
 ## 1. 研究范围
 
-四个变体共用同一信号逻辑：主流币/山寨币分别做多和做空。输入为 OKX USDT 永续 5 分钟已确认 K 线，重采样为完整 1 小时 K 线。数据范围由 `data/kline/okx/swap/5m/manifest.json` 决定。
+四个变体共用同一信号逻辑：主流币/山寨币分别做多和做空。输入为 OKX USDT 永续 5 分钟已确认 K 线，重采样为完整 1 小时 K 线。数据范围由实际加载的导出文件决定（取全池最早/最晚 K 线的时间戳，`summary.json` 的 `data_start`/`data_end` 即由此计算）；`data/kline/okx/swap/5m/manifest.json` 只用于核对导出覆盖范围，回测不读取它。
 
 主流币池：BTC、ETH、BNB、SOL、XRP、DOGE、ADA、TRX、TON、AVAX、LINK、DOT、LTC、BCH、ETC、UNI、ATOM、NEAR、APT、SUI。
 

@@ -150,7 +150,8 @@ def simulate(symbol: str, bs: list[Bar], p: dict, start: int, end: int, btc_stat
     pending: Optional[int] = None
     pos: Optional[dict] = None
     i = max(trend_n - 1, start)
-    while i < min(end, len(bs) - 1):
+    limit = min(end, len(bs))
+    while i < limit:
         bar = bs[i]
         state = btc_state.get(bar.ts)
         # BTC 门控只关闭该时刻的新信号（STRATEGY.md §2.5-§2.6）。已持仓头寸的
@@ -192,7 +193,7 @@ def simulate(symbol: str, bs: list[Bar], p: dict, start: int, end: int, btc_stat
                 pending = None
             else:
                 touched = bar.l <= fast[i] + p["pullback_atr"] * aa[i]
-                if touched:
+                if touched and i + 1 < limit:
                     # A first touch that closes below the fast EMA is a failed
                     # pullback; it must not be retried inside the same setup.
                     if bar.c > fast[i] and atr_ok:
@@ -213,6 +214,14 @@ def simulate(symbol: str, bs: list[Bar], p: dict, start: int, end: int, btc_stat
         if previous_spread <= p["cluster_atr"] and bar.c > prior_high and aligned and atr_ok and breakout_strength >= p["min_breakout_atr"] and spread_now >= p["min_spread_atr"]:
             pending = i
         i += 1
+    if pos is not None:
+        # 窗口末端仍持仓：按本窗口最后一根收盘价标记离场（与 HLSR 的 window_end 口径
+        # 一致）。此前直接丢弃，未结束的交易会从统计里消失；训练段用的是本窗口最后
+        # 一根，不会用到测试段价格。
+        last = bs[limit - 1]
+        px = exit_price(last.c, "buy", p["slippage"])
+        net = px - pos["entry"] - (pos["entry"] + px) * p["fee_rate"]
+        trades.append(Trade(symbol, pos["signal_ts"], pos["entry_ts"], last.ts, pos["entry"], px, pos["stop"], pos["target"], pos["risk"], net / pos["risk"], "window_end"))
     return trades
 
 

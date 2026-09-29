@@ -7,8 +7,7 @@ import csv
 import gzip
 import itertools
 import json
-import math
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,6 +36,21 @@ NON_CRYPTO = {
     "XIAOMI", "XLE", "XOM", "XPD", "XPT", "ZHIPU", "ZHONGJI", "ZM",
 }
 STABLE = {"USDC", "USDT", "DAI", "BUSD", "FDUSD", "TUSD", "USDE", "USD1", "PYUSD", "GUSD", "EURT", "EURS"}
+# 选参约束（STRATEGY.md §7）：训练段样本量与胜率门槛；命中门槛的组合再按
+# 胜率 / 平均 R / 总 R 排序。山寨币多头是重点变体，用更严的样本门槛。
+MIN_SELECTION_TRADES = 30
+MIN_FOCUS_TRADES = 60
+MIN_FOCUS_WIN_RATE = 0.40
+
+
+def selection_key(name: str, summary: dict) -> tuple:
+    """唯一选参目标（此前一处用 30 笔门槛、一处用 60 笔×40%，前者还是死代码）。"""
+    if name == "alt_long":
+        return (summary["trades"] >= MIN_FOCUS_TRADES and summary["win_rate"] >= MIN_FOCUS_WIN_RATE,
+                summary["win_rate"], summary["avg_r"], summary["total_r"])
+    return (summary["trades"] >= MIN_SELECTION_TRADES, summary["total_r"], summary["avg_r"])
+
+
 INDICATOR_CACHE: dict[str, tuple[list[float], list[float], list[float], list[float], list[float]]] = {}
 
 @dataclass
@@ -94,7 +108,7 @@ def simulate(bs: list[Bar], name: str, p: dict, start: int, end: int, fee: float
     # 期间唯一，列表被回收后地址复用会让另一个品种取到本品种的指标。
     key=name
     if key not in INDICATOR_CACHE:
-        q=[]; running=0.0; prefix=[0.0]
+        q=[]; prefix=[0.0]
         for b in bs: prefix.append(prefix[-1]+b.q)
         for i in range(len(bs)):
             lo=max(0,i-47); q.append((prefix[i+1]-prefix[lo])/max(i-lo+1,1))
@@ -102,7 +116,8 @@ def simulate(bs: list[Bar], name: str, p: dict, start: int, end: int, fee: float
     e20,e60,e120,aa,qmean=INDICATOR_CACHE[key]
     trades=[]; pending=None; pos=None; i=max(125,start)
     side=p["side"]
-    while i < min(end,len(bs)-1):
+    limit=min(end,len(bs))
+    while i < limit:
         b=bs[i]
         # BTC 门控只关闭该时刻的新信号（STRATEGY.md §3.5）。已持仓头寸的止损/
         # 止盈/超时必须每个小时照常判定，否则保护单会被门控整段暂停，并把止损
@@ -152,7 +167,7 @@ def simulate(bs: list[Bar], name: str, p: dict, start: int, end: int, fee: float
             else:
                 touched=(b.l <= e20[i]+p["pullback_atr"]*aa[i]) if side=="long" else (b.h >= e20[i]-p["pullback_atr"]*aa[i])
                 held=(b.c>e20[i]) if side=="long" else (b.c<e20[i])
-                if touched and held and vol_ok and ema_slope_ok and volume_ok:
+                if touched and held and vol_ok and ema_slope_ok and volume_ok and i+1 < limit:
                     en=bs[i+1].o*(1+slip if side=="long" else 1-slip); risk=max(p["stop_atr"]*aa[i], en*0.002)
                     stop=en-risk if side=="long" else en+risk; target=en+p["target_r"]*risk if side=="long" else en-p["target_r"]*risk
                     pos={"entry":en,"risk":risk,"stop":stop,"target":target,"ts":bs[i+1].ts,"index":i+1}; pending=None; i+=1; continue
@@ -165,6 +180,13 @@ def simulate(bs: list[Bar], name: str, p: dict, start: int, end: int, fee: float
                 and breakout_strength>=p.get("min_breakout_atr",0.0) and spread_now>=p.get("min_spread_atr",0.0)):
             pending=i
         i+=1
+    if pos:
+        # 窗口末端仍持仓：按本窗口最后一根收盘价标记离场（与正式目录/HLSR 的
+        # window_end 口径一致）。此前直接丢弃，未结束的交易会从统计里消失。
+        last=bs[limit-1]; px=last.c
+        gross=(px-pos["entry"]) if side=="long" else (pos["entry"]-px)
+        net=gross-(pos["entry"]+px)*fee-(pos["entry"]+px)*slip
+        trades.append(Trade(name,"",pos["ts"],last.ts,side,pos["entry"],px,pos["stop"],pos["target"],net/pos["risk"],"window_end"))
     return trades
 
 def stats(ts: list[Trade]) -> dict:
@@ -213,12 +235,9 @@ def main():
                 tr=[]
                 for f in opt_fs:
                     bs=series[base(f)]; cut=next((i for i,b in enumerate(bs) if b.ts>=split),len(bs)); tr += simulate(bs,base(f),candidate,0,cut,cfg["fee_rate"],cfg["slippage"],btc_state)
-                s=stats(tr); candidates.append((s["total_r"] if s["trades"]>=30 else -999,s["avg_r"],candidate,s))
-            if name == "alt_long":
-                candidates.sort(key=lambda x: (x[3]["trades"] >= 60 and x[3]["win_rate"] >= 0.40, x[3]["win_rate"], x[3]["avg_r"], x[3]["total_r"]), reverse=True)
-            else:
-                candidates.sort(key=lambda x:(x[0],x[1]),reverse=True)
-            p=candidates[0][2] if candidates else p; chosen[name]={"params":p,"train_grid_best":candidates[0][3] if candidates else {}}
+                s=stats(tr); candidates.append((candidate,s))
+            candidates.sort(key=lambda item: selection_key(name, item[1]), reverse=True)
+            p=candidates[0][0] if candidates else p; chosen[name]={"params":p,"train_grid_best":candidates[0][1] if candidates else {}}
         test=[]; train=[]
         for f in fs:
             bs=series[base(f)]; cut=next((i for i,b in enumerate(bs) if b.ts>=split),len(bs)); a=simulate(bs,base(f),p,0,cut,cfg["fee_rate"],cfg["slippage"],btc_state); b=simulate(bs,base(f),p,cut,len(bs),cfg["fee_rate"],cfg["slippage"],btc_state); train+=a; test+=b

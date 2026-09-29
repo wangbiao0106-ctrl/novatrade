@@ -106,6 +106,32 @@ class ExitManagementTests(unittest.TestCase):
         gate = {bar.ts: None for bar in bars}
         self.assertEqual(MODULE.simulate("TEST", bars, PARAMS, 0, len(bars), gate), [])
 
+    def test_window_end_position_is_recorded_not_dropped(self):
+        """窗口末端仍持仓必须按最后一根收盘价记为 window_end，不能静默丢弃。"""
+        bars, breach = _open_position_series()
+        gate = {bar.ts: GATE_OPEN for bar in bars}
+        # 把跌破止损的那根换成既不止损也不止盈的横盘 K 线，让头寸跨到窗口末端。
+        flat = bars[breach - 1].c
+        bars[breach] = _bar(breach, flat, open_=flat, high=flat + 0.05, low=flat - 0.05)
+        trades = MODULE.simulate("TEST", bars, PARAMS, 0, breach + 1, gate)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0].reason, "window_end")
+        self.assertEqual(trades[0].exit_ts, bars[breach].ts)
+        expected_exit = MODULE.exit_price(bars[breach].c, "buy", PARAMS["slippage"])
+        self.assertAlmostEqual(trades[0].exit, expected_exit, places=10)
+        expected_net = expected_exit - trades[0].entry - (trades[0].entry + expected_exit) * PARAMS["fee_rate"]
+        self.assertAlmostEqual(trades[0].r, expected_net / trades[0].risk, places=10)
+
+    def test_entry_must_fill_inside_the_window(self):
+        """确认 K 线的下一根已越出窗口时不得开仓（训练段不能用测试段开盘价成交）。"""
+        bars, breach = _open_position_series()
+        gate = {bar.ts: GATE_OPEN for bar in bars}
+        # 确认 K 线是 breach-2，成交价来自 breach-1；窗口在 breach-1 处结束，
+        # 成交根已经在窗口外，因此不得开仓。
+        self.assertEqual(MODULE.simulate("TEST", bars, PARAMS, 0, breach - 1, gate), [])
+        # 窗口包含成交根时同一个信号正常开仓，证明上一条不是因为信号本身不存在。
+        self.assertEqual(len(MODULE.simulate("TEST", bars, PARAMS, 0, breach, gate)), 1)
+
     def test_periods_and_risk_distance_come_from_the_config(self):
         """周期与风险参数必须取自 config，而不是代码里的默认值。"""
         bars, _ = _open_position_series()
