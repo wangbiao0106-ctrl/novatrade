@@ -318,12 +318,12 @@ def main() -> None:
     (OUT / "summary.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2))
     with (OUT / "summary.csv").open("w", newline="") as handle:
         fields = ["split", "symbols", "raw_signals", "rejected_by_portfolio", "trades", "wins", "win_rate", "total_r", "avg_r", "profit_factor", "max_drawdown_r", "max_consecutive_losses", "avg_hold_hours"]
-        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows({key: row.get(key) for key in fields} for row in results)
     with (OUT / "by_symbol.csv").open("w", newline="") as handle:
         fields = ["split", "symbol", "trades", "wins", "win_rate", "total_r", "avg_r"]
-        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(detail)
     print(json.dumps(payload, ensure_ascii=False, indent=2))

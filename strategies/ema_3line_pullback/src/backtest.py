@@ -37,7 +37,7 @@ NON_CRYPTO = {
     "XIAOMI", "XLE", "XOM", "XPD", "XPT", "ZHIPU", "ZHONGJI", "ZM",
 }
 STABLE = {"USDC", "USDT", "DAI", "BUSD", "FDUSD", "TUSD", "USDE", "USD1", "PYUSD", "GUSD", "EURT", "EURS"}
-INDICATOR_CACHE: dict[int, tuple[list[float], list[float], list[float], list[float], list[float]]] = {}
+INDICATOR_CACHE: dict[str, tuple[list[float], list[float], list[float], list[float], list[float]]] = {}
 
 @dataclass
 class Bar:
@@ -90,7 +90,9 @@ def eligible(path: Path, universe: str) -> bool:
 def simulate(bs: list[Bar], name: str, p: dict, start: int, end: int, fee: float, slip: float, btc_state: dict[int, tuple[float, float, float, float]] | None = None) -> list[Trade]:
     if len(bs)<160 or end-start < 2: return []
     closes=[b.c for b in bs]
-    key=id(bs)
+    # 缓存键必须是稳定的标的名（调用方传 base(path)）：`id(bs)` 只保证对象存活
+    # 期间唯一，列表被回收后地址复用会让另一个品种取到本品种的指标。
+    key=name
     if key not in INDICATOR_CACHE:
         q=[]; running=0.0; prefix=[0.0]
         for b in bs: prefix.append(prefix[-1]+b.q)
@@ -186,7 +188,12 @@ def grid(basep: dict):
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument("--optimize",action="store_true"); ap.add_argument("--max-symbols",type=int,default=0, help="cap test universe; default uses all eligible symbols"); ap.add_argument("--optimize-symbols",type=int,default=50, help="largest-volume symbols used for parameter selection"); args=ap.parse_args()
     cfg=json.loads((ROOT/"strategies/ema_3line_pullback/config/variants.json").read_text()); files=list(DATA.glob("*_USDT_SWAP_5m_*.jsonl.gz")); files=[f for f in files if base(f) not in STABLE and base(f) not in NON_CRYPTO]
-    series={base(f): load(f) for f in files}; sample=next(iter(series.values())); first,last=sample[0].ts,sample[-1].ts; split=first+120*24*3600*1000; OUT.mkdir(parents=True,exist_ok=True); all_rows=[]; chosen={}
+    series={base(f): load(f) for f in files}
+    # 训练/测试切分必须确定性：此前取 glob 第一个品种的首根 K 线，文件顺序或某个
+    # 品种首个不完整小时都会让边界整体平移。这里用全池的时间范围。
+    starts=[bars[0].ts for bars in series.values() if bars]; ends=[bars[-1].ts for bars in series.values() if bars]
+    if not starts: raise SystemExit("no bars loaded")
+    first,last=min(starts),max(ends); split=first+120*24*3600*1000; OUT.mkdir(parents=True,exist_ok=True); all_rows=[]; chosen={}
     btc_state={}
     if "BTC" in series:
         btc=series["BTC"]; b60=ema([b.c for b in btc],60)
@@ -205,7 +212,7 @@ def main():
             for candidate in grid(original):
                 tr=[]
                 for f in opt_fs:
-                    bs=series[base(f)]; cut=next((i for i,b in enumerate(bs) if b.ts>=split),len(bs)); tr += simulate(bs,name,candidate,0,cut,cfg["fee_rate"],cfg["slippage"],btc_state)
+                    bs=series[base(f)]; cut=next((i for i,b in enumerate(bs) if b.ts>=split),len(bs)); tr += simulate(bs,base(f),candidate,0,cut,cfg["fee_rate"],cfg["slippage"],btc_state)
                 s=stats(tr); candidates.append((s["total_r"] if s["trades"]>=30 else -999,s["avg_r"],candidate,s))
             if name == "alt_long":
                 candidates.sort(key=lambda x: (x[3]["trades"] >= 60 and x[3]["win_rate"] >= 0.40, x[3]["win_rate"], x[3]["avg_r"], x[3]["total_r"]), reverse=True)
@@ -214,7 +221,7 @@ def main():
             p=candidates[0][2] if candidates else p; chosen[name]={"params":p,"train_grid_best":candidates[0][3] if candidates else {}}
         test=[]; train=[]
         for f in fs:
-            bs=series[base(f)]; cut=next((i for i,b in enumerate(bs) if b.ts>=split),len(bs)); a=simulate(bs,name,p,0,cut,cfg["fee_rate"],cfg["slippage"],btc_state); b=simulate(bs,name,p,cut,len(bs),cfg["fee_rate"],cfg["slippage"],btc_state); [setattr(t,"symbol",base(f)) for t in a+b]; train+=a; test+=b
+            bs=series[base(f)]; cut=next((i for i,b in enumerate(bs) if b.ts>=split),len(bs)); a=simulate(bs,base(f),p,0,cut,cfg["fee_rate"],cfg["slippage"],btc_state); b=simulate(bs,base(f),p,cut,len(bs),cfg["fee_rate"],cfg["slippage"],btc_state); train+=a; test+=b
         for label, trades in (("train",train),("test",test)):
             s=stats(sorted(trades,key=lambda t:t.exit_ts)); s.update({"variant":name,"split":label,"params":p,"symbols":len(fs)}); all_rows.append(s)
             by_symbol={}
@@ -224,9 +231,9 @@ def main():
             for t in trades: t.symbol=base(next((f for f in fs if base(f)==t.symbol),fs[0]) if fs else fs[0]) if t.symbol else "" # retained for schema
     (OUT/"summary.json").write_text(json.dumps({"generated_at":datetime.now(UTC).isoformat(),"data_start":datetime.fromtimestamp(first/1000,UTC).isoformat(),"data_end":datetime.fromtimestamp(last/1000,UTC).isoformat(),"summary":all_rows,"chosen":chosen,"universe":universe_rows},ensure_ascii=False,indent=2))
     with (OUT/"summary.csv").open("w",newline="") as f:
-        w=csv.DictWriter(f,fieldnames=["variant","split","symbols","trades","wins","win_rate","total_r","avg_r","profit_factor","max_drawdown_r","max_consecutive_losses"]); w.writeheader(); [w.writerow({k:x.get(k) for k in w.fieldnames}) for x in all_rows]
+        w=csv.DictWriter(f,fieldnames=["variant","split","symbols","trades","wins","win_rate","total_r","avg_r","profit_factor","max_drawdown_r","max_consecutive_losses"], lineterminator="\n"); w.writeheader(); [w.writerow({k:x.get(k) for k in w.fieldnames}) for x in all_rows]
     with (OUT/"by_symbol.csv").open("w",newline="") as f:
-        w=csv.DictWriter(f,fieldnames=["variant","split","symbol","trades","wins","total_r","avg_r"]); w.writeheader(); w.writerows(detail_rows)
+        w=csv.DictWriter(f,fieldnames=["variant","split","symbol","trades","wins","total_r","avg_r"], lineterminator="\n"); w.writeheader(); w.writerows(detail_rows)
     print(json.dumps({"data_start":datetime.fromtimestamp(first/1000,UTC).isoformat(),"data_end":datetime.fromtimestamp(last/1000,UTC).isoformat(),"summary":all_rows,"chosen":chosen},ensure_ascii=False,indent=2))
 
 if __name__=="__main__": main()
