@@ -38,7 +38,7 @@ def main():
         if m.sum() == 0:
             continue
         res = E.simulate(ev, d, m, [buf], [tp], max_hold, fee, sl_mode="ext")[0]
-        o, h, l, c, v, t = d["o"], d["h"], d["l"], d["c"], d["v"], d["t"]
+        t = d["t"]
         for i in range(len(res["entry"])):
             k = int(res["k"][i])
             s = int(res["s"][i])

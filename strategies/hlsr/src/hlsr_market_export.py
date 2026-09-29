@@ -11,9 +11,9 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from high_short_strategy import (LAB_CONFIG, Params, acceptance_criteria, aggregate_data,
-                                aggregate_result, backtest, fixed_parameters, load_lab_config,
-                                parameter_grid, reward_risk_ratio)
+from high_short_strategy import (LAB_CONFIG, acceptance_criteria, aggregate_data,
+                                fixed_parameters, load_lab_config, parameter_grid,
+                                reward_risk_ratio)
 from altcoin_backtest import Bar, Trade as BaseTrade, beta_interval, bootstrap_positive_probability, rolling_sum
 
 UTC = timezone.utc

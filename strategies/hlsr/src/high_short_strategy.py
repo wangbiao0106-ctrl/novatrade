@@ -241,7 +241,7 @@ def backtest(symbol: str, bars: list[Bar], params: Params, fee: float, slippage:
         if htf_index < 0:
             index += 1
             continue
-        regime, recent_high, resistance, midpoint, major_low, htf_atr = regime_at(four_hour, htf_index)
+        regime, _, resistance, midpoint, major_low, htf_atr = regime_at(four_hour, htf_index)
         if regime not in ({"bearish", "range"} if params.allow_range else {"bearish"}):
             index += 1
             continue
@@ -260,11 +260,9 @@ def backtest(symbol: str, bars: list[Bar], params: Params, fee: float, slippage:
         if len(reasons) < params.minimum_rejection_score:
             index += 1
             continue
-        local_low = lows[index]
         confirmation_index = None
         confirmation = ""
         for confirm in range(index + 1, min(index + params.confirmation_window + 1, len(bars) - 1)):
-            local_low = min(local_low, lows[confirm])
             break_of_local_low = closes[confirm] < min(lows[index + 1:confirm]) if confirm > index + 1 else False
             failed_retest = highs[confirm] >= previous_swing_high * 0.995 and closes[confirm] < bars[confirm].open and closes[confirm] < previous_swing_high
             if break_of_local_low:

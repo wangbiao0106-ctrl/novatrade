@@ -16,7 +16,6 @@ import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
 
 API_BASE = "https://www.okx.com/api/v5"
 UTC = timezone.utc

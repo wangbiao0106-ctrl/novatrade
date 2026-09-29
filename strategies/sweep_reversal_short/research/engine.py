@@ -134,7 +134,7 @@ def rsi(c, n=14):
 def precompute(d, atr_n=14, sma_lens=(), major_wins=(), mom_wins=(), vol_n=48,
                eqh_wins=()):
     """按需预计算指标数组（一次计算，多参数组合复用）"""
-    o, h, l, c, v = d["o"], d["h"], d["l"], d["c"], d["v"]
+    _, h, l, c, v = d["o"], d["h"], d["l"], d["c"], d["v"]
     out = {"atr": atr(h, l, c, atr_n), "rsi": rsi(c, atr_n),
            "sma20": sma(c, 20), "std20": pd.Series(c).rolling(20, min_periods=20).std().fillna(0).to_numpy()}
     # 日内运行最高价（UTC 日）

@@ -3,7 +3,7 @@
 
 用法: python run_grid.py --tf 1h --config cfg_base.json [--min-qv 0] [--out res.csv] [--max-syms N]
 """
-import argparse, json, os, sys, time
+import argparse, json, os, time
 import numpy as np
 import pandas as pd
 import engine as E
@@ -200,7 +200,6 @@ def main():
     print(f"rows={len(df)} saved -> {args.out}", flush=True)
 
     # 打印训练集最优 top10（按 win_rate≥0.5 与 ratio≥2 联合目标）
-    cols = [c for c in df.columns if not c.startswith(("tr_", "te_"))]
     sub = df.dropna(subset=["tr_trades"]).copy()
     sub["ok_tr"] = (sub["tr_win_rate"] >= 0.50) & (sub["tr_ratio"] >= 2.0)
     sub["score"] = (sub["tr_win_rate"] - 0.5) * 100 + (sub["tr_ratio"] - 2.0)

@@ -29,7 +29,6 @@ def main(pool="lowmid"):
     data = {s: d for s, d in data.items() if s in altcoins}
     bd = E.load_tf("1h", syms={"BTC"})["BTC"]
     bs = E.sma(bd["c"], 200)
-    qv = meta.set_index("sym")["tot_qv"]
     trades = []
     for sym, d in data.items():
         pre = E.precompute(d, sma_lens=(200,), major_wins=(288,),

@@ -37,7 +37,7 @@ def parse_one(path):
     # 去重、排序
     order = np.argsort(t, kind="stable")
     t, o, h, l, c, v, qv = (a[order] for a in (t, o, h, l, c, v, qv))
-    uniq, idx = np.unique(t, return_index=True)
+    _, idx = np.unique(t, return_index=True)
     t, o, h, l, c, v, qv = (a[idx] for a in (t, o, h, l, c, v, qv))
     # 元信息
     meta = dict(sym=sym, n=len(t), t0=t[0], t1=t[-1],

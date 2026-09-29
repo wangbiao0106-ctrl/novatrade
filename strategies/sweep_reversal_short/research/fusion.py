@@ -3,7 +3,7 @@
 
 对比基线：固定 2.2R + 96根时间离场（60笔/51.7%/1.69R/+0.37R）
 """
-import json, os, sys
+import json, os
 import numpy as np
 import pandas as pd
 import engine as E

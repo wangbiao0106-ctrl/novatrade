@@ -153,7 +153,7 @@ def symbol_state(d, btc_d, cfg, d15=None):
         if not (v[s] >= cfg["vol_mult"] * volmean[s]):
             continue
         btc_idx = int(np.searchsorted(btc_d["t"], t[j], side="right") - 1)
-        gate, bc, bs = btc_gate_at(btc_d, btc_idx)
+        gate, _, _ = btc_gate_at(btc_d, btc_idx)
         if not gate:
             continue
         ext = float(h[s:j + 1].max())

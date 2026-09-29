@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from dataclasses import dataclass
 
 import numpy as np
@@ -372,7 +371,6 @@ def main():
         # The scaled experiment is expensive. Use the two broad pools so the
         # comparison remains useful and avoids pretending that Top50 is a
         # separate 15m strategy selection.
-        cfg, filt, _ = scaled_cfg(4)
         btc15 = btc
         for pool_name in ("lowmid177", "lowmid_high59", "lowmid_mid59",
                           "lowmid_low59", "all295"):
