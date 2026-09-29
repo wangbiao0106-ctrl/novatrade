@@ -19,6 +19,8 @@ UTC = timezone.utc
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data/kline/okx/swap/5m"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "strategies/hlsr/results"
+# 选币所用的训练期长度（天）。必须不晚于第一折测试期起点，避免选择性前视。
+SELECTION_DAYS = 60
 
 
 def load_15m(path: Path) -> list[Bar]:
@@ -39,7 +41,12 @@ def load_15m(path: Path) -> list[Bar]:
 
 
 def symbol_from_path(path: Path) -> str:
-    return path.name.split("_5m_")[0] + "-USDT-SWAP"
+    # 文件名形如 BEAT_USDT_SWAP_5m_<start>_<end>.jsonl.gz；合约 id 需要的是
+    # BEAT-USDT-SWAP。直接拼 "-USDT-SWAP" 会得到 BEAT_USDT_SWAP-USDT-SWAP。
+    stem = path.name.split("_5m_")[0]
+    if stem.endswith("_USDT_SWAP"):
+        stem = stem[: -len("_USDT_SWAP")]
+    return stem.replace("_", "-") + "-USDT-SWAP"
 
 
 def hard_filter_stats(bars: list[Bar]) -> dict[str, int]:
@@ -76,14 +83,22 @@ def main() -> None:
     stats: dict[str, dict[str, int]] = {}
     for path in paths:
         symbol = symbol_from_path(path)
-        bars = load_15m(path)
-        loaded[symbol] = bars
-        stats[symbol] = hard_filter_stats(bars)
+        loaded[symbol] = load_15m(path)
+    if not loaded:
+        raise SystemExit("market_export 中没有找到任何 K 线导出文件")
+    # 标的池必须只用第一折训练期（数据起点起 60 天）的数据挑选。用整段 180 天
+    # 的事件数选币会把测试期信息带进样本外指标（选择性前视）。
+    data_start = min(bar.ts for bars in loaded.values() for bar in bars[:1])
+    selection_end = data_start + int(SELECTION_DAYS * 86_400_000)
+    for symbol, bars in loaded.items():
+        stats[symbol] = hard_filter_stats([bar for bar in bars if bar.ts < selection_end])
     eligible = sorted((value["composite_hits"], symbol) for symbol, value in stats.items() if value["composite_hits"] >= args.min_events)
     selected = [symbol for _, symbol in eligible[-args.max_symbols:]]
     selected.sort()
     if not selected:
         raise SystemExit("market_export中没有满足硬筛选事件数的合约")
+    print(f"selection_window={datetime.fromtimestamp(data_start / 1000, UTC).isoformat()}"
+          f"..{datetime.fromtimestamp(selection_end / 1000, UTC).isoformat()} ({SELECTION_DAYS} 天训练期)")
     timestamps = [bar.ts for symbol in selected for bar in loaded[symbol]]
     start = datetime.fromtimestamp(min(timestamps) / 1000, UTC)
     end = datetime.fromtimestamp(max(timestamps) / 1000, UTC) + timedelta(minutes=15)
@@ -122,17 +137,20 @@ def main() -> None:
         for trade in all_trades
     ])
     # Interpret “risk:reward <= 1:2” as reward/risk >= 2.0 in the report.
+    # DESIGN.md:79 的接受标准包含"样本外至少 30 笔"；此前只把样本量放进
+    # acceptance 字典、没有参与 passed，导致 9 笔样本也能被判通过。
+    sample_sufficient = oos["trades"] >= 30
     criteria = {
         "win_rate_gt_50pct": oos["win_rate"] > 0.50,
         "positive_mean_probability_gt_50pct": oos_positive_probability["positive_mean_probability"] > 0.50,
         "actual_reward_risk_gte_2": actual_rr >= 2.0,
         "average_net_r_positive": oos["avg_net_r"] > 0,
+        "sample_sufficient_30_trades": sample_sufficient,
     }
     passed = all(criteria.values())
-    sample_sufficient = oos["trades"] >= 30
     output = args.output_dir
     output.mkdir(parents=True, exist_ok=True)
-    report = {"strategy": "HLSR", "source": str(root), "timeframe": "5m source -> 15m entry", "window": {"start": start.isoformat(), "end": end.isoformat()}, "source_files": len(paths), "eligible_symbols": len(eligible), "selected_symbols": selected, "hard_filters": {"gain_24h_gt": 0.40, "quote_volume_24h_gt": 30_000_000}, "screening_stats": {symbol: stats[symbol] for symbol in selected}, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": {**oos, "beta": oos_beta, "positive_probability": oos_positive_probability}, "actual_reward_risk": actual_rr, "risk_reward_requirement": "reward/risk >= 2.0 (interpreted from risk:reward <= 1:2)", "acceptance": {**criteria, "sample_sufficient_30_trades": sample_sufficient}, "passed": passed}
+    report = {"strategy": "HLSR", "source": str(root), "timeframe": "5m source -> 15m entry", "window": {"start": start.isoformat(), "end": end.isoformat()}, "source_files": len(paths), "eligible_symbols": len(eligible), "selected_symbols": selected, "hard_filters": {"gain_24h_gt": 0.40, "quote_volume_24h_gt": 30_000_000}, "screening_stats": {symbol: stats[symbol] for symbol in selected}, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": {**oos, "beta": oos_beta, "positive_probability": oos_positive_probability}, "actual_reward_risk": actual_rr, "risk_reward_requirement": "reward/risk >= 2.0 (interpreted from risk:reward <= 1:2)", "acceptance": criteria, "passed": passed}
     (output / "hlsr_market_export_report.json").write_text(json.dumps(report, indent=2))
     with (output / "hlsr_market_export_trades.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(all_trades[0]) if all_trades else ["symbol", "entry_ts", "net_r"])

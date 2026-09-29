@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Iterable
 
 from altcoin_backtest import Bar, atr, ema, rolling_sum, short_entry_price
-from high_short_strategy import Params, resample
+from high_short_strategy import Params, rejection_reasons, resample
 
 
 STANDARD_PARAMS = Params(
@@ -29,6 +29,7 @@ STANDARD_PARAMS = Params(
     trail_bars=2,
     allow_range=True,
     zone_required="any",
+    reject_depth_atr=0.1,
 )
 
 
@@ -48,6 +49,7 @@ def load_params(path: Path | None) -> Params:
         trail_bars=int(values["trail_bars"]),
         allow_range=bool(values["allow_range"]),
         zone_required=str(values["zone_required"]),
+        reject_depth_atr=float(values.get("reject_depth_atr", STANDARD_PARAMS.reject_depth_atr)),
     )
 
 
@@ -172,18 +174,15 @@ def _candidate_signal(
     previous_swing_high = max(highs[sweep_index - params.swing_lookback:sweep_index])
     if not (highs[sweep_index] > previous_swing_high and closes[sweep_index] < previous_swing_high):
         return None
-    candle_range = max(highs[sweep_index] - lows[sweep_index], 1e-12)
-    upper_wick = (highs[sweep_index] - max(bars[sweep_index].open, closes[sweep_index])) / candle_range
-    reasons = (
-        "large_upper_wick" if upper_wick >= params.wick_ratio else "",
-        "bearish_close" if closes[sweep_index] < bars[sweep_index].open else "",
-        "volume_expansion" if volumes[sweep_index] > sum(volumes[sweep_index - 20:sweep_index]) / 20 * params.volume_multiple else "",
-        "failed_breakout" if closes[sweep_index] < previous_swing_high else "",
+    mean_volume = sum(volumes[sweep_index - 20:sweep_index]) / 20
+    reasons = rejection_reasons(
+        params,
+        open_price=bars[sweep_index].open, high=highs[sweep_index], low=lows[sweep_index],
+        close=closes[sweep_index], previous_swing_high=previous_swing_high,
+        atr14=ranges[sweep_index], volume=volumes[sweep_index], mean_volume=mean_volume,
     )
-    rejection_reasons = tuple(reason for reason in reasons if reason)
-    if len(rejection_reasons) < params.minimum_rejection_score:
+    if len(reasons) < params.minimum_rejection_score:
         return None
-
     if not (sweep_index < confirmation_index <= sweep_index + params.confirmation_window):
         return None
     break_of_local_low = closes[confirmation_index] < min(lows[sweep_index + 1:confirmation_index]) if confirmation_index > sweep_index + 1 else False
@@ -271,14 +270,19 @@ def generate_signals(symbol: str, bars: list[Bar], params: Params = STANDARD_PAR
         midpoint = (recent_high + major_low) / 2
         width = (recent_high - major_low) / max(midpoint, 1e-12)
         htf_atr = htf_ranges[index]
-        if htf_closes[index] < fast_ema[index] < slow_ema[index]:
+        # 与 high_short_strategy.regime_at 保持一致：EMA50 至少需要 55 根已收盘
+        # 的 4H K 线才有意义，不足时状态必须是 unknown（不允许开仓），不能按
+        # EMA20/EMA50 的早期数值猜状态。
+        if index < 54:
+            state = "unknown"
+        elif htf_closes[index] < fast_ema[index] < slow_ema[index]:
             state = "bearish"
         elif htf_closes[index] > fast_ema[index] > slow_ema[index]:
             state = "bullish"
         elif width <= max(0.08, htf_atr / max(midpoint, 1e-12) * 8):
             state = "range"
         else:
-            state = "transition" if index >= 54 else "unknown"
+            state = "transition"
         regimes.append((state, recent_high, recent_high + htf_atr * 0.25, midpoint, major_low, htf_atr))
     signals: list[Signal] = []
     cooldown = -1

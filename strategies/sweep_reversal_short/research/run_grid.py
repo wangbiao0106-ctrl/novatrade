@@ -16,6 +16,7 @@ def agg_init():
         p = tag + "_" if tag else ""
         a[p + "n"] = 0; a[p + "win_n"] = 0.0; a[p + "loss_n"] = 0.0
         a[p + "pos"] = 0.0; a[p + "neg"] = 0.0; a[p + "pnl"] = 0.0
+        a[p + "pnl_R"] = 0.0
         a[p + "risk"] = 0.0
         a[p + "g_pos"] = 0.0; a[p + "g_neg"] = 0.0
         a[p + "k_tp"] = 0; a[p + "k_sl"] = 0; a[p + "k_time"] = 0
@@ -34,6 +35,7 @@ def agg_add(a, pnl, risk, kinds, entry_t, pnl_g=None):
         a[p + "loss_n"] += float((~w).sum())
         a[p + "pos"] += p_[w].sum(); a[p + "neg"] += (-p_[~w]).sum()
         a[p + "pnl"] += p_.sum(); a[p + "risk"] += r_.sum()
+        a[p + "pnl_R"] += np.divide(p_, np.maximum(r_, 1e-12)).sum()
         a[p + "g_pos"] += g_[wg].sum(); a[p + "g_neg"] += (-g_[~wg]).sum()
         a[p + "k_tp"] += int((k_ == 2).sum()); a[p + "k_sl"] += int((k_ == 1).sum())
         a[p + "k_time"] += int((k_ == 3).sum())
@@ -57,6 +59,7 @@ def agg_row(a, prefix=""):
     row[p + "pf"] = a[p + "pos"] / a[p + "neg"] if a[p + "neg"] > 0 else np.nan
     row[p + "expect"] = a[p + "pnl"] / a[p + "n"]
     row[p + "expect_R"] = a[p + "pnl"] / a[p + "risk"] if a[p + "risk"] > 0 else np.nan
+    row[p + "expect_R_mean"] = a[p + "pnl_R"] / a[p + "n"]
     row[p + "tp_pct"] = a[p + "k_tp"] / a[p + "n"]
     row[p + "sl_pct"] = a[p + "k_sl"] / a[p + "n"]
     row[p + "time_pct"] = a[p + "k_time"] / a[p + "n"]
@@ -70,10 +73,7 @@ def run_symbol(d, pre, F, detect_cfgs, filter_cfgs, bufs, tp_mults, max_hold,
         if ev is None:
             continue
         if btc is not None:
-            bt, bc, bs = btc
-            idx = np.searchsorted(bt, ev["entry_t"], side="right") - 1
-            idx = np.clip(idx, 0, len(bt) - 1)
-            ev["btc_flag"] = (bc[idx] > bs[idx]).astype(np.int8)
+            E.btc_gate_flags(ev, btc)
         for fi, f in enumerate(filter_cfgs):
             mask = E.apply_filters(ev, f)
             if mask.sum() == 0:
@@ -93,7 +93,12 @@ def main():
     ap.add_argument("--out", default="strategies/sweep_reversal_short/results/grid_result.csv")
     ap.add_argument("--min-qv", type=float, default=0.0)
     ap.add_argument("--max-syms", type=int, default=0)
-    ap.add_argument("--max-hold", type=int, default=48)
+    ap.add_argument("--pool", default="all",
+                    choices=["all", "lowmid", "lowmid_high", "lowmid_mid", "lowmid_low",
+                             "top50", "bottom148"],
+                    help="历史研究池：全部山寨币、推荐中低流动性三层、静态Top50或后148")
+    ap.add_argument("--max-hold", type=int, default=96,
+                    help="最大持仓根数；上线规则是 96 根 1h，默认值必须与规则一致")
     ap.add_argument("--fee", type=float, default=0.0005)
     ap.add_argument("--sl-mode", default="ext", choices=["ext", "level", "h2", "atr"])
     args = ap.parse_args()
@@ -108,6 +113,32 @@ def main():
     meta = E.load_meta()
     syms = set(meta["sym"])
     data = E.load_tf(args.tf, syms=syms, min_qv=args.min_qv)
+    btc_data = data.get("BTC")
+    universe_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "universe.json")
+    uni = json.load(open(universe_path))
+    alts = set(uni["altcoins"])
+    m = meta[meta["sym"].isin(alts)].copy()
+    days = ((m["t1"] - m["t0"]) / 86_400_000).clip(lower=1)
+    ordered = m.assign(qv_daily=m["tot_qv"] / days).sort_values("qv_daily", ascending=False)["sym"].tolist()
+    if args.pool == "all":
+        data = {s: d for s, d in data.items() if s in alts}
+    if args.pool != "all":
+        if args.pool.startswith("lowmid"):
+            rec = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "universe_recommended.json")))
+            rec_ordered = [s for s in ordered if s in set(rec["recommended_low_mid"])]
+            if args.pool == "lowmid":
+                allowed = set(rec_ordered)
+            else:
+                third = len(rec_ordered) // 3
+                chunks = {
+                    "lowmid_high": rec_ordered[:third],
+                    "lowmid_mid": rec_ordered[third:2 * third],
+                    "lowmid_low": rec_ordered[2 * third:],
+                }
+                allowed = set(chunks[args.pool])
+        else:
+            allowed = set(ordered[:50] if args.pool == "top50" else ordered[len(ordered) // 2:])
+        data = {s: d for s, d in data.items() if s in allowed}
     syms = sorted(data.keys())
     if args.max_syms:
         syms = syms[: args.max_syms]
@@ -136,7 +167,7 @@ def main():
     # BTC 大盘 regime（可选）
     btc = None
     if any(f.get("btc_up", 0) or f.get("btc_down", 0) for f in filter_cfgs):
-        bd = data.get("BTC")
+        bd = btc_data
         if bd is not None:
             bs = E.sma(bd["c"], 200)
             btc = (bd["t"], bd["c"], bs)

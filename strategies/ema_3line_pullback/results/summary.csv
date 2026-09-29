@@ -1,0 +1,9 @@
+variant,split,symbols,trades,wins,win_rate,total_r,avg_r,profit_factor,max_drawdown_r,max_consecutive_losses
+major_long,train,19,99,37,0.3737,-19.0515,-0.1924,0.7247,20.9836,6
+major_long,test,19,28,9,0.3214,-9.873,-0.3526,0.5519,13.6354,7
+major_short,train,19,58,21,0.3621,-13.3077,-0.2294,0.682,13.4591,6
+major_short,test,19,36,15,0.4167,-5.5843,-0.1551,0.781,10.7429,6
+alt_long,train,50,73,25,0.3425,8.4061,0.1152,1.1619,12.8122,9
+alt_long,test,50,35,13,0.3714,7.9278,0.2265,1.3354,9.4963,9
+alt_short,train,50,129,47,0.3643,3.4362,0.0266,1.0394,14.5565,8
+alt_short,test,50,76,28,0.3684,1.7006,0.0224,1.0328,8.9987,8

@@ -31,6 +31,9 @@ UTC = timezone.utc
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data/kline/okx/swap/15m"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "strategies/hlsr/results"
+# 选币只允许使用窗口前 60 天（第一折训练期）的成交额；用窗口末尾或整段数据
+# 排名会把测试期信息带进样本外结果。
+SELECTION_DAYS = 60
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,9 @@ class Params:
     trail_bars: int
     allow_range: bool
     zone_required: str
+    # 拒绝评分第 4 项"失败突破"的深度阈值（× ATR14）。必须大于 0，否则第 4 项
+    # 会退化成与"扫顶"前置条件重复的恒真项。
+    reject_depth_atr: float = 0.1
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -119,6 +125,27 @@ def regime_at(bars: list[HTFBar], index: int) -> tuple[str, float, float, float,
         state = "transition"
     resistance = recent_high + htf_atr * 0.25
     return state, recent_high, resistance, midpoint, major_low, htf_atr
+
+
+def rejection_reasons(params: Params, *, open_price: float, high: float, low: float, close: float,
+                      previous_swing_high: float, atr14: float, volume: float,
+                      mean_volume: float) -> tuple[str, ...]:
+    """拒绝评分四项的唯一实现，回测器和实时生成器共用。
+
+    第 4 项（失败突破）定义为"深度失败突破"：收盘必须比被扫的前高低出
+    `reject_depth_atr × ATR14`。只判断 `close < previous_swing_high` 会与"扫顶"
+    的前置条件完全重复而恒为真，使评分整体虚高一分，等于把
+    `minimum_rejection_score` 静默降一档。
+    """
+    candle_range = max(high - low, 1e-12)
+    upper_wick = (high - max(open_price, close)) / candle_range
+    checks = (
+        ("large_upper_wick", upper_wick >= params.wick_ratio),
+        ("bearish_close", close < open_price),
+        ("volume_expansion", volume > mean_volume * params.volume_multiple),
+        ("failed_breakout", close < previous_swing_high - params.reject_depth_atr * atr14),
+    )
+    return tuple(name for name, passed in checks if passed)
 
 
 def aggregate_result(params: Params, trades: list[HighShortTrade]) -> Result:
@@ -185,13 +212,14 @@ def backtest(symbol: str, bars: list[Bar], params: Params, fee: float, slippage:
         if not sweep:
             index += 1
             continue
-        candle_range = max(highs[index] - lows[index], 1e-12)
-        upper_wick = (highs[index] - max(bars[index].open, closes[index])) / candle_range
-        volume_expansion = volumes[index] > sum(volumes[index - 20:index]) / 20 * params.volume_multiple
-        bearish_close = closes[index] < bars[index].open
-        failed_breakout = closes[index] < previous_swing_high
-        rejection_score = sum((upper_wick >= params.wick_ratio, bearish_close, volume_expansion, failed_breakout))
-        if rejection_score < params.minimum_rejection_score:
+        mean_volume = sum(volumes[index - 20:index]) / 20
+        reasons = rejection_reasons(
+            params,
+            open_price=bars[index].open, high=highs[index], low=lows[index], close=closes[index],
+            previous_swing_high=previous_swing_high, atr14=ranges[index],
+            volume=volumes[index], mean_volume=mean_volume,
+        )
+        if len(reasons) < params.minimum_rejection_score:
             index += 1
             continue
         local_low = lows[index]
@@ -311,7 +339,11 @@ def cached_symbols(data_dir: Path, start_ms: int, end_ms: int, limit: int) -> li
 
 
 def cached_bar_symbols(data_dir: Path, start_ms: int, end_ms: int, limit: int) -> list[str]:
-    """Rank existing bar caches by their final 24h quote volume for offline use."""
+    """Rank existing bar caches by first-60-day quote volume.
+
+    选币只能用窗口早期的数据。此前用窗口最后 24h 的成交额排名，等于用测试期末尾
+    的信息挑标的（选择性前视），会把样本外指标系统性抬高。
+    """
     suffix = f"_15m_{start_ms}_{end_ms}.json"
     ranked: list[tuple[float, str]] = []
     for path in sorted(data_dir.glob(f"*_15m_{start_ms}_{end_ms}.json")):
@@ -322,7 +354,7 @@ def cached_bar_symbols(data_dir: Path, start_ms: int, end_ms: int, limit: int) -
             continue
         try:
             rows = json.loads(path.read_text())
-            volume = sum(float(row.get("quote_volume", 0)) for row in rows[-96:])
+            volume = sum(float(row.get("quote_volume", 0)) for row in rows[:96 * SELECTION_DAYS])
         except (AttributeError, OSError, TypeError, ValueError):
             continue
         ranked.append((-volume, symbol))

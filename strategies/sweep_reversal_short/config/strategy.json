@@ -1,12 +1,34 @@
 {
   "strategy": "SWEEP_REVERSAL_SHORT",
-  "version": "1.0",
+  "version": "1.3",
+  "source_of_truth": "strategies/sweep_reversal_short/STRATEGY.md",
   "name_zh": "山寨币二次扫顶做空（1h）",
   "market": "OKX_USDT_LINEAR_PERPETUAL",
   "entry_timeframe_minutes": 60,
-  "universe": {
-    "note": "中低流动性加密山寨币（排除BTC/稳定币/股票ETF商品代币）。名单: strategies/sweep_reversal_short/config/universe_recommended.json",
+  "confirmation_timeframe_minutes": 15,
+  "confirmation_window_minutes": 60,
+  "candle_timestamp": "bar_open_time",
+  "confirmation_window_origin": "structure_bar_close",
+  "confirmation_rule": "first confirmed 15m close <= 1h structure close and close < open, within [structure_bar_close, structure_bar_close + 60m)",
+  "confirmation_window_bars": [60, 75, 90, 105],
+  "entry_submission": "market",
+  "runtime_universe": {
+    "mode": "dynamic",
+    "category": "hotAltcoins",
+    "limit": 20,
+    "sort": "volume24h_desc",
+    "refresh_seconds": 30,
+    "filter": "USDT linear swaps; exclude mainstream, stablecoin, equity, index and commodity bases",
     "btc_not_traded": true
+  },
+  "backtest_universe": {
+    "mode": "snapshot",
+    "pool": "177个中低流动性山寨币",
+    "files": [
+      "strategies/sweep_reversal_short/config/universe_recommended.json",
+      "strategies/sweep_reversal_short/config/universe.json"
+    ],
+    "note": "仅用于历史回测基线，不是运行时绑定名单"
   },
   "signal_parameters": {
     "L": 10,
@@ -18,12 +40,37 @@
     "rsi_min": 62,
     "volume_multiple": 1.5,
     "resweep_deep_atr": 0.2,
-    "resweep_lower_ext": true
+    "resweep_lower_ext": true,
+    "atr_period": 14,
+    "buffer_atr": 0.5,
+    "take_profit_r": 2.2,
+    "min_atr_pct": 0.5,
+    "max_risk_atr": 5.0
   },
   "regime_gate": {
     "enabled": true,
+    "minimum_history_bars": 200,
     "rule": "BTC 1H close < BTC SMA200(1H)",
     "when_off": "停止新开仓，已持仓位按原止损止盈管理"
+  },
+  "risk_policy": {
+    "account_daily_loss_percent": 5.0,
+    "baseline": "calendar_day_start_equity",
+    "measurement": "mark_to_market",
+    "actions": [
+      "stop_all_strategies",
+      "cancel_entry_orders",
+      "close_all_positions_reduce_only",
+      "latch_until_manual_reset"
+    ],
+    "strategy_rules_before_trip": "strategy_specific_stop_take_time_exit"
+  },
+  "capital_pool": {
+    "mode": "per_strategy_instance",
+    "allocation_percent_default": 100.0,
+    "rollover": "compound_realized_pnl",
+    "unrealized_pnl_releases_available": false,
+    "cross_pool_borrowing": false
   },
   "position_management": {
     "leverage": 1.0,
@@ -32,20 +79,50 @@
     "time_exit_bars": 96,
     "cooldown_bars": 96,
     "risk_per_trade_pct": 1.0,
+    "risk_per_trade_scope": "each_entry_order",
+    "risk_per_trade_basis": "strategy_pool_equity_at_authorization",
+    "sizing_formula": "min(available_capital, pool_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))",
+    "risk_budget_costs_included": false,
+    "risk_reference": "strategy_pool_equity",
     "min_atr_pct": 0.5,
     "max_risk_atr": 5.0
+  },
+  "runtime_integration": {
+    "signal_generation": "implemented",
+    "entry_submission": "okx_demo_market_order",
+    "protective_exit_orders": "implemented",
+    "risk_distance_position_sizing": "implemented",
+    "strategy_time_exit": "implemented",
+    "account_daily_loss_circuit_breaker": "implemented",
+    "evaluation_is_idempotent_per_confirmed_bar": true,
+    "cooldown_advances": "per_confirmed_bar",
+    "per_instrument_status_isolation": true,
+    "signal_ownership_check_before_submit": true,
+    "note": "1h只建立二次扫顶结构；后续最多1小时等待首根符合条件的15m阴线收盘，随后以市价做空。入场按策略资金池权益和止损距离计算数量，并附带条件止损/止盈；运行时监控负责96根1h（384根15m）时间离场，账户级5% mark-to-market 熔断负责停止策略、撤单和全平。"
   },
   "costs": {
     "fee_rate_one_way": 0.0005,
     "funding_note": "做空需评估资金费率"
   },
   "backtest": {
-    "pool": "177个中低流动性山寨币",
-    "trades": 60,
-    "win_rate": 0.517,
-    "reward_risk_ratio": 1.69,
+    "rule": "1h structure + first 15m bearish close confirmation + market short",
+    "evidence_script": "strategies/sweep_reversal_short/research/report_live_rule.py",
+    "btc_gate_semantics": "fail_closed_requires_200_prior_hourly_bars",
+    "pool": "177个中低流动性山寨币（历史基线）",
+    "structures": 54,
+    "trades": 41,
+    "win_rate": 0.561,
+    "reward_risk_ratio": 1.53,
     "expectancy_R_per_trade": 0.37,
-    "max_drawdown_R": 7.9,
-    "period": "2026-03-31 ~ 2026-09-27"
+    "train_trades": 18,
+    "train_expectancy_R_per_trade": 0.23,
+    "test_trades": 23,
+    "test_expectancy_R_per_trade": 0.48,
+    "expectancy_R_per_trade_at_10bps_per_side": 0.35,
+    "max_drawdown_R": 4.09,
+    "max_consecutive_losses": 4,
+    "worst_month_expectancy_R": -1.02,
+    "period": "2026-03-31 ~ 2026-09-27",
+    "superseded_note": "更早的 60 笔/+0.37R/回撤 7.9R 来自 1h 收盘市价基线 research/final_report.py；中间一版 47 笔/+0.39R 的门控用了 min_periods=1 的均线、把 BTC 历史不足 200 根的开头 8 天算成门控开。两版均已作废"
   }
 }

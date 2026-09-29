@@ -50,11 +50,14 @@ def main():
             bt_idx = int(np.clip(np.searchsorted(btc_t, res["entry_t"][i],
                                                  side="right") - 1,
                                  0, len(btc_t) - 1))
+            # BTC 历史不足 200 根时门控无法判定（上线规则下不发信号），特征记 -1
+            # 而不是用 min_periods=1 的均线给出一个看似有效的取值。
+            btc_known = bt_idx >= 199 and np.isfinite(bs200[bt_idx])
             rows.append(dict(
                 sym=sym, qv_rank=qv_rank.get(sym, np.nan), win=win,
                 entry_t=res["entry_t"][i],
-                btc_b200=int(bd["c"][bt_idx] < bs200[bt_idx]),
-                btc_b50=int(bd["c"][bt_idx] < bs50[bt_idx]),
+                btc_b200=int(bd["c"][bt_idx] < bs200[bt_idx]) if btc_known else -1,
+                btc_b50=int(bd["c"][bt_idx] < bs50[bt_idx]) if btc_known else -1,
                 hour=(t[k] // 3_600_000) % 24,
                 dow=(t[k] // 86_400_000 + 4) % 7,
                 risk=res["risk"][i] / atrk,

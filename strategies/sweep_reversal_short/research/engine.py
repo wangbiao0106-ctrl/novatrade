@@ -68,6 +68,25 @@ def sma(x, n):
     # 前 n 根用扩展均值（因果，无未来函数）
     return pd.Series(x).rolling(n, min_periods=1).mean().to_numpy()
 
+def btc_gate_flags(ev, btc, min_history=200):
+    """BTC 门控标记的唯一实现，fail-closed，与运行时 `btcGateAllows` 一致。
+
+    `btc_flag = 1` 表示"不通过门控"（`btc_down` 过滤器要求 flag == 0 才放行）。
+    信号时刻之前不足 `min_history` 根 1h K 线、索引越界、或收盘/SMA 不可用时一律
+    置 1（不发新信号）。历史实现用 `(close > sma).astype(int8)` 且 `sma` 走
+    `min_periods=1`，会把数据开头（BTC 历史不足 200 根）算成"门控开"，虚增成交。
+    """
+    bt, bc, bs = btc
+    idx = np.searchsorted(bt, ev["entry_t"], side="right") - 1
+    flag = np.ones(len(ev["entry_t"]), dtype=np.int8)
+    valid = (idx >= min_history - 1) & (idx < len(bc))
+    safe = np.clip(idx, 0, max(len(bc) - 1, 0))
+    if len(bc):
+        usable = valid & np.isfinite(bc[safe]) & np.isfinite(bs[safe])
+        flag[usable] = (bc[safe][usable] > bs[safe][usable]).astype(np.int8)
+    ev["btc_flag"] = flag
+    return ev
+
 def rsi(c, n=14):
     diff = np.diff(c, prepend=c[0])
     up = np.clip(diff, 0, None)
@@ -82,7 +101,7 @@ def precompute(d, atr_n=14, sma_lens=(), major_wins=(), mom_wins=(), vol_n=48,
                eqh_wins=()):
     """按需预计算指标数组（一次计算，多参数组合复用）"""
     o, h, l, c, v = d["o"], d["h"], d["l"], d["c"], d["v"]
-    out = {"atr": atr(h, l, c, atr_n), "rsi": rsi(c),
+    out = {"atr": atr(h, l, c, atr_n), "rsi": rsi(c, atr_n),
            "sma20": sma(c, 20), "std20": pd.Series(c).rolling(20, min_periods=20).std().fillna(0).to_numpy()}
     # 日内运行最高价（UTC 日）
     day_id = d["t"] // 86_400_000

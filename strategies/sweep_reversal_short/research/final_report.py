@@ -42,9 +42,7 @@ def main(pool="lowmid"):
         ev = E.detect_events(d, pre, F, dict(CFG))
         if ev is None:
             continue
-        idx = np.clip(np.searchsorted(bd["t"], ev["entry_t"], side="right") - 1,
-                      0, len(bd["t"]) - 1)
-        ev["btc_flag"] = (bd["c"][idx] > bs[idx]).astype(np.int8)
+        E.btc_gate_flags(ev, (bd["t"], bd["c"], bs))
         m = E.apply_filters(ev, FILT)
         if m.sum() == 0:
             continue

@@ -61,7 +61,11 @@ close[i] < previous_swing_high
 1. 上影线占本根振幅达到 `wick_ratio`；
 2. 收阴；
 3. 成交额超过前 20 根均值乘以 `volume_multiple`；
-4. 收盘重新跌破前高。
+4. 深度失败突破：`close[i] < previous_swing_high − reject_depth_atr × ATR14[i]`（默认 `reject_depth_atr = 0.1`）。
+
+第 4 项必须比"扫顶"本身更严格。扫顶定义里已经要求 `close[i] < previous_swing_high`，
+若第 4 项只重复该条件则恒为真，评分会整体虚高一分、`minimum_rejection_score` 实际
+降一档。`reject_depth_atr` 必须大于 0。
 
 默认至少需要 2 分。
 
@@ -111,6 +115,7 @@ TP1 成交后止损移到开仓价；TP2 或更远目标成交后，使用最近
   "wick_ratio": 0.6,
   "volume_multiple": 1.0,
   "minimum_rejection_score": 2,
+  "reject_depth_atr": 0.1,
   "confirmation_window": 4,
   "stop_atr": 0.25,
   "trail_bars": 2,
@@ -119,7 +124,14 @@ TP1 成交后止损移到开仓价；TP2 或更远目标成交后，使用最近
 }
 ```
 
-回测报告中的样本外点估计为 55.56% 胜率、实际平均收益/风险 3.04，但只有 9 笔样本，不能视为未来收益保证。风险收益表述按“风险:收益不高于 1:2”解释，即收益/风险至少为 2.0。
+2026-09 修正后重跑（标的池只用数据起点起 60 天训练期的硬筛选事件数挑选，拒绝评分第 4 项改为深度失败突破，`symbol_from_path` 修正，`passed` 纳入 30 笔样本门槛），报告见 `results/hlsr_market_export_report.json`：
+
+- 样本外 10 笔、胜率 **50.0%**、平均净 R **+0.978**、实际平均收益/风险 **2.90**；
+- 接受标准判定为 **FAIL**：样本 10 笔低于 30 笔门槛，胜率也未严格高于 50%，因此**不能**作为已通过的策略证据。
+
+修正前的报告（9 笔、55.56% 胜率、收益/风险 3.04、`passed=true`）存在三处问题：标的池用含测试期的整段 180 天数据挑选（选择性前视）、拒绝评分第 4 项恒为真、`passed` 未包含样本量门槛。这些数字已作废。
+
+风险收益表述按“风险:收益不高于 1:2”解释，即收益/风险至少为 2.0。
 
 ## 9. 使用信号生成器
 
@@ -127,7 +139,7 @@ TP1 成交后止损移到开仓价；TP2 或更远目标成交后，使用最近
 
 ```bash
 python3 strategies/hlsr/src/hlsr_signal_generator.py \
-  --input data/kline/okx/swap/5m/BEAT_USDT_SWAP_5m_20260331T065300Z_20260927T065300Z.jsonl.gz \
+  --input data/kline/okx/swap/5m/BEAT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz \
   --symbol BEAT-USDT-SWAP \
   --config strategies/hlsr/config/signal.json
 ```

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""流动性分层稳健性验证：
+"""流动性分层稳健性验证（**1h 收盘市价基线**，历史对照用）：
 1) 静态分层：按全期总成交额把山寨币池分为 Top50/Top100/Top200/全部 + 后50%
 2) 因果口径：每笔交易入场时点的"过去30天日均成交额"全市场排名 → 验证 Top100 规则
+
+注意：本脚本按 `engine.simulate` 的 1h 收盘入场口径统计，不是已上线规则（15m 确认）。
+已上线规则的分层结论见 `report_live_rule.py --by-tier`（`STRATEGY_SPEC.md` §7.5）。
 """
 import json, os
 import numpy as np
@@ -35,9 +38,7 @@ def run_backtest(syms, fee):
         ev = E.detect_events(d, pre, F, dict(CFG))
         if ev is None:
             continue
-        idx = np.clip(np.searchsorted(bd["t"], ev["entry_t"], side="right") - 1,
-                      0, len(bd["t"]) - 1)
-        ev["btc_flag"] = (bd["c"][idx] > bs[idx]).astype(np.int8)
+        E.btc_gate_flags(ev, (bd["t"], bd["c"], bs))
         m = E.apply_filters(ev, FILT)
         if m.sum() == 0:
             continue

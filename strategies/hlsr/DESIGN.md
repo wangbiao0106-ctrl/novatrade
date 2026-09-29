@@ -17,7 +17,8 @@
 | `swing_lookback` | 6、12根 | 前一摆动高点取入场K线前N根最高价 |
 | `wick_ratio` | 0.4、0.6 | 上影线长度 / K线总振幅 |
 | `volume_multiple` | 1.0、1.5 | 当前成交额 / 前20根平均成交额 |
-| `minimum_rejection_score` | 1、2 | 上影线、阴线、放量、失败突破四项满足数 |
+| `minimum_rejection_score` | 1、2 | 上影线、阴线、放量、深度失败突破四项满足数 |
+| `reject_depth_atr` | 0.1 | 第 4 项"失败突破"的深度阈值（× ATR14），必须大于 0 |
 | `confirmation_window` | 4、8根 | sweep后等待结构确认的最长K线数 |
 | `stop_atr` | 0.25、0.5 | 止损 = sweep high + ATR(14)×倍数 |
 | `trail_bars` | 2 | TP2后使用最近N根高点跟踪 |
@@ -32,7 +33,7 @@
 2. **高位区域**：4H最近20根最高价为 `recent_high`，ATR为波动尺度。`resistance = recent_high + 0.25 × ATR`。当前价按距离阻力划分 normal extension、primary sweep、extreme sweep。
 3. **硬筛选**：15分钟滚动96根涨幅必须大于40%，报价成交额必须大于3,000万 USDT。
 4. **流动性扫高**：`high[t] > previous_swing_high` 且 `close[t] < previous_swing_high`。
-5. **拒绝确认**：以下四项中至少满足配置的数量：上影线比例达标、阴线、成交额放大、收盘重新回到前高下方。
+5. **拒绝确认**：以下四项中至少满足配置的数量：上影线比例达标、阴线、成交额放大、深度失败突破（收盘比前高低出 `reject_depth_atr × ATR14`，不能只重复"收盘回到前高下方"这一与扫顶重复的条件）。
 6. **结构确认**：sweep后的确认窗口内，出现 `break_of_local_low` 或 `failed_retest`。确认K线收盘后，在下一根15分钟K线开盘做空。
 7. **止损**：初始止损高于 sweep high；若价格收盘重新站上 sweep high，立即退出。跳空时按下一根K线开盘价处理。
 8. **止盈**：TP1为确认前局部支撑，TP2为4H区间中点，TP3为4H最近20根主要低点；若结构目标不在入场价下方，则退回1R、2R、3R保护目标。
@@ -76,4 +77,4 @@ python3 strategies/hlsr/src/high_short_strategy.py \
   --end 2026-09-26T19:00:00+00:00
 ```
 
-脚本执行三个滚动窗口：60天训练、30天验证、30天测试。结果按需写入 `strategies/hlsr/results/`；报告中的 `passed` 需要样本外至少30笔、胜率至少50%、平均净R为正，不作为运行时数据提交。
+脚本执行三个滚动窗口：60天训练、30天验证、30天测试。结果按需写入 `strategies/hlsr/results/`；报告中的 `passed` 需要同时满足：样本外至少 30 笔、胜率严格高于 50%、实际收益/风险至少 2.0、bootstrap 正期望概率高于 50%、平均净 R 为正。`passed` 不作为运行时数据提交。

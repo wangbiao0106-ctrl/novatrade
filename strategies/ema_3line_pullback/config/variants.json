@@ -1,0 +1,14 @@
+{
+  "data_timeframe": "5m",
+  "signal_timeframe": "1h",
+  "fee_rate": 0.0005,
+  "slippage": 0.0002,
+  "train_days": 120,
+  "test_days": 60,
+  "variants": {
+    "major_long": {"universe": "major", "side": "long", "btc_gate": "above", "cluster_atr": 0.75, "breakout_bars": 4, "pullback_bars": 8, "pullback_atr": 0.35, "stop_atr": 1.5, "target_r": 1.5, "max_hold_bars": 120, "min_atr_pct": 0.0015},
+    "major_short": {"universe": "major", "side": "short", "btc_gate": "below", "cluster_atr": 0.75, "breakout_bars": 4, "pullback_bars": 8, "pullback_atr": 0.35, "stop_atr": 1.25, "target_r": 1.5, "max_hold_bars": 120, "min_atr_pct": 0.0015},
+    "alt_long": {"universe": "alt", "side": "long", "btc_gate": "above", "cluster_atr": 0.75, "breakout_bars": 4, "pullback_bars": 6, "pullback_atr": 0.35, "stop_atr": 1.25, "target_r": 2.5, "max_hold_bars": 96, "min_atr_pct": 0.004, "btc_slope_bars": 6, "ema_slope_bars": 0, "min_breakout_atr": 0.3, "min_volume_ratio": 0.0, "min_spread_atr": 0.5, "max_symbols": 50},
+    "alt_short": {"universe": "alt", "side": "short", "btc_gate": "below", "cluster_atr": 0.75, "breakout_bars": 4, "pullback_bars": 6, "pullback_atr": 0.35, "stop_atr": 1.5, "target_r": 2.0, "max_hold_bars": 96, "min_atr_pct": 0.004, "max_symbols": 50}
+  }
+}
