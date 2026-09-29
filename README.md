@@ -43,6 +43,7 @@ Swift 应用不会直接打开配置文件，也不会持久化或展示密钥�
 - K 线使用 SwiftUI 原生 Canvas：红涨绿跌、连续拖拽、悬停十字线、日期/价格轴、成交量和 EMA。历史数据首次通过 API 预热；实时 K 柱仅使用 OKX V5 Business WSS 的 candle 频道，没有 K 线轮询或 ticker 拼接。WSS 不提供历史查询，因此首次历史加载仍需 API。
 - `okx-locald` 使用 Hummingbird 提供 REST 和本地 WebSocket；上游订阅、断线、重连状态会传到图表底栏。使用 OKX 文本 ping/pong 保活，断线后指数退避并重新订阅。多个本地客户端订阅同一合约/周期时共享同一个上游 OKX 连接和辅助轮询（StreamHub 扇出），实时 K 柱只在服务端摄入一次。
 - 本地服务对 ATK CLI 调用带 TTL 缓存和单飞去重（ticker 2s、账户/持仓/挂单 5s、合约列表与历史预热 60s），多个客户端并发轮询时不再重复拉起 CLI 进程；下单成功后立即失效账户缓存。盘口和逐笔成交通过 OKX REST 提供。
+- 运行日志按 JSONL 持久化到状态目录的 `runtime-log.jsonl`，服务重启后自动回读；策略状态、订单账本和状态审计仍分别写入 `paper-state.json`、`paper-ledger.json` 和 `audit.jsonl`。
 - 风控：日亏/回撤熔断按日历日正确滚动日初权益基线；模拟撮合支持部分平仓（保留剩余仓位）和同向加仓均价合并，已实现盈亏扣除手续费。
 - 工作台通过 ATK CLI 读取实时 ticker 和 API Key profile 状态；未配置或暂时无法连接 ATK 时显示等待状态，不注入虚构行情或策略实例。
 - iOS SwiftUI 入口：只读占位，不运行 CLI，不保存凭据。
@@ -99,16 +100,31 @@ python3 strategies/hlsr/src/hlsr_signal_generator.py \
 
 ## 山寨币二次扫顶做空（1h）（已集成）
 
-另一个同族但信号不同的做空策略（BTC 门控 + 12 天高点二次假突破）已集成到策略引擎（`StrategyType.sweepReversalShort`）：
+策略实验室中的 `sweep_reversal_short` 是当前规则的唯一来源：人类规则见 `strategies/sweep_reversal_short/STRATEGY.md`，机器参数见同目录 `config/strategy.json`。运行时策略依据该版本同步到 `Sources/`，不会读取研究目录。
+
+这是一个 BTC 门控 + 12 天高点二次假突破的做空策略，已集成到策略引擎（`StrategyType.sweepReversalShort`）：
 
 - 规则与集成说明：`strategies/sweep_reversal_short/STRATEGY.md`
 - 参数配置：`strategies/sweep_reversal_short/config/strategy.json`
-- 引擎实现：`Sources/TradingService/StrategyEngine.swift`（`evaluateSweepReversal`，与 Python 回测逐条一致；信号携带 ATR 标定的止损/止盈价位）
+- 引擎实现：`Sources/TradingService/StrategyEngine.swift`（`evaluateWithConfirmation`，按实验室 v1.3 规则实现；信号携带 ATR 标定的止损/止盈价位）
+- 执行边界：当前版本包含策略资金池 sizing、条件保护单、96 根时间离场和账户级 5% mark-to-market 熔断；熔断处置失败会写入 warning 并保持锁存。评估按已确认 K 线幂等，REST 刷新图表不会消耗冷却；状态按「策略 + 标的」隔离，1h 结构事件不会带出其它标的的信号
 - 稳定策略标识：`sweepReversalShort`；UI 显示名称：`山寨币二次扫顶做空（1h）`
-- 门控数据流：`PaperTradingStore` 缓存 BTC 1H K 线（BTC<SMA200 才发做空信号）
+- 运行范围：后台每 30 秒刷新行情，排除主流币、稳定币及非加密资产后，按 24h 报价成交额动态扫描前 20 个 USDT 线性永续山寨币；177 个推荐标的只属于历史回测基线，不是固定运行名单
+- 门控数据流：`PaperTradingStore` 缓存 BTC 1H K 线，取不晚于信号时刻的最近已确认 bar；历史不足 200 根或无法对齐时门控不通过
 - UI：新建策略对话框可选"山寨币二次扫顶做空（1h）"规则
-- 单元测试：`Tests/OKXGatewayTests/SweepReversalStrategyTests.swift`（4 项，含门控与假突破场景）
-- 研究与回测：`strategies/sweep_reversal_short/`（推荐池 177 个中低流动性山寨币，60 笔，胜率 51.7%，盈亏比 1.69R，期望 +0.37R/笔）
+- 单元测试：`Tests/OKXGatewayTests/SweepReversalStrategyTests.swift`（含门控、假突破、15m 确认窗口边界、冷却幂等、跨标的信号隔离）
+- 研究与回测：已上线规则口径为 177 个历史快照 54 个结构 → 41 笔、胜率 56.1%、盈亏比 1.53R、期望 +0.37R/笔（复现入口 `strategies/sweep_reversal_short/research/report_live_rule.py`）；不代表动态榜单未来绩效
+
+## 双均线交易山寨币多（1h）（已集成，仅模拟盘）
+
+- 规则与运行时映射契约：`strategies/ema_altcoin_long/STRATEGY.md`（§8）
+- 参数配置：`strategies/ema_altcoin_long/config/strategy.json`
+- 引擎实现：`Sources/TradingService/StrategyEngine.swift`（`evaluateEmaAltcoinLong`：EMA20/60/120 + ATR14，密集 → 突破 → 首次回踩 EMA20 收盘确认）
+- 执行边界：确认 1h 收盘后市价做多，随单附带 `入场价 − 1.25×ATR` 止损与 `2.5R` 止盈；BTC 1h 门控（`close > EMA60` 且 EMA60 高于 6 小时前）只关闭新开仓；96 小时时间离场；每标的单仓；资金池按 3% 开放止损风险与 6 笔并发封顶
+- 稳定策略标识：`emaAltcoinLong`；UI 显示名称：`双均线交易山寨币多（1h）`
+- 研究与回测：177 币快照训练 73 笔 +9.2756R / 样本外 35 笔 +8.2944R（胜率 37.14%，低于该策略 40% 门槛）→ **只允许模拟盘，未开放实盘自动下单**
+
+以后修改策略必须先更新策略实验室，再同步代码。完成同步后运行 `python3 scripts/validate_strategy_sync.py`、`swift test` 和 `git diff --check`；校验失败时不得用代码反向回填实验室规则。
 
 ## 本机运行
 
@@ -130,7 +146,7 @@ swift run okx-atk-cli BTC-USDT-SWAP
 python3 scripts/export_market_data.py
 ```
 
-`manifest.json` 记录时间范围、字段定义、每个合约的文件名、K 线数量和失败状态；每行行情包含 UTC 时间、毫秒时间戳、OHLC、成交量、报价成交量和 `confirmed`。脚本支持断点续跑，已经完成的文件会跳过；需要重新抓取时加 `--force`。可用 `--output` 指定目录，`--symbols BTC-USDT-SWAP ETH-USDT-SWAP` 只导出指定合约，`--workers` 控制并发数。
+`manifest.json` 记录时间范围、字段定义、每个合约的文件名、K 线数量和失败状态；每行行情包含 UTC 时间、毫秒时间戳、OHLC、成交量、报价成交量和 `confirmed`。脚本支持断点续跑，已经完成的文件会跳过；需要重新抓取时加 `--force`。已有全量清单需要更新到当前时间时使用 `--update`，它只抓取各合约最后一根附近到现在的增量行情并替换旧文件。可用 `--output` 指定目录，`--symbols BTC-USDT-SWAP ETH-USDT-SWAP` 只导出指定合约，`--workers` 控制并发数。
 
 安装 ATK 后，`okx-atk-cli` 会通过系统 `PATH` 或 `/opt/homebrew/bin/okx`、`/usr/local/bin/okx` 查找 `okx`，也可使用 `OKX_CLI_PATH` 指定绝对路径。它是本项目的诊断入口；Swift 适配层使用同一 CLI 的 `--json` 机器输出。未安装或未配置 API Key 时，界面会显示明确错误；公共行情本身不要求 API Key。
 
