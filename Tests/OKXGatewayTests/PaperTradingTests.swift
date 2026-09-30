@@ -18,6 +18,89 @@ func strategyScopesResolveSingleMultipleAndDynamicTargets() throws {
 }
 
 @Test
+func unknownStrategyTypeDoesNotDiscardLedgerOrKnownStrategies() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("novatrade-unknown-strategy-state-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let knownID = UUID()
+    let orphanID = UUID()
+    let orderID = UUID()
+    let known = StrategyConfig(id: knownID, name: "Sweep", scope: .dynamic(.hotAltcoins),
+                               interval: .oneHour, type: .sweepReversalShort)
+    let orphan = StrategyConfig(id: orphanID, name: "实验室策略", scope: .dynamic(.hotAltcoins),
+                                interval: .oneHour, type: .external("lab-new-v9"), enabled: true)
+    let order = PaperOrder(id: orderID, strategyID: orphanID, instrumentID: "ALT-USDT-SWAP",
+                           side: "short", quantity: 2, status: "filled")
+    let fill = PaperFill(orderID: orderID, price: 12, quantity: 2, fee: 0.02)
+    let risk = RiskSnapshot(equity: 10_000, equityPeak: 10_500, dayStartEquity: 9_900,
+                            dailyPnLPercent: 1, drawdownPercent: 2)
+
+    struct State: Codable {
+        let schemaVersion: Int
+        let strategies: [StrategyConfig]
+        let statuses: [String: StrategyStatus]
+        let orders: [PaperOrder]
+        let fills: [PaperFill]
+        let risk: RiskSnapshot
+    }
+    let state = State(schemaVersion: 1,
+                      strategies: [known, orphan],
+                      statuses: [knownID.uuidString: StrategyStatus(id: knownID, state: .running),
+                                 orphanID.uuidString: StrategyStatus(id: orphanID, state: .running)],
+                      orders: [order], fills: [fill], risk: risk)
+    let encoder = JSONEncoder()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try encoder.encode(state).write(to: directory.appendingPathComponent("paper-state.json"))
+
+    let store = PaperTradingStore(directory: directory)
+    let strategies = await store.allStrategies()
+    #expect(strategies.contains(where: { $0.id == knownID && $0.type == .sweepReversalShort }))
+    #expect(strategies.contains(where: { $0.id == orphanID && $0.type == .external("lab-new-v9") && !$0.enabled }))
+    #expect((await store.allOrders()).contains(where: { $0.id == orderID }))
+    #expect((await store.allFills()).contains(where: { $0.orderID == orderID }))
+    #expect((await store.riskSnapshot()).equity == 10_000)
+    #expect((await store.status(for: orphanID))?.state == .paused)
+}
+
+@Test
+func emaAltcoinLongIsAvailableAndCanonicalized() async throws {
+    #expect(StrategyType.availableCases.contains(.emaAltcoinLong))
+    #expect(StrategyType.emaAltcoinLong.displayName == "双均线交易山寨币做多")
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-ema-visible-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PaperTradingStore(directory: directory)
+    let input = StrategyConfig(name: "EMA", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .emaAltcoinLong, riskPercent: 0.5)
+    let created = try await store.create(input)
+    #expect(created.name == "双均线交易山寨币做多")
+    #expect(created.scope == .dynamic(.hotAltcoins))
+    #expect(created.instrumentID.isEmpty)
+    #expect(created.riskPercent == 0.5)
+    #expect(created.parameters["maxConcurrentPositions"] == 1)
+}
+
+@Test
+func strategyStoreRejectsFixedInstrumentScopes() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-single-scope-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PaperTradingStore(directory: directory)
+
+    let invalidScopes = [
+        StrategyScope.single(""),
+        StrategyScope.single("ALT-USDT-SWAP"),
+        StrategyScope.multiple(["ALT-USDT-SWAP", "ALT2-USDT-SWAP"]),
+    ]
+    for scope in invalidScopes {
+        do {
+            _ = try await store.create(StrategyConfig(name: "无效范围", scope: scope, interval: .oneHour, type: .emaAltcoinLong, riskPercent: 0.5))
+            Issue.record("expected a strategy scope with anything other than one instrument to be rejected")
+        } catch PaperTradingStore.StoreError.unsupported {
+            // Expected.
+        }
+    }
+}
+
+@Test
 func hotAltcoinScopeExcludesNonTargetsAndCapsAtTwenty() {
     let ranked = (0..<21).map { index in
         ContractMarket(id: "ALT\(index)-USDT-SWAP", name: "ALT\(index)", baseCurrency: "ALT\(index)", quoteCurrency: "USDT", last: 1, volume24h: Decimal(21_000 - index))
@@ -44,7 +127,7 @@ func strategyStoreAllowsOneInstancePerRuleAndDeletesIt() async throws {
     let store = PaperTradingStore(directory: directory)
     #expect((await store.allStrategies()).isEmpty)
 
-    let config = StrategyConfig(name: "山寨币二次扫顶做空（1h）", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
+    let config = StrategyConfig(name: "山寨币二次扫顶做空", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
     _ = try await store.create(config)
     do {
         _ = try await store.create(StrategyConfig(name: "重复扫顶", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort))
@@ -72,7 +155,7 @@ func tradingBackendCannotRestartStrategyWhileAccountKillSwitchIsLatched() async 
     let lossTime = Date(timeIntervalSince1970: 1_700_000_000)
     await risk.record(realizedPnL: -60, now: lossTime)
     let backend = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: risk)
-    let config = try await backend.createStrategy(StrategyConfig(name: "山寨币二次扫顶做空（1h）", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort))
+    let config = try await backend.createStrategy(StrategyConfig(name: "山寨币二次扫顶做空", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort))
 
     do {
         _ = try await backend.startStrategy(config.id)
@@ -88,7 +171,7 @@ func deletingStrategyPersistsRemovalOfItsCapitalPool() async throws {
     defer { try? FileManager.default.removeItem(at: directory) }
 
     let first = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: RiskEngine(initialEquity: 10_000))
-    let config = StrategyConfig(name: "山寨币二次扫顶做空（1h）", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
+    let config = StrategyConfig(name: "山寨币二次扫顶做空", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
     let created = try await first.createStrategy(config)
     #expect((await first.strategyCapital()).contains { $0.strategyID == created.id })
     _ = try await first.deleteStrategy(created.id)
@@ -98,14 +181,16 @@ func deletingStrategyPersistsRemovalOfItsCapitalPool() async throws {
 }
 
 @Test
-func strategyStoreRejectsRiskAboveOnePercent() async throws {
+func strategyStoreAcceptsRiskUpToFivePercentAndRejectsAboveIt() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-risk-(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = PaperTradingStore(directory: directory)
-    let config = StrategyConfig(name: "超限", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 1.1)
+    let accepted = StrategyConfig(name: "上限内", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 5.0)
+    _ = try await store.create(accepted)
+    let config = StrategyConfig(name: "超限", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 5.1)
     do {
         _ = try await store.create(config)
-        Issue.record("expected risk above one percent to be rejected")
+        Issue.record("expected risk above five percent to be rejected")
     } catch PaperTradingStore.StoreError.unsupported {
         // Expected.
     }
@@ -145,6 +230,69 @@ func paperBrokerFillsOnlyOnFollowingCandleAndAppliesFeeAndSlippage() async throw
 }
 
 @Test
+func paperBrokerKeepsRiskPositionCountConsistentAcrossScaleAndReversal() async throws {
+    let risk = RiskEngine(limits: RiskLimits(minOrderIntervalSeconds: 0), initialEquity: 10_000)
+    let broker = PaperBroker(risk: risk, feeRate: 0, slippageBps: 0)
+    let strategyID = UUID()
+    _ = await risk.registerStrategy(strategyID, allocationPercent: 100)
+    let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+
+    guard case .success = await broker.submit(strategyID: strategyID, instrumentID: "ALT-USDT-SWAP", side: "long", quantity: 10, referencePrice: 100, requestedAt: t0) else {
+        Issue.record("initial entry should be accepted")
+        return
+    }
+    await broker.processNextOpen(instrumentID: "ALT-USDT-SWAP", candle: Candle(timestamp: t0.addingTimeInterval(60), open: 100, high: 100, low: 100, close: 100))
+
+    // A normal opposite-side order partially closes the position. It must not
+    // consume a second concurrent-position slot.
+    guard case .success = await broker.submit(strategyID: strategyID, instrumentID: "ALT-USDT-SWAP", side: "short", quantity: 4, referencePrice: 100, requestedAt: t0.addingTimeInterval(120)) else {
+        Issue.record("partial close should be accepted")
+        return
+    }
+    await broker.processNextOpen(instrumentID: "ALT-USDT-SWAP", candle: Candle(timestamp: t0.addingTimeInterval(180), open: 100, high: 100, low: 100, close: 100))
+    var capital = await risk.strategyCapital(strategyID)
+    #expect(capital.openPositions == 1)
+    #expect(capital.reservedCapital == 600)
+
+    // Reversing by more than the residual closes the old slot and leaves one
+    // slot for the residual short position.
+    guard case .success = await broker.submit(strategyID: strategyID, instrumentID: "ALT-USDT-SWAP", side: "short", quantity: 8, referencePrice: 100, requestedAt: t0.addingTimeInterval(240)) else {
+        Issue.record("reversal should be accepted")
+        return
+    }
+    await broker.processNextOpen(instrumentID: "ALT-USDT-SWAP", candle: Candle(timestamp: t0.addingTimeInterval(300), open: 100, high: 100, low: 100, close: 100))
+    capital = await risk.strategyCapital(strategyID)
+    #expect(capital.openPositions == 1)
+    #expect(capital.reservedCapital == 200)
+    #expect((await broker.allPositions()).first?.side == "short")
+    #expect((await broker.allPositions()).first?.quantity == 2)
+}
+
+@Test
+func paperBrokerReduceOnlyFullCloseReleasesPositionSlot() async throws {
+    let risk = RiskEngine(limits: RiskLimits(minOrderIntervalSeconds: 0), initialEquity: 10_000)
+    let broker = PaperBroker(risk: risk, feeRate: 0, slippageBps: 0)
+    let strategyID = UUID()
+    _ = await risk.registerStrategy(strategyID, allocationPercent: 100)
+    let t0 = Date(timeIntervalSince1970: 1_700_000_100)
+
+    guard case .success = await broker.submit(strategyID: strategyID, instrumentID: "ALT-USDT-SWAP", side: "long", quantity: 2, referencePrice: 100, requestedAt: t0) else {
+        Issue.record("entry should be accepted")
+        return
+    }
+    await broker.processNextOpen(instrumentID: "ALT-USDT-SWAP", candle: Candle(timestamp: t0.addingTimeInterval(60), open: 100, high: 100, low: 100, close: 100))
+    guard case .success = await broker.submit(strategyID: strategyID, instrumentID: "ALT-USDT-SWAP", side: "short", quantity: 2, referencePrice: 100, requestedAt: t0.addingTimeInterval(120), reduceOnly: true) else {
+        Issue.record("reduce-only close should be accepted")
+        return
+    }
+    await broker.processNextOpen(instrumentID: "ALT-USDT-SWAP", candle: Candle(timestamp: t0.addingTimeInterval(180), open: 100, high: 100, low: 100, close: 100))
+    let capital = await risk.strategyCapital(strategyID)
+    #expect(capital.openPositions == 0)
+    #expect(capital.reservedCapital == 0)
+    #expect((await broker.allPositions()).isEmpty)
+}
+
+@Test
 func riskEngineEnforcesNotionalAndThrottleLimits() async {
     let risk = RiskEngine(limits: RiskLimits(maxInstrumentNotional: 100, minOrderIntervalSeconds: 10), initialEquity: 10_000)
     let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -154,6 +302,76 @@ func riskEngineEnforcesNotionalAndThrottleLimits() async {
     #expect(first.allowed)
     #expect(!throttled.allowed)
     #expect(capped.reason == "单标的名义价值超过上限")
+}
+
+@Test
+func riskLimitsNormalizeInvalidCeilingsToFailClosedValues() {
+    let limits = RiskLimits(maxInstrumentNotional: -1, maxTotalNotional: -2, maxMarginPercent: -3,
+                            minOrderIntervalSeconds: -4, maxOrdersPerHour: -5,
+                            maxDailyLossPercent: -6, maxDrawdownPercent: -7)
+    #expect(limits.maxInstrumentNotional == 0)
+    #expect(limits.maxTotalNotional == 0)
+    #expect(limits.maxMarginPercent == 0)
+    #expect(limits.minOrderIntervalSeconds == 0)
+    #expect(limits.maxOrdersPerHour == 0)
+    #expect(limits.maxDailyLossPercent == 0)
+    #expect(limits.maxDrawdownPercent == 0)
+}
+
+@Test
+func riskEnginePersistsGlobalNotionalAcrossRestart() async {
+    let limits = RiskLimits(maxInstrumentNotional: 100, minOrderIntervalSeconds: 0)
+    let first = RiskEngine(limits: limits, initialEquity: 10_000)
+    #expect((await first.authorize(instrumentID: "BTC-USDT-SWAP", notional: 80, margin: 80)).allowed)
+    let saved = await first.snapshot()
+    let restored = RiskEngine(limits: limits, initialEquity: 10_000)
+    await restored.restore(saved)
+    let rejected = await restored.authorize(instrumentID: "BTC-USDT-SWAP", notional: 30, margin: 30)
+    #expect(rejected.reason == "单标的名义价值超过上限")
+}
+
+@Test
+func strategyRiskEngineAllowsOnlyOneActiveSymbol() async {
+    let risk = RiskEngine(limits: RiskLimits(minOrderIntervalSeconds: 0), initialEquity: 10_000)
+    let strategyID = UUID()
+    let first = await risk.authorize(
+        instrumentID: "ALT-USDT-SWAP", notional: 100, margin: 100,
+        strategyID: strategyID, poolAllocationPercent: 100, riskAmount: 5,
+        maxOpenRiskPercent: 5, maxConcurrentPositions: 1
+    )
+    let second = await risk.authorize(
+        instrumentID: "ALT2-USDT-SWAP", notional: 100, margin: 100,
+        strategyID: strategyID, poolAllocationPercent: 100, riskAmount: 5,
+        maxOpenRiskPercent: 5, maxConcurrentPositions: 1
+    )
+    #expect(first.allowed)
+    #expect(!second.allowed)
+    #expect(second.reason == "策略并发持仓超过上限")
+}
+
+@Test
+func riskEngineRejectsNegativeRiskInputsAndDoesNotIncreaseReservationsOnRelease() async {
+    let risk = RiskEngine(limits: RiskLimits(minOrderIntervalSeconds: 0), initialEquity: 10_000)
+    let strategyID = UUID()
+    _ = await risk.registerStrategy(strategyID, allocationPercent: 100)
+    let negativeRisk = await risk.authorize(
+        instrumentID: "ALT-USDT-SWAP", notional: 100, margin: 100,
+        strategyID: strategyID, riskAmount: -1, maxOpenRiskPercent: 5
+    )
+    #expect(!negativeRisk.allowed)
+    #expect(negativeRisk.reason == "止损风险必须是有限的非负数")
+    let baseline = await risk.strategyCapital(strategyID)
+    await risk.release(instrumentID: "ALT-USDT-SWAP", notional: -100, strategyID: strategyID, margin: -100, riskAmount: -1)
+    let after = await risk.strategyCapital(strategyID)
+    #expect(after.reservedCapital == baseline.reservedCapital)
+    #expect(after.openRisk == baseline.openRisk)
+    #expect(after.openPositions == baseline.openPositions)
+
+    let zeroCaps = await risk.authorize(
+        instrumentID: "ALT-USDT-SWAP", notional: 100, margin: 100,
+        strategyID: strategyID, riskAmount: 1, maxOpenRiskPercent: 0, maxConcurrentPositions: 0
+    )
+    #expect(!zeroCaps.allowed)
 }
 
 @Test

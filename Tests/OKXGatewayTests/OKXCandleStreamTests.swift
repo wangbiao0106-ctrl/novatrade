@@ -16,6 +16,7 @@ func candleStreamDecodesLiveAndClosedBarsInTimeOrder() throws {
     #expect(!candles[1].confirmed)
     #expect(candles[1].close == 104)
     #expect(candles[1].volume == 12)
+    #expect(candles[1].quoteVolume == 1248)
     #expect(candles[1].timestamp == Date(timeIntervalSince1970: 1_700_003_600))
 }
 

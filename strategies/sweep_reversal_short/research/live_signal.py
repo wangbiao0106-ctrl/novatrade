@@ -23,10 +23,6 @@ import engine as E
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results")
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config")
-PARAMS = dict(L=10, R=5, sweep_wait=96, reject_wait=5, retest_wait=12,
-              major_win=288, atr_period=14, rsi_s_min=62, vol_mult=1.5, rs_deep=0.2,
-              buf_atr=0.5, tp_mult=2.2, max_hold=96, max_hold_15m=384,
-              confirmation_window_minutes=60)
 
 
 MAINSTREAM = {
@@ -39,6 +35,40 @@ STABLECOINS = {
 }
 with open(os.path.join(CONFIG_DIR, "universe.json"), encoding="utf-8") as handle:
     EXCLUDED_BASES = frozenset(item.upper() for item in json.load(handle).get("exclude", []))
+
+
+def _load_signal_parameters() -> dict:
+    """Read scanner parameters from the strategy machine source of truth."""
+    with open(os.path.join(CONFIG_DIR, "strategy.json"), encoding="utf-8") as handle:
+        payload = json.load(handle)
+    signal = payload["signal_parameters"]
+    position = payload.get("position_management", {})
+    costs = payload.get("costs", {})
+    return {
+        "L": int(signal["L"]),
+        "R": int(signal["R"]),
+        "sweep_wait": int(signal["sweep_wait"]),
+        "reject_wait": int(signal["reject_wait"]),
+        "retest_wait": int(signal["resweep_wait"]),
+        "major_win": int(signal["major_window"]),
+        "atr_period": int(signal["atr_period"]),
+        "rsi_s_min": float(signal["rsi_min"]),
+        "vol_mult": float(signal["volume_multiple"]),
+        "rs_deep": float(signal["resweep_deep_atr"]),
+        "buf_atr": float(signal["buffer_atr"]),
+        "tp_mult": float(signal["take_profit_r"]),
+        "min_atr_pct": float(signal["min_atr_pct"]),
+        "max_risk_atr": float(signal["max_risk_atr"]),
+        "max_hold": int(position.get("time_exit_bars", 96)),
+        "max_hold_15m": int(position.get("time_exit_bars", 96)) * 4,
+        "fee_rate": float(costs.get("fee_rate_one_way", 0.0005)),
+        "confirmation_window_minutes": int(payload["confirmation_window_minutes"]),
+    }
+
+
+# Keep one parameter mapping for historical replay and the live scanner.  The
+# previous literal dictionary silently drifted when strategy.json changed.
+PARAMS = _load_signal_parameters()
 
 
 def _base_symbol(symbol):
@@ -100,7 +130,10 @@ def symbol_state(d, btc_d, cfg, d15=None):
     h, l, c, v, t = d["h"], d["l"], d["c"], d["v"], d["t"]
     A = E.atr(h, l, c, cfg.get("atr_period", 14))
     RSI = E.rsi(c, cfg.get("atr_period", 14))
-    volmean = E.sma(v, 48)
+    # The sweep bar must not dilute its own volume baseline.  Keep this in
+    # lockstep with engine.precompute() so live scans and backtests use the
+    # same causal filter.
+    volmean = E.prior_sma(v, 48)
     rm288 = E.rolling_max(h, 288)
     F = E.next_higher_high(h)
     piv = E.find_pivots(h, cfg["L"], cfg["R"])
@@ -232,7 +265,7 @@ def symbol_state(d, btc_d, cfg, d15=None):
                 bars=int(n15 - 1 - confirm), cur=round(float(c15[-1]), 6),
                 note=f"持仓 {n15 - 1 - confirm} 根 15m / {hold} 根上限"))
         elif kind is not None:
-            pnl = entry - px - 0.0005 * (entry + px)
+            pnl = entry - px - cfg.get("fee_rate", 0.0005) * (entry + px)
             states.append(dict(
                 phase="已离场", j=j, confirm=confirm, entry=round(entry, 6), exit=round(px, 6),
                 kind=kind, pnl_R=round(pnl / risk, 3),
@@ -248,9 +281,9 @@ def main():
     ap.add_argument("--min-qv", type=float, default=0.0)
     ap.add_argument("--pool", default="hot20", choices=["hot20", "lowmid", "all"],
                     help="hot20=动态热门榜前20(生产规则) lowmid/all=历史回测基线")
-    ap.add_argument("--min-atr-pct", type=float, default=0.5,
+    ap.add_argument("--min-atr-pct", type=float, default=None,
                     help="最小波动过滤：ATR14/价格低于该百分比(%%)的币不下单（薄盘保护）")
-    ap.add_argument("--max-risk-atr", type=float, default=5.0,
+    ap.add_argument("--max-risk-atr", type=float, default=None,
                     help="最大止损距离：R 超过该 ATR 倍数的信号放弃（极端波动保护）")
     ap.add_argument("--top", type=int, default=40, help="打印信号条数上限")
     args = ap.parse_args()
@@ -270,8 +303,8 @@ def main():
         data = {s: d for s, d in data.items() if len(d["t"]) > 20}
     btc_d = data["BTC"]
     run_cfg = dict(PARAMS)
-    run_cfg["min_atr_pct"] = args.min_atr_pct
-    run_cfg["max_risk_atr"] = args.max_risk_atr
+    run_cfg["min_atr_pct"] = PARAMS["min_atr_pct"] if args.min_atr_pct is None else args.min_atr_pct
+    run_cfg["max_risk_atr"] = PARAMS["max_risk_atr"] if args.max_risk_atr is None else args.max_risk_atr
 
     # 已上线规则要等 15m 收盘确认，所以必须把 15m 序列一起载入并对齐到同一时点。
     data15 = E.load_tf("15m")
@@ -296,8 +329,18 @@ def main():
             st["sym"] = sym
             rows.append(st)
 
-    gate_on, bc, bs = btc_gate_at(btc_d, len(btc_d["c"]) - 1)
-    last_ts = pd.to_datetime(btc_d["t"][-1], unit="ms")
+    # Historical replays keep BTC's full history for SMA warm-up, but the
+    # reported gate must be evaluated at the requested replay timestamp.  The
+    # previous code always reported the current latest BTC gate for --asof,
+    # which could tell a reviewer that a historical signal was allowed when it
+    # was actually blocked (or vice versa).
+    gate_idx = (int(np.searchsorted(btc_d["t"], asof_ms, side="right") - 1)
+                if asof_ms is not None else len(btc_d["c"]) - 1)
+    gate_on, bc, bs = btc_gate_at(btc_d, gate_idx)
+    last_ts = pd.to_datetime(
+        btc_d["t"][gate_idx] if 0 <= gate_idx < len(btc_d["t"]) else asof_ms,
+        unit="ms",
+    )
     print(f"扫描时点: {last_ts}  (BTC {bc:.0f} vs SMA200 {bs:.0f} → "
           f"门控 {'开·可做空' if gate_on else '关·停止开新仓'})")
     pool_label = {"hot20": "动态热门榜前20个山寨币", "lowmid": "中低流动性山寨币历史基线", "all": "全部山寨币历史基线"}[args.pool]

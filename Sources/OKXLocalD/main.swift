@@ -159,8 +159,17 @@ private final class StreamHub: @unchecked Sendable {
                             // execution confirmation stream for this rule.
                             targets.insert(StrategyTarget(instrumentID: instrumentID, interval: .fifteenMinutes))
                         }
+                        if config.type == .hlsr {
+                            // HLSR consumes confirmed 15m bars for entry and a
+                            // separate completed 4H history for regime state.
+                            targets.insert(StrategyTarget(instrumentID: instrumentID, interval: .fifteenMinutes))
+                            targets.insert(StrategyTarget(instrumentID: instrumentID, interval: .fourHours))
+                        }
                     }
                     if config.type == .sweepReversalShort && (config.parameters["btcGateEnabled"] ?? 1) >= 1 {
+                        targets.insert(StrategyTarget(instrumentID: "BTC-USDT-SWAP", interval: .oneHour))
+                    }
+                    if config.type == .emaAltcoinLong {
                         targets.insert(StrategyTarget(instrumentID: "BTC-USDT-SWAP", interval: .oneHour))
                     }
                 }

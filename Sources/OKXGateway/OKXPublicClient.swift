@@ -1,7 +1,7 @@
 import Foundation
 import TradingDomain
 
-public enum OKXGatewayError: LocalizedError, Sendable {
+public enum OKXGatewayError: LocalizedError, Sendable, Equatable {
     case invalidResponse
     case api(code: String, message: String)
     case invalidNumber(String)
@@ -23,22 +23,26 @@ extension URLSession: HTTPSession {}
 
 public struct OKXPublicClient: Sendable {
     public let baseURL: URL
+    public let timeoutInterval: TimeInterval
     private let session: any HTTPSession
     private let decoder: JSONDecoder
 
-    public init(baseURL: URL = URL(string: "https://www.okx.com")!, session: any HTTPSession = URLSession.shared) {
+    public init(baseURL: URL = URL(string: "https://www.okx.com")!, session: any HTTPSession = URLSession.shared, timeoutInterval: TimeInterval = 15) {
         self.baseURL = baseURL
+        self.timeoutInterval = timeoutInterval.isFinite && timeoutInterval > 0 ? timeoutInterval : 15
         self.session = session
         self.decoder = JSONDecoder()
     }
 
     public func ticker(instrumentID: String) async throws -> MarketTicker {
+        guard Self.isSafeInstrumentID(instrumentID) else { throw OKXGatewayError.invalidResponse }
         var components = URLComponents(url: baseURL.appendingPathComponent("api/v5/market/ticker"), resolvingAgainstBaseURL: false)
         components?.queryItems = [URLQueryItem(name: "instId", value: instrumentID)]
         guard let url = components?.url else { throw OKXGatewayError.invalidResponse }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = timeoutInterval
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -48,19 +52,39 @@ public struct OKXPublicClient: Sendable {
         guard envelope.code == "0", let item = envelope.data.first else {
             throw OKXGatewayError.api(code: envelope.code, message: envelope.msg)
         }
-        guard let last = Decimal(string: item.last, locale: Locale(identifier: "en_US_POSIX")) else {
+        guard item.instID == instrumentID else { throw OKXGatewayError.invalidResponse }
+        guard let last = Self.decimal(item.last), last > 0 else {
             throw OKXGatewayError.invalidNumber(item.last)
+        }
+        let bid: Decimal?
+        if let value = item.bid {
+            guard let parsed = Self.decimal(value), parsed > 0 else { throw OKXGatewayError.invalidNumber(value) }
+            bid = parsed
+        } else {
+            bid = nil
+        }
+        let ask: Decimal?
+        if let value = item.ask {
+            guard let parsed = Self.decimal(value), parsed > 0 else { throw OKXGatewayError.invalidNumber(value) }
+            ask = parsed
+        } else {
+            ask = nil
+        }
+        guard let rawTimestamp = item.timestamp,
+              let timestamp = Self.dateFromMilliseconds(rawTimestamp) else {
+            throw OKXGatewayError.invalidResponse
         }
         return MarketTicker(
             instrumentID: item.instID,
             last: last,
-            bid: item.bid.flatMap { Decimal(string: $0, locale: Locale(identifier: "en_US_POSIX")) },
-            ask: item.ask.flatMap { Decimal(string: $0, locale: Locale(identifier: "en_US_POSIX")) },
-            timestamp: Self.dateFromMilliseconds(item.timestamp) ?? .now
+            bid: bid,
+            ask: ask,
+            timestamp: timestamp
         )
     }
 
     public func candles(instrumentID: String, interval: KlineInterval, limit: Int = 200) async throws -> [Candle] {
+        guard Self.isSafeInstrumentID(instrumentID) else { throw OKXGatewayError.invalidResponse }
         var components = URLComponents(url: baseURL.appendingPathComponent("api/v5/market/candles"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "instId", value: instrumentID),
@@ -68,7 +92,10 @@ public struct OKXPublicClient: Sendable {
             URLQueryItem(name: "limit", value: String(min(max(limit, 1), 300)))
         ]
         let envelope: OKXEnvelope<[[String]]> = try await get(components)
-        return envelope.data.compactMap(Self.decodeCandle).sorted { $0.timestamp < $1.timestamp }
+        return try envelope.data.map { row in
+            guard let candle = Self.decodeCandle(row) else { throw OKXGatewayError.invalidResponse }
+            return candle
+        }.sorted { $0.timestamp < $1.timestamp }
     }
 
     /// Reconnects the OKX business stream and reports transport state separately
@@ -82,7 +109,9 @@ public struct OKXPublicClient: Sendable {
                 while !Task.isCancelled {
                     attempt += 1
                     continuation.yield(.connecting(attempt: attempt))
-                    let socket = URLSession.shared.webSocketTask(with: url)
+                    var request = URLRequest(url: url)
+                    request.timeoutInterval = timeoutInterval
+                    let socket = URLSession.shared.webSocketTask(with: request)
                     let health = OKXCandleConnectionHealth()
                     socket.resume()
                     do {
@@ -196,21 +225,35 @@ public struct OKXPublicClient: Sendable {
     }
 
     public func orderBook(instrumentID: String, depth: Int = 20) async throws -> OrderBookSnapshot {
+        guard Self.isSafeInstrumentID(instrumentID) else { throw OKXGatewayError.invalidResponse }
         var components = URLComponents(url: baseURL.appendingPathComponent("api/v5/market/books"), resolvingAgainstBaseURL: false)
         components?.queryItems = [URLQueryItem(name: "instId", value: instrumentID), URLQueryItem(name: "sz", value: String(min(max(depth, 1), 400)))]
         let envelope: OKXEnvelope<[OKXOrderBook]> = try await get(components)
-        let book = envelope.data.first
-        let timestamp = Self.dateFromMilliseconds(book?.timestamp) ?? .now
-        return OrderBookSnapshot(instrumentID: instrumentID, bids: book?.bids.compactMap(Self.decimalRow) ?? [], asks: book?.asks.compactMap(Self.decimalRow) ?? [], timestamp: timestamp)
+        guard let book = envelope.data.first,
+              let timestamp = Self.dateFromMilliseconds(book.timestamp) else {
+            throw OKXGatewayError.invalidResponse
+        }
+        guard let bids = Self.decimalRows(book.bids), let asks = Self.decimalRows(book.asks) else {
+            throw OKXGatewayError.invalidResponse
+        }
+        return OrderBookSnapshot(instrumentID: instrumentID, bids: bids, asks: asks, timestamp: timestamp)
     }
 
     public func trades(instrumentID: String, limit: Int = 50) async throws -> [TradeTick] {
+        guard Self.isSafeInstrumentID(instrumentID) else { throw OKXGatewayError.invalidResponse }
         var components = URLComponents(url: baseURL.appendingPathComponent("api/v5/market/trades"), resolvingAgainstBaseURL: false)
         components?.queryItems = [URLQueryItem(name: "instId", value: instrumentID), URLQueryItem(name: "limit", value: String(min(max(limit, 1), 500)))]
         let envelope: OKXEnvelope<[OKXTrade]> = try await get(components)
-        return envelope.data.compactMap { trade in
-            guard let price = Decimal(string: trade.price, locale: Locale(identifier: "en_US_POSIX")), let size = Decimal(string: trade.size, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
-            let timestamp = Self.dateFromMilliseconds(trade.timestamp) ?? .now
+        return try envelope.data.map { trade in
+            guard !trade.tradeID.isEmpty,
+                  let price = Self.decimal(trade.price), price > 0,
+                  let size = Self.decimal(trade.size), size > 0,
+                  let timestamp = Self.dateFromMilliseconds(trade.timestamp) else {
+                throw OKXGatewayError.invalidResponse
+            }
+            if let side = trade.side, !["buy", "sell"].contains(side.lowercased()) {
+                throw OKXGatewayError.invalidResponse
+            }
             return TradeTick(id: trade.tradeID, instrumentID: instrumentID, price: price, size: size, side: trade.side, timestamp: timestamp)
         }
     }
@@ -219,6 +262,7 @@ public struct OKXPublicClient: Sendable {
         guard let url = components?.url else { throw OKXGatewayError.invalidResponse }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = timeoutInterval
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw OKXGatewayError.invalidResponse }
@@ -228,19 +272,47 @@ public struct OKXPublicClient: Sendable {
     }
 
     private static func decimalRow(_ row: [String]) -> [Decimal]? {
-        let values = row.compactMap { Decimal(string: $0, locale: Locale(identifier: "en_US_POSIX")) }
-        return values.count == row.count ? values : nil
+        guard row.count >= 2 else { return nil }
+        let values = row.compactMap { decimal($0) }
+        guard values.count == row.count,
+              values[0] > 0, values[1] >= 0 else { return nil }
+        return values
+    }
+
+    private static func decimalRows(_ rows: [[String]]) -> [[Decimal]]? {
+        let parsed = rows.compactMap(decimalRow)
+        return parsed.count == rows.count ? parsed : nil
     }
 
     private static func decodeCandle(_ row: [String]) -> Candle? {
-        guard row.count >= 6,
+        guard row.count >= 9,
               let timestamp = Double(row[0]), timestamp.isFinite, timestamp > 0,
-              let open = Decimal(string: row[1], locale: Locale(identifier: "en_US_POSIX")),
-              let high = Decimal(string: row[2], locale: Locale(identifier: "en_US_POSIX")),
-              let low = Decimal(string: row[3], locale: Locale(identifier: "en_US_POSIX")),
-              let close = Decimal(string: row[4], locale: Locale(identifier: "en_US_POSIX")),
-              let volume = Decimal(string: row[5], locale: Locale(identifier: "en_US_POSIX")) else { return nil }
-        return Candle(timestamp: Date(timeIntervalSince1970: timestamp / 1000), open: open, high: high, low: low, close: close, volume: volume, confirmed: row.count < 9 || row[8] == "1")
+              let open = decimal(row[1]), let high = decimal(row[2]),
+              let low = decimal(row[3]), let close = decimal(row[4]),
+              let volume = decimal(row[5]),
+              let quoteVolume = decimal(row[7]),
+              open > 0, high > 0, low > 0, close > 0, volume >= 0,
+              quoteVolume >= 0,
+              high >= low, high >= open, high >= close, low <= open, low <= close else { return nil }
+        guard row[8] == "0" || row[8] == "1" else { return nil }
+        let confirmed = row[8] == "1"
+        return Candle(timestamp: Date(timeIntervalSince1970: timestamp / 1000), open: open, high: high, low: low, close: close, volume: volume, quoteVolume: quoteVolume, confirmed: confirmed)
+    }
+
+    private static func decimal(_ value: String) -> Decimal? {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty,
+              normalized.range(of: #"^[+-]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$"#, options: .regularExpression) != nil,
+              let parsed = Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX")),
+              parsed.isFinite else { return nil }
+        return parsed
+    }
+
+    private static func isSafeInstrumentID(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed == value && value.count <= 100
+            && !value.hasPrefix("-")
+            && value.unicodeScalars.allSatisfy { !$0.properties.isWhitespace && $0.value >= 0x20 && $0.value != 0x7F }
     }
 
     private static func dateFromMilliseconds(_ value: String?) -> Date? {

@@ -58,9 +58,9 @@ spec/                               稳定的工程规范和接口约定
 
 | 目录 | 用途 | 状态 |
 | --- | --- | --- |
-| `strategies/hlsr/` | 高位流动性扫顶反转及其 15 分钟回测 | 研究中，可生成信号；`STRATEGY.md` 是人类规则真源、`config/strategy.json` 是机器参数真源（四个参数块都被源码读取） |
-| `strategies/sweep_reversal_short/` | 山寨币二次扫顶做空（1h） | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.3）|
-| `strategies/ema_altcoin_long/` | 双均线交易山寨币多（1h） | 历史研究归档，不接入运行时 |
+| `strategies/hlsr/` | 高位扫顶反转及其 15 分钟回测 | 已接入 OKX 模拟盘执行层，默认禁用；`STRATEGY.md` 是人类规则真源、`config/strategy.json` 是机器参数真源（四个参数块都被源码读取）；三段退出状态机位于 `Sources/TradingService/HLSRPositionManager.swift` |
+| `strategies/sweep_reversal_short/` | 山寨币二次扫顶做空 | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.3）|
+| `strategies/ema_altcoin_long/` | 双均线交易山寨币做多 | 已集成 `Sources/TradingService/StrategyEngine.swift`；目录同时保存规则真源、回测和参数验证 |
 | `strategies/ema_3line_pullback/` | EMA 20/60/120 回踩策略族历史研究（四方向） | 研究归档，不是规则真源，未接入运行时 |
 
 ## 迁移检查
@@ -72,3 +72,11 @@ spec/                               稳定的工程规范和接口约定
 3. 对 Python 入口执行 `--help`，确认默认输入和输出路径分别落在 `data/kline/` 与策略 `results/`。
 4. 运行 `python3 scripts/validate_strategy_sync.py`，确认实验室规则、参数映射和运行时范围一致。
 5. 用 `git status` 确认迁移没有生成未预期的大型数据文件。
+
+## 策略配置包
+
+实验定稿后的策略可以打成带 `manifest.json`、版本和 artifact 摘要的配置包。
+包导入/卸载由 [`scripts/strategy_package.py`](../scripts/strategy_package.py)
+完成，只写应用数据目录下的 `NovaTrade/strategy-packages/` 和其中的
+`registry.json`，不修改实验室源目录或 `Sources/`。包格式、生命周期和校验规则见
+[`spec/STRATEGY_PACKAGE.md`](STRATEGY_PACKAGE.md)。

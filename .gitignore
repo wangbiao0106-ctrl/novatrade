@@ -9,3 +9,4 @@ __pycache__/
 *.py[cod]
 data/kline/okx/swap/
 strategies/sweep_reversal_short/results/
+dist/

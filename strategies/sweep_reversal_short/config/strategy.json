@@ -2,7 +2,7 @@
   "strategy": "SWEEP_REVERSAL_SHORT",
   "version": "1.3",
   "source_of_truth": "strategies/sweep_reversal_short/STRATEGY.md",
-  "name_zh": "山寨币二次扫顶做空（1h）",
+  "name_zh": "山寨币二次扫顶做空",
   "market": "OKX_USDT_LINEAR_PERPETUAL",
   "entry_timeframe_minutes": 60,
   "confirmation_timeframe_minutes": 15,
@@ -79,11 +79,14 @@
     "time_exit_bars": 96,
     "cooldown_bars": 96,
     "risk_per_trade_pct": 1.0,
+    "risk_per_trade_max_pct": 5.0,
     "risk_per_trade_scope": "each_entry_order",
     "risk_per_trade_basis": "strategy_pool_equity_at_authorization",
     "sizing_formula": "min(available_capital, pool_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))",
     "risk_budget_costs_included": false,
     "risk_reference": "strategy_pool_equity",
+    "max_concurrent_positions": 1,
+    "max_open_risk_percent": 5.0,
     "min_atr_pct": 0.5,
     "max_risk_atr": 5.0
   },
@@ -98,7 +101,7 @@
     "cooldown_advances": "per_confirmed_bar",
     "per_instrument_status_isolation": true,
     "signal_ownership_check_before_submit": true,
-    "note": "1h只建立二次扫顶结构；后续最多1小时等待首根符合条件的15m阴线收盘，随后以市价做空。入场按策略资金池权益和止损距离计算数量，并附带条件止损/止盈；运行时监控负责96根1h（384根15m）时间离场，账户级5% mark-to-market 熔断负责停止策略、撤单和全平。"
+    "note": "动态扫描热门榜前20个山寨币；1h只建立二次扫顶结构，后续最多1小时等待首根符合条件的15m阴线收盘，随后从扫描结果中只选择一个币种以市价做空。入场按策略资金池权益和止损距离计算数量，并附带条件止损/止盈；运行时监控负责96根1h（384根15m）时间离场，账户级5% mark-to-market 熔断负责停止策略、撤单和全平。"
   },
   "costs": {
     "fee_rate_one_way": 0.0005,

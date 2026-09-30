@@ -52,6 +52,20 @@ def parse_one(path):
             continue
         df = pd.DataFrame({"bin": bins, "o": o, "h": h, "l": l, "c": c, "v": v, "qv": qv})
         g = df.groupby("bin", sort=True)
+        # Input is 5-minute candles.  A partial bucket or a gap must not be
+        # silently turned into a complete higher-timeframe candle; doing so
+        # changes closes/volumes and can create a signal from unavailable data.
+        expected_children = max(1, mins // 5)
+        complete_bins = []
+        for bucket, child in g:
+            timestamps = sorted(int(value) for value in t[bins == bucket])
+            expected = [int(bucket) + index * 300_000 for index in range(expected_children)]
+            if timestamps == expected:
+                complete_bins.append(bucket)
+        if not complete_bins:
+            continue
+        df = df[df["bin"].isin(complete_bins)]
+        g = df.groupby("bin", sort=True)
         r = pd.DataFrame({
             "t": g["bin"].first(),
             "o": g["o"].first(), "h": g["h"].max(), "l": g["l"].min(),

@@ -123,8 +123,12 @@ public actor RiskEngine {
     /// `maxOpenRiskPercent` / `maxConcurrentPositions` 执行策略实验室的组合上限。
     public func authorize(instrumentID: String, notional: Decimal, margin: Decimal, reduceOnly: Bool = false, now: Date = .now, strategyID: UUID? = nil, poolAllocationPercent: Decimal = 100, riskAmount: Decimal = 0, maxOpenRiskPercent: Decimal? = nil, maxConcurrentPositions: Int? = nil) -> RiskDecision {
         refresh(now: now)
-        if notional <= 0 { return RiskDecision(allowed: false, reason: "名义价值必须大于 0") }
-        if margin < 0 { return RiskDecision(allowed: false, reason: "保证金不能为负") }
+        if instrumentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return RiskDecision(allowed: false, reason: "合约不能为空") }
+        if !notional.isFinite || notional <= 0 { return RiskDecision(allowed: false, reason: "名义价值必须是有限的正数") }
+        if !margin.isFinite || margin < 0 { return RiskDecision(allowed: false, reason: "保证金必须是有限的非负数") }
+        if !riskAmount.isFinite || riskAmount < 0 { return RiskDecision(allowed: false, reason: "止损风险必须是有限的非负数") }
+        if let cap = maxOpenRiskPercent, !cap.isFinite || cap <= 0 { return RiskDecision(allowed: false, reason: "开放风险上限无效") }
+        if let maxConcurrent = maxConcurrentPositions, maxConcurrent <= 0 { return RiskDecision(allowed: false, reason: "并发持仓上限无效") }
         // Exits remain available after a kill switch, but malformed orders
         // must never bypass the input checks above.
         if reduceOnly { return RiskDecision(allowed: true) }
@@ -144,13 +148,13 @@ public actor RiskEngine {
                 return RiskDecision(allowed: false, reason: "策略资金池可用余额不足")
             }
             // 开放止损风险上限：按池权益的百分比计算，累计已开仓风险 + 本单风险。
-            if let cap = maxOpenRiskPercent, cap > 0 {
+            if let cap = maxOpenRiskPercent {
                 let limit = pool.equity * cap / 100
                 if pool.openRisk + riskAmount > limit {
                     return RiskDecision(allowed: false, reason: "策略开放止损风险超过上限")
                 }
             }
-            if let maxConcurrent = maxConcurrentPositions, maxConcurrent > 0,
+            if let maxConcurrent = maxConcurrentPositions,
                pool.openPositions + 1 > maxConcurrent {
                 return RiskDecision(allowed: false, reason: "策略并发持仓超过上限")
             }
@@ -175,6 +179,10 @@ public actor RiskEngine {
 
     /// 释放一笔授权。`closedPosition` 为真时同时释放一个并发名额（平仓 / 入场单失败）。
     public func release(instrumentID: String, notional: Decimal, strategyID: UUID? = nil, margin: Decimal? = nil, riskAmount: Decimal = 0, closedPosition: Bool = false) {
+        guard !instrumentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              notional.isFinite, notional >= 0,
+              riskAmount.isFinite, riskAmount >= 0,
+              margin.map({ $0.isFinite && $0 >= 0 }) ?? true else { return }
         notionals[instrumentID] = max(0, notionals[instrumentID, default: 0] - notional)
         if let strategyID, var pool = pools[strategyID] {
             pool.reservedCapital = max(0, pool.reservedCapital - (margin ?? notional))
@@ -287,7 +295,7 @@ public actor RiskEngine {
         let drawdown = equityPeak == 0 ? 0 : (equityPeak - equity) / equityPeak * 100
         let capitalSnapshots = pools.map { $0.value.snapshot(strategyID: $0.key) }
             .sorted { $0.strategyID.uuidString < $1.strategyID.uuidString }
-        return RiskSnapshot(equity: equity, equityPeak: equityPeak, dayStartEquity: dayStartEquity, dayStartAt: dayStartBoundary, dailyPnLPercent: daily, drawdownPercent: drawdown, killSwitch: killSwitch, reason: reason, strategyCapitals: capitalSnapshots)
+        return RiskSnapshot(equity: equity, equityPeak: equityPeak, dayStartEquity: dayStartEquity, dayStartAt: dayStartBoundary, dailyPnLPercent: daily, drawdownPercent: drawdown, killSwitch: killSwitch, reason: reason, strategyCapitals: capitalSnapshots, globalNotionals: notionals)
     }
 
     public func restore(_ snapshot: RiskSnapshot, now: Date = .now) {
@@ -331,7 +339,23 @@ public actor RiskEngine {
                 updatedAt: capital.updatedAt
             ))
         })
+        notionals = snapshot.globalNotionals.reduce(into: [:]) { result, item in
+            let key = item.key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, item.value.isFinite, item.value > 0 else { return }
+            result[key] = item.value
+        }
         hasSynchronizedEquity = true
+    }
+
+    /// Replaces the global exposure baseline with an authenticated exchange
+    /// view.  This closes the restart gap where an in-memory reservation would
+    /// otherwise disappear (or remain forever) after a service relaunch.
+    public func reconcileGlobalNotionals(_ exposures: [String: Decimal]) {
+        notionals = exposures.reduce(into: [:]) { result, item in
+            let key = item.key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, item.value.isFinite, item.value > 0 else { return }
+            result[key] = item.value
+        }
     }
 
     public func resetKillSwitch(now: Date = .now) -> RiskSnapshot {
@@ -506,12 +530,24 @@ public actor PaperBroker {
             let strategyID = positionStrategyIDs[order.instrumentID] ?? order.strategyID
             let realized = (price - existing.entryPrice) * closeQuantity * direction - fee
             let remaining = existing.quantity - closeQuantity
+            // A normal order is authorized as a new position before we know
+            // whether it will close, partially close, or reverse an existing
+            // position. Keep that reservation only for a reversal residual;
+            // otherwise release the synthetic position slot while retaining
+            // the old position slot when it still has quantity left.
+            let leavesReversal = !reduceOnly && order.quantity > closeQuantity
             // A normal order reserves risk for its full requested quantity.
             // Release the fraction used to close the old position; any
             // residual reversal remains reserved for the new position.
             if !reduceOnly, let reservedOrderNotional {
                 let closedReservation = reservedOrderNotional * closeQuantity / order.quantity
-                await risk.release(instrumentID: order.instrumentID, notional: closedReservation, strategyID: order.strategyID, margin: closedReservation)
+                await risk.release(
+                    instrumentID: order.instrumentID,
+                    notional: closedReservation,
+                    strategyID: order.strategyID,
+                    margin: closedReservation,
+                    closedPosition: !leavesReversal
+                )
             }
             if remaining > 0 {
                 let remainingPnL = (price - existing.entryPrice) * remaining * direction
@@ -529,7 +565,13 @@ public actor PaperBroker {
             // closing result so the old mark is removed exactly once.
             await synchronizeRiskUnrealized(at: timestamp)
             await risk.record(realizedPnL: realized, now: timestamp, strategyID: strategyID)
-            await risk.release(instrumentID: order.instrumentID, notional: closeQuantity * existing.entryPrice, strategyID: strategyID, margin: closeQuantity * existing.entryPrice)
+            await risk.release(
+                instrumentID: order.instrumentID,
+                notional: closeQuantity * existing.entryPrice,
+                strategyID: strategyID,
+                margin: closeQuantity * existing.entryPrice,
+                closedPosition: remaining <= 0
+            )
         } else {
             // Adding to an existing position merges the average entry price.
             let fee = abs(price * order.quantity) * feeRate
@@ -539,6 +581,10 @@ public actor PaperBroker {
             positions[order.instrumentID] = PaperPosition(id: existing.id, instrumentID: order.instrumentID, side: existing.side, quantity: totalQuantity, entryPrice: blendedEntry, markPrice: price, unrealizedPnL: (price - blendedEntry) * totalQuantity * sign, updatedAt: timestamp)
             positionStrategyIDs[order.instrumentID] = positionStrategyIDs[order.instrumentID] ?? order.strategyID
             await synchronizeRiskUnrealized(at: timestamp)
+            // Adding to a position does not create a second concurrent
+            // position. The order authorization reserved margin/notional for
+            // the added quantity, so only release its synthetic slot.
+            await risk.release(instrumentID: order.instrumentID, notional: 0, strategyID: order.strategyID, margin: 0, closedPosition: true)
             // Every fill pays a fee, including an addition to an existing
             // position. Charge it immediately so account equity and the
             // strategy pool cannot overstate available capital.
@@ -549,7 +595,18 @@ public actor PaperBroker {
     }
 
     public func cancelPendingOrders() async {
-        for order in pending {
+        await cancelPendingOrders(where: { _ in true })
+    }
+
+    /// Cancels only one strategy's pending entries. Package removal uses this
+    /// scoped form so another installed strategy's order is never touched.
+    public func cancelPendingOrders(strategyID: UUID) async {
+        await cancelPendingOrders(where: { $0.strategyID == strategyID })
+    }
+
+    private func cancelPendingOrders(where predicate: (PaperOrder) -> Bool) async {
+        let cancelled = pending.filter(predicate)
+        for order in cancelled {
             if let reserved = reservedNotionals.removeValue(forKey: order.id) {
                 await risk.release(instrumentID: order.instrumentID, notional: reserved, strategyID: order.strategyID, margin: reserved)
             }
@@ -558,7 +615,7 @@ public actor PaperBroker {
                 orders[index] = PaperOrder(id: order.id, strategyID: order.strategyID, instrumentID: order.instrumentID, side: order.side, quantity: order.quantity, requestedAt: order.requestedAt, status: "cancelled", remoteOrderID: order.remoteOrderID)
             }
         }
-        pending.removeAll()
+        pending.removeAll(where: predicate)
     }
 
     @discardableResult

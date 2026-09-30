@@ -34,6 +34,29 @@ public struct PaperLedgerSnapshot: Codable, Sendable {
     public let fills: [PaperFill]
 }
 
+/// HTTP payloads for the data-driven strategy package lifecycle.  They live
+/// in the client target so the macOS app can import/upgrade/remove packages
+/// without depending on the server implementation target.
+public struct StrategyPackageInstallCommand: Codable, Equatable, Sendable {
+    public let path: String
+    public let replacing: Bool
+
+    public init(path: String, replacing: Bool = false) {
+        self.path = path
+        self.replacing = replacing
+    }
+}
+
+public struct StrategyPackageInstanceCommand: Codable, Equatable, Sendable {
+    public let name: String?
+    public let scope: StrategyScope?
+
+    public init(name: String? = nil, scope: StrategyScope? = nil) {
+        self.name = name
+        self.scope = scope
+    }
+}
+
 public actor TradingServiceClient {
     public let baseURL: URL
     private let session: URLSession
@@ -74,6 +97,16 @@ public actor TradingServiceClient {
     public func runtimeLogs() async throws -> [RuntimeLog] { try await get(path: "/api/v1/logs") }
     public func appendLog(_ log: RuntimeLog) async throws -> RuntimeLog { try await post("/api/v1/logs", body: log) }
     public func strategies() async throws -> [StrategyConfig] { try await get(path: "/api/v1/strategies") }
+    public func strategyPackages() async throws -> [StrategyPackageManifest] { try await get(path: "/api/v1/strategy-packages") }
+    public func installStrategyPackage(path: String, replacing: Bool = false) async throws -> StrategyPackageManifest {
+        try await post("/api/v1/strategy-packages", body: StrategyPackageInstallCommand(path: path, replacing: replacing))
+    }
+    public func createStrategyFromPackage(_ identifier: String, name: String? = nil, scope: StrategyScope? = nil) async throws -> StrategyConfig {
+        try await post("/api/v1/strategy-packages/\(identifier)/instances", body: StrategyPackageInstanceCommand(name: name, scope: scope))
+    }
+    public func uninstallStrategyPackage(_ identifier: String) async throws -> StrategyPackageManifest {
+        try await request(path: "/api/v1/strategy-packages/\(identifier)", method: "DELETE")
+    }
     public func strategyStatuses() async throws -> [StrategyStatus] { try await get(path: "/api/v1/strategies/status") }
     public func strategyCapital() async throws -> [StrategyCapitalSnapshot] { try await get(path: "/api/v1/strategies/capital") }
     public func risk() async throws -> RiskSnapshot { try await get(path: "/api/v1/risk") }
@@ -138,6 +171,10 @@ public actor TradingServiceClient {
         components.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
         var request = URLRequest(url: components.url!)
         request.httpMethod = method
+        // Every REST call is bounded so a stalled local daemon cannot block
+        // the UI actor indefinitely.  The websocket stream has its own
+        // reconnect watchdog and keeps its separate timeout below.
+        request.timeoutInterval = 15
         if let body { request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try encoder.encode(body) }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw TradingServiceClientError.invalidResponse }

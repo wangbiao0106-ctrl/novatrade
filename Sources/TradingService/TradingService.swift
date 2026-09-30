@@ -6,6 +6,28 @@ import ATKGateway
 import OKXGateway
 import TradingDomain
 
+/// Local path is resolved below the backend's strategy-staging directory;
+/// callers never hand the registry an arbitrary filesystem destination.
+public struct StrategyPackageInstallRequest: Codable, Equatable, Sendable {
+    public let path: String
+    public let replacing: Bool
+
+    public init(path: String, replacing: Bool = false) {
+        self.path = path
+        self.replacing = replacing
+    }
+}
+
+public struct StrategyPackageInstanceRequest: Codable, Equatable, Sendable {
+    public let name: String?
+    public let scope: StrategyScope?
+
+    public init(name: String? = nil, scope: StrategyScope? = nil) {
+        self.name = name
+        self.scope = scope
+    }
+}
+
 public actor PaperTradingStore {
     public private(set) var strategies: [StrategyConfig]
     public private(set) var statuses: [UUID: StrategyStatus]
@@ -26,6 +48,9 @@ public actor PaperTradingStore {
     /// a confirmed 15m close is the only event allowed to create an entry.
     private var structureCandlesByInstrument: [String: [Candle]] = [:]
     private var confirmationCandlesByInstrument: [String: [Candle]] = [:]
+    /// HLSR keeps a dedicated completed 4H history. It must not be inferred
+    /// from the bounded 15m cache because 55 4H bars require 880 children.
+    private var hlsrFourHourCandlesByInstrument: [String: [Candle]] = [:]
 
     public nonisolated var stateDirectory: URL { directory }
 
@@ -37,22 +62,65 @@ public actor PaperTradingStore {
             normalized.parameters[key] = value
         }
         switch config.type {
-        case .sweepReversalShort:
+        case .sweepReversalShort, .emaAltcoinLong:
             normalized.name = config.type.displayName
             normalized.interval = .oneHour
+            // Strategy instances scan the live universe. Fixed-symbol inputs
+            // are migrated to the dynamic scope when legacy state is loaded.
+            normalized.instrumentID = ""
+            normalized.scope = .dynamic(.hotAltcoins)
+            if config.type == .emaAltcoinLong {
+                normalized.riskPercent = config.type.maxRiskPercent
+                normalized.cooldownBars = 96
+            } else {
+                normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
+            }
+        case .hlsr:
+            normalized.name = config.type.displayName
+            normalized.interval = .fifteenMinutes
             normalized.instrumentID = ""
             normalized.scope = .dynamic(.hotAltcoins)
             normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
+            normalized.cooldownBars = config.type.defaultCooldownBars
+        case .external:
+            // Keep an orphaned package instance visible so its ledger and
+            // protective history survive an uninstall. It can never be
+            // started until the package's runtime handler is installed.
+            normalized.enabled = false
         }
+        // A strategy may scan many symbols, but its instance-level execution
+        // policy allows only one active symbol at a time. Override stale
+        // persisted concurrency values during migration.
+        normalized.parameters["maxConcurrentPositions"] = 1
+        normalized.parameters["maxOpenRiskPercent"] = config.type == .emaAltcoinLong ? 0.5 : 5.0
         normalized.capitalPoolPercent = min(max(normalized.capitalPoolPercent, 0.1), 100.0)
         return normalized
     }
 
-    private static func supports(_ config: StrategyConfig) -> Bool {
+    private static func supports(_ config: StrategyConfig, allowLegacyDynamic: Bool = false) -> Bool {
+        if case .external = config.type { return true }
+        let validInterval = config.type == .hlsr ? config.interval == .fifteenMinutes : config.interval == .oneHour
+        guard validInterval else { return false }
+        let validDynamic = config.scope == .dynamic(.hotAltcoins)
+        let legacySingle = allowLegacyDynamic && Self.singleInstrumentID(in: config.scope) != nil
         switch config.type {
         case .sweepReversalShort:
-            return config.interval == .oneHour && config.scope == .dynamic(.hotAltcoins)
+            return validDynamic || legacySingle
+        case .emaAltcoinLong:
+            return validDynamic || legacySingle
+        case .hlsr:
+            return validDynamic || legacySingle
+        case .external:
+            return true
         }
+    }
+
+    /// Returns a fixed symbol only for migrating old persisted configurations.
+    /// New instances always use a dynamic scan scope.
+    private static func singleInstrumentID(in scope: StrategyScope) -> String? {
+        guard scope.mode == .single, scope.instrumentIDs.count == 1 else { return nil }
+        let instrumentID = scope.instrumentIDs[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        return instrumentID.isEmpty ? nil : instrumentID
     }
 
     public init(directory: URL = PaperTradingStore.defaultDirectory()) {
@@ -65,7 +133,7 @@ public actor PaperTradingStore {
         self.fills = []
         if let file = Self.loadFile(directory: directory, decoder: decoder) {
             let loaded = file.strategies
-                .filter(Self.supports(_:))
+                .filter { Self.supports($0, allowLegacyDynamic: true) }
                 .map(Self.canonicalized(_:))
             var unique: [StrategyConfig] = []
             for config in loaded where !unique.contains(where: { $0.type == config.type }) {
@@ -123,6 +191,24 @@ public actor PaperTradingStore {
         return StrategyStatus(id: aggregate.id, state: aggregate.state)
     }
 
+    /// Applies a completed-exit cooldown to one instrument's isolated state.
+    /// The aggregate dashboard status follows the most recently updated
+    /// instrument, while other symbols retain their own independent cooldown.
+    public func setCooldown(strategyID: UUID, instrumentID: String, bars: Int) {
+        let current = statusesByInstrument[strategyID]?[instrumentID]
+            ?? statuses[strategyID]
+            ?? StrategyStatus(id: strategyID, state: .running)
+        let updated = StrategyStatus(id: current.id, state: current.state,
+                                     direction: current.direction,
+                                     cooldown: max(0, bars), pnl: current.pnl,
+                                     lastSignal: current.lastSignal,
+                                     indicators: current.indicators,
+                                     lastEvaluatedBar: current.lastEvaluatedBar)
+        statusesByInstrument[strategyID, default: [:]][instrumentID] = updated
+        statuses[strategyID] = updated
+        save()
+    }
+
     public func prewarm(_ snapshot: MarketSnapshot) {
         if snapshot.instrumentID == "BTC-USDT-SWAP", snapshot.interval == .oneHour {
             btcHourlyCandles = snapshot.candles
@@ -132,6 +218,8 @@ public actor PaperTradingStore {
             structureCandlesByInstrument[snapshot.instrumentID] = snapshot.candles
         case .fifteenMinutes:
             confirmationCandlesByInstrument[snapshot.instrumentID] = snapshot.candles
+        case .fourHours:
+            hlsrFourHourCandlesByInstrument[snapshot.instrumentID] = snapshot.candles
         default:
             break
         }
@@ -139,9 +227,10 @@ public actor PaperTradingStore {
     public func riskSnapshot() -> RiskSnapshot { risk }
 
     public func create(_ config: StrategyConfig) throws -> StrategyConfig {
-        guard Self.supports(config),
+        guard config.type.hasRuntimeHandler,
+              Self.supports(config),
               config.riskPercent > 0,
-              config.riskPercent <= 1,
+              config.riskPercent <= config.type.maxRiskPercent,
               config.capitalPoolPercent > 0,
               config.capitalPoolPercent <= 100 else { throw StoreError.unsupported }
         let normalized = Self.canonicalized(config)
@@ -154,9 +243,10 @@ public actor PaperTradingStore {
     }
 
     public func update(_ config: StrategyConfig) throws -> StrategyConfig {
-        guard Self.supports(config),
+        guard config.type.hasRuntimeHandler,
+              Self.supports(config),
               config.riskPercent > 0,
-              config.riskPercent <= 1,
+              config.riskPercent <= config.type.maxRiskPercent,
               config.capitalPoolPercent > 0,
               config.capitalPoolPercent <= 100 else { throw StoreError.unsupported }
         let normalized = Self.canonicalized(config)
@@ -181,12 +271,27 @@ public actor PaperTradingStore {
         let removed = strategies.remove(at: index)
         statuses.removeValue(forKey: id)
         statusesByInstrument.removeValue(forKey: id)
+        // Deleting an instance must not leave a live pending entry that can
+        // fill after its strategy/package has been removed. Keep the order in
+        // the audit ledger, but make it ineligible for PaperBroker execution.
+        orders = orders.map { order in
+            guard order.strategyID == id, order.status == "pending" else { return order }
+            return PaperOrder(id: order.id, strategyID: order.strategyID,
+                              instrumentID: order.instrumentID, side: order.side,
+                              quantity: order.quantity, requestedAt: order.requestedAt,
+                              fillPrice: order.fillPrice, status: "cancelled",
+                              remoteOrderID: order.remoteOrderID, signal: order.signal)
+        }
         save()
         return removed
     }
 
     public func setState(_ id: UUID, running: Bool) throws -> StrategyConfig {
         guard let index = strategies.firstIndex(where: { $0.id == id }) else { throw StoreError.notFound }
+        guard strategies[index].type.hasRuntimeHandler else { throw StoreError.unsupported }
+        if running, strategies[index].scope != .dynamic(.hotAltcoins) {
+            throw StoreError.unsupported
+        }
         strategies[index].enabled = running
         statusesByInstrument[id] = [:]
         statuses[id] = StrategyStatus(id: id, state: running ? .running : .paused)
@@ -237,12 +342,47 @@ public actor PaperTradingStore {
             structureCandlesByInstrument[snapshot.instrumentID] = snapshot.candles
         case .fifteenMinutes:
             confirmationCandlesByInstrument[snapshot.instrumentID] = snapshot.candles
+        case .fourHours:
+            hlsrFourHourCandlesByInstrument[snapshot.instrumentID] = snapshot.candles
         default:
             break
         }
         var changed = false
         var evaluatedStatuses: [StrategyStatus] = []
         for config in strategies where config.scope.matches(snapshot.instrumentID, contracts: contracts) {
+            if !config.type.hasRuntimeHandler {
+                // An installed package can outlive its compiled adapter. Keep
+                // the orphan visible and paused, while leaving its orders,
+                // fills, and risk records untouched for reconciliation.
+                let orphan = StrategyStatus(id: config.id, state: .paused)
+                if statuses[config.id] != orphan {
+                    statuses[config.id] = orphan
+                    changed = true
+                }
+                evaluatedStatuses.append(orphan)
+                continue
+            }
+            if config.type == .hlsr {
+                guard snapshot.interval == .fifteenMinutes else {
+                    let current = statusesByInstrument[config.id]?[snapshot.instrumentID]
+                        ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+                    evaluatedStatuses.append(current)
+                    continue
+                }
+                let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
+                    ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+                let next = engine.evaluateHLSR(config: config,
+                                               candles15m: snapshot.candles,
+                                               fourHourCandles: hlsrFourHourCandlesByInstrument[snapshot.instrumentID] ?? [],
+                                               previous: previous)
+                statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
+                evaluatedStatuses.append(next)
+                if statuses[config.id] != next {
+                    statuses[config.id] = next
+                    changed = true
+                }
+                continue
+            }
             if config.type == .sweepReversalShort {
                 // The structure close is an arm-only event. It never submits
                 // an order and cannot be mistaken for a 1h market entry.
@@ -267,6 +407,24 @@ public actor PaperTradingStore {
                 let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
                     ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
                 let next = engine.evaluateWithConfirmation(config: config, structureCandles: structure, confirmationCandles: snapshot.candles, previous: previous, btcCandles: btcHourlyCandles)
+                statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
+                evaluatedStatuses.append(next)
+                if statuses[config.id] != next {
+                    statuses[config.id] = next
+                    changed = true
+                }
+                continue
+            }
+            if config.type == .emaAltcoinLong {
+                guard snapshot.interval == .oneHour else {
+                    let current = statusesByInstrument[config.id]?[snapshot.instrumentID]
+                        ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+                    evaluatedStatuses.append(current)
+                    continue
+                }
+                let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
+                    ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+                let next = engine.evaluateEmaAltcoinLong(config: config, candles: snapshot.candles, previous: previous, btcCandles: btcHourlyCandles)
                 statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
                 evaluatedStatuses.append(next)
                 if statuses[config.id] != next {
@@ -369,7 +527,7 @@ public actor PaperTradingStore {
             case .conflict: return "每种策略规则只允许创建一个实例"
             case .notFound: return "策略实例不存在"
             case .running: return "策略运行中，请先停止策略后再删除"
-            case .unsupported: return "当前仅支持 1 小时山寨币二次扫顶做空策略；范围必须是动态热门榜前 20 个山寨币，单笔风险不得超过 1%"
+            case .unsupported: return "当前仅支持 1 小时山寨币策略；运行时扫描动态合规币种池，每次只允许一个币种下单或持仓，单笔风险不得超过规则上限"
         }
         }
     }
@@ -416,6 +574,9 @@ public actor MarketDataService {
 
     private var tickerCache: [String: Fresh<MarketTicker>] = [:]
     private var tickerTasks: [String: Task<MarketTicker, Error>] = [:]
+
+    private var instrumentSpecCache: [String: Fresh<SwapInstrumentSpec>] = [:]
+    private var instrumentSpecTasks: [String: Task<SwapInstrumentSpec, Error>] = [:]
 
     private var contractsCache: Fresh<[ContractMarket]>?
     private var contractsTask: Task<[ContractMarket], Error>?
@@ -502,6 +663,27 @@ public actor MarketDataService {
             return value
         } catch {
             tickerTasks[instrumentID] = nil
+            throw error
+        }
+    }
+
+    /// Returns the authenticated exchange specification for a swap.  Specs
+    /// are cached separately from ticker data because a stale or missing
+    /// contract multiplier changes the meaning of every order quantity.
+    public func instrumentSpec(instrumentID: String) async throws -> SwapInstrumentSpec {
+        if let cached = instrumentSpecCache[instrumentID], cached.isValid(ttl: ttl.contracts) {
+            return cached.value
+        }
+        if let task = instrumentSpecTasks[instrumentID] { return try await task.value }
+        let task = Task { [client] in try await client.marketInstrumentSpec(instrumentID: instrumentID) }
+        instrumentSpecTasks[instrumentID] = task
+        do {
+            let value = try await task.value
+            instrumentSpecCache[instrumentID] = Fresh(value: value, fetchedAt: Date())
+            instrumentSpecTasks[instrumentID] = nil
+            return value
+        } catch {
+            instrumentSpecTasks[instrumentID] = nil
             throw error
         }
     }
@@ -666,6 +848,10 @@ public actor MarketDataService {
 public actor TradingBackend {
     public let market: MarketDataService
     public let paper: PaperTradingStore
+    /// Installed strategy packages are application data, independent from
+    /// the laboratory checkout.  Package install/uninstall APIs below are the
+    /// only runtime mutation path for this catalog.
+    public let strategyPackages: StrategyPackageRegistry
     public let candles = CandleStore()
     public let riskEngine: RiskEngine
     public let broker: PaperBroker
@@ -682,6 +868,26 @@ public actor TradingBackend {
     private var globalRiskTripHandled = false
     private var globalRiskRemoteCleanupComplete = false
     private var submittedExitPositionIDs: Set<String> = []
+    /// The HLSR exit state machine is persisted independently from the paper
+    /// ledger.  A manager is only advanced after a position snapshot confirms
+    /// the reduce-only fill, so a rejected or partially filled order cannot
+    /// skip a target or silently lose the breakeven/trailing stop.
+    private struct HLSRExitRuntimeState: Codable, Sendable {
+        var manager: HLSRPositionManager
+        var remoteOrderID: String?
+        var submittedAt: Date?
+        var lastExitPrice: Decimal?
+        var realizedExitPnL: Decimal?
+    }
+    private struct HLSRExitStateFile: Codable {
+        let schemaVersion: Int
+        let states: [String: HLSRExitRuntimeState]
+    }
+    private var hlsrExitStates: [String: HLSRExitRuntimeState]
+    private let hlsrExitStateURL: URL
+    /// Serialize exit monitors across awaits to keep an older position read
+    /// from claiming another leg while the first submit is still suspended.
+    private var strategyExitMonitorInFlight = false
     private struct PendingRemoteExit {
         let strategyID: UUID
         let instrumentID: String
@@ -689,23 +895,209 @@ public actor TradingBackend {
         let entryPrice: Decimal
         let exitPrice: Decimal
         let side: String
+        let contractValue: Decimal
         let reservedNotional: Decimal
         let exitRisk: Decimal
+        var realizedPnL: Decimal? = nil
     }
     private var pendingRemoteExits: [String: PendingRemoteExit] = [:]
+
+    /// Computes the net result of one confirmed HLSR reduce-only fill. The
+    /// current ATK order snapshot does not expose per-fill trade reports, so
+    /// the manager's claimed execution price is the deterministic price used
+    /// for the strategy leg. Accumulating by the observed quantity keeps
+    /// TP1/TP2/TP3 accounting correct across partial position snapshots.
+    private func hlsrLegRealizedPnL(quantity: Decimal, entryPrice: Decimal,
+                                    exitPrice: Decimal, side: String,
+                                    contractValue: Decimal,
+                                    feeRate: Decimal? = nil) -> Decimal {
+        guard quantity.isFinite, quantity > 0,
+              entryPrice.isFinite, entryPrice > 0,
+              exitPrice.isFinite, exitPrice > 0,
+              contractValue.isFinite, contractValue > 0 else { return 0 }
+        let direction: Decimal = side.lowercased() == "short" ? -1 : 1
+        let gross = (exitPrice - entryPrice) * quantity * contractValue * direction
+        let effectiveFeeRate = feeRate ?? broker.feeRate
+        let fee = abs(exitPrice * quantity * contractValue) * effectiveFeeRate
+        return gross - fee
+    }
+    /// Reservations created by the manual live/demo order endpoints. Strategy
+    /// orders have their own position lifecycle; manual orders need a small
+    /// reconciliation ledger so a successful submit cannot permanently consume
+    /// the global notional limit, while a still-open remote position remains
+    /// protected by the reservation.
+    private struct RemoteReservation {
+        let instrumentID: String
+        let notional: Decimal
+        let createdAt: Date
+        /// A reservation is tagged with the strategy that authorized it so a
+        /// rejected entry (or a native exchange stop/take-profit) can return
+        /// both global exposure and the strategy pool reservation exactly
+        /// once.  Manual orders leave this nil.
+        let strategyID: UUID?
+        let margin: Decimal
+        let riskAmount: Decimal
+        let closedPosition: Bool
+        /// Set while the remote command is suspended.  Reconciliation must
+        /// carry this amount forward even when the exchange has not published
+        /// the newly submitted order yet.
+        let inFlight: Bool
+
+        init(instrumentID: String, notional: Decimal, createdAt: Date = .now,
+             strategyID: UUID? = nil, margin: Decimal? = nil,
+             riskAmount: Decimal = 0, closedPosition: Bool = false,
+             inFlight: Bool = false) {
+            self.instrumentID = instrumentID
+            self.notional = notional
+            self.createdAt = createdAt
+            self.strategyID = strategyID
+            self.margin = margin ?? notional
+            self.riskAmount = riskAmount
+            self.closedPosition = closedPosition
+            self.inFlight = inFlight
+        }
+    }
+    private var remoteReservations: [String: RemoteReservation] = [:]
     private var riskRestored = false
+    /// Serializes the short ledger mutation section. Network reads stay
+    /// outside this gate; RiskEngine calls and reservation-map changes stay
+    /// inside it so a reconciliation release cannot subtract a newer order.
+    private var riskReservationMutationInFlight = false
+    /// Monotonically tags authenticated reservation snapshots. A slower,
+    /// older read must not overwrite a newer reconciliation result.
+    private var reconciliationGeneration: UInt64 = 0
+
+    private func acquireRiskReservationMutation() async {
+        // This gate is held only across short RiskEngine/map mutations.
+        // Cooperative polling avoids a continuation that could strand a
+        // cancelled waiter and deadlock future orders.
+        while riskReservationMutationInFlight {
+            await Task.yield()
+        }
+        riskReservationMutationInFlight = true
+    }
+
+    private func releaseRiskReservationMutation() {
+        riskReservationMutationInFlight = false
+    }
+
+    private func withRiskReservationMutation<T>(_ operation: () async throws -> T) async rethrows -> T {
+        await acquireRiskReservationMutation()
+        defer { releaseRiskReservationMutation() }
+        return try await operation()
+    }
+
+    private func authorizeRemoteSubmission(instrumentID: String, notional: Decimal,
+                                            reduceOnly: Bool = false,
+                                            strategyID: UUID? = nil,
+                                            poolAllocationPercent: Decimal = 100,
+                                            riskAmount: Decimal = 0,
+                                            maxOpenRiskPercent: Decimal? = nil,
+                                            maxConcurrentPositions: Int? = nil) async -> (RiskDecision, String?) {
+        return await withRiskReservationMutation {
+            let decision = await riskEngine.authorize(
+                instrumentID: instrumentID, notional: notional, margin: notional,
+                reduceOnly: reduceOnly, strategyID: strategyID,
+                poolAllocationPercent: poolAllocationPercent, riskAmount: riskAmount,
+                maxOpenRiskPercent: maxOpenRiskPercent,
+                maxConcurrentPositions: maxConcurrentPositions
+            )
+            guard decision.allowed, !reduceOnly else { return (decision, nil) }
+            let token = beginRemoteSubmission(
+                instrumentID: instrumentID, notional: notional,
+                strategyID: strategyID, margin: notional,
+                riskAmount: riskAmount, closedPosition: strategyID != nil
+            )
+            return (decision, token)
+        }
+    }
+
+    private func failRemoteSubmission(_ token: String?) async {
+        guard let token else { return } // Reduce-only orders reserve nothing.
+        await withRiskReservationMutation {
+            guard let reservation = remoteReservations.removeValue(forKey: token) else { return }
+            await riskEngine.release(
+                instrumentID: reservation.instrumentID, notional: reservation.notional,
+                strategyID: reservation.strategyID, margin: reservation.margin,
+                riskAmount: reservation.riskAmount,
+                closedPosition: reservation.closedPosition
+            )
+        }
+    }
+
+    /// Registers exposure before awaiting a remote order command.  Actors may
+    /// re-enter at that await, so account reconciliation must see this token
+    /// even if the exchange has not returned an order ID yet.
+    private func beginRemoteSubmission(instrumentID: String, notional: Decimal,
+                                       strategyID: UUID? = nil, margin: Decimal? = nil,
+                                       riskAmount: Decimal = 0,
+                                       closedPosition: Bool = false) -> String {
+        let token = "pending-\(UUID().uuidString)"
+        remoteReservations[token] = RemoteReservation(
+            instrumentID: instrumentID,
+            notional: notional,
+            strategyID: strategyID,
+            margin: margin,
+            riskAmount: riskAmount,
+            closedPosition: closedPosition,
+            inFlight: true
+        )
+        return token
+    }
+
+    /// Converts a local submission token into the authenticated order ID.
+    /// Keeping the same reservation across the await closes the stale remote
+    /// snapshot window immediately after a successful placement.
+    private func confirmRemoteSubmission(_ token: String?, orderID: String) async {
+        guard let token else { return }
+        await withRiskReservationMutation {
+            guard let reservation = remoteReservations.removeValue(forKey: token) else { return }
+            remoteReservations[orderID] = RemoteReservation(
+                instrumentID: reservation.instrumentID,
+                notional: reservation.notional,
+                createdAt: reservation.createdAt,
+                strategyID: reservation.strategyID,
+                margin: reservation.margin,
+                riskAmount: reservation.riskAmount,
+                closedPosition: reservation.closedPosition,
+                inFlight: false
+            )
+        }
+    }
 
     private static let submittedSignalLimit = 500
     private static let runtimeLogMemoryLimit = 1_000
 
-    public init(market: MarketDataService = MarketDataService(), paper: PaperTradingStore = PaperTradingStore(), riskEngine: RiskEngine = RiskEngine(), logDirectory: URL? = nil) {
+    public init(market: MarketDataService = MarketDataService(), paper: PaperTradingStore = PaperTradingStore(), riskEngine: RiskEngine = RiskEngine(), logDirectory: URL? = nil, strategyPackages: StrategyPackageRegistry? = nil) {
         self.market = market
         self.paper = paper
+        self.strategyPackages = strategyPackages ?? StrategyPackageRegistry()
         self.riskEngine = riskEngine
         self.broker = PaperBroker(risk: riskEngine)
         let directory = logDirectory ?? paper.stateDirectory
         self.runtimeLogURL = directory.appendingPathComponent("runtime-log.jsonl")
         self.runtimeLogs = Self.loadRuntimeLogs(from: self.runtimeLogURL)
+        self.hlsrExitStateURL = directory.appendingPathComponent("hlsr-exit-state.json")
+        self.hlsrExitStates = Self.loadHLSRExitStates(from: self.hlsrExitStateURL)
+    }
+
+    private static func loadHLSRExitStates(from url: URL) -> [String: HLSRExitRuntimeState] {
+        guard let data = try? Data(contentsOf: url),
+              let file = try? JSONDecoder().decode(HLSRExitStateFile.self, from: data),
+              file.schemaVersion == 1 else { return [:] }
+        return file.states
+    }
+
+    private func saveHLSRExitStates() {
+        let file = HLSRExitStateFile(schemaVersion: 1, states: hlsrExitStates)
+        guard let data = try? JSONEncoder().encode(file) else { return }
+        do {
+            try FileManager.default.createDirectory(at: hlsrExitStateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let tmp = hlsrExitStateURL.deletingLastPathComponent().appendingPathComponent(".hlsr-exit-state.json.tmp")
+            try data.write(to: tmp, options: .atomic)
+            if FileManager.default.fileExists(atPath: hlsrExitStateURL.path) { try FileManager.default.removeItem(at: hlsrExitStateURL) }
+            try FileManager.default.moveItem(at: tmp, to: hlsrExitStateURL)
+        } catch { }
     }
 
     private func recordSubmittedSignal(_ id: UUID) {
@@ -719,7 +1111,6 @@ public actor TradingBackend {
 
     private func restoreRiskIfNeeded() async {
         guard !riskRestored else { return }
-        riskRestored = true
         await riskEngine.restore(await paper.riskSnapshot())
         // Recreate pools for persisted strategy instances before the first
         // capital/status request. Pool state itself is runtime-owned, while
@@ -727,9 +1118,97 @@ public actor TradingBackend {
         for config in await paper.allStrategies() {
             _ = await riskEngine.registerStrategy(config.id, allocationPercent: Decimal(config.capitalPoolPercent))
         }
+        riskRestored = true
     }
 
     public func health() -> ServiceHealth { ServiceHealth() }
+
+    /// AI and the strategy laboratory copy finalized packages into this
+    /// directory before calling the install endpoint.  Keeping the staging
+    /// root below the paper state directory prevents an HTTP caller from
+    /// importing arbitrary paths on the host.
+    public nonisolated var strategyPackageStagingDirectory: URL {
+        paper.stateDirectory.appendingPathComponent("strategy-staging", isDirectory: true)
+    }
+
+    public func strategyPackageManifests() async -> [StrategyPackageManifest] {
+        (await strategyPackages.installed()).map(\.manifest)
+    }
+
+    private func stagedPackageURL(_ path: String) throws -> URL {
+        let root = strategyPackageStagingDirectory.resolvingSymlinksInPath().standardizedFileURL
+        let candidate: URL
+        if path.hasPrefix("/") {
+            candidate = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
+        } else {
+            candidate = root.appendingPathComponent(path).resolvingSymlinksInPath().standardizedFileURL
+        }
+        let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        guard candidate.path.hasPrefix(prefix), candidate.path != root.path else {
+            throw StrategyPackageError.invalidPackage("策略包路径必须位于 strategy-staging 目录内")
+        }
+        return candidate
+    }
+
+    public func installStrategyPackage(_ request: StrategyPackageInstallRequest) async throws -> StrategyPackageManifest {
+        try FileManager.default.createDirectory(at: strategyPackageStagingDirectory, withIntermediateDirectories: true)
+        let source = try stagedPackageURL(request.path)
+        let installed = try await strategyPackages.install(package: source, replacing: request.replacing)
+        appendLog("策略包已安装：\(installed.manifest.identifier) v\(installed.manifest.version)", level: "strategy")
+        return installed.manifest
+    }
+
+    public func createStrategyFromPackage(identifier: String,
+                                          request: StrategyPackageInstanceRequest = StrategyPackageInstanceRequest()) async throws -> StrategyConfig {
+        guard let package = await strategyPackages.package(identifier: identifier) else {
+            throw StrategyPackageError.notInstalled(StrategyPackageManifest.normalizePackageIdentifier(identifier))
+        }
+        let config = try package.manifest.makeDefaultConfiguration(name: request.name, scope: request.scope)
+        return try await createStrategy(config)
+    }
+
+    public func uninstallStrategyPackage(identifier: String) async throws -> StrategyPackageManifest {
+        guard let package = await strategyPackages.package(identifier: identifier) else {
+            throw StrategyPackageError.notInstalled(StrategyPackageManifest.normalizePackageIdentifier(identifier))
+        }
+        let normalized = package.manifest.identifier
+        let strategyType = package.manifest.executableStrategyType
+        let configs = await paper.allStrategies()
+        let matching = configs.filter { config in
+            if let strategyType { return config.type == strategyType }
+            return config.strategyIdentifier == normalized
+        }
+        guard matching.allSatisfy({ !$0.enabled }) else {
+            throw StrategyPackageError.activePackage(normalized)
+        }
+        let matchingIDs = Set(matching.map(\.id))
+        let positions = await broker.allPositions()
+        if !positions.isEmpty {
+            let orders = await paper.allOrders()
+            let hasOwnedPosition = positions.contains { position in
+                guard abs(position.quantity) > 0 else { return false }
+                return orders.contains { order in
+                    matchingIDs.contains(order.strategyID) &&
+                        order.instrumentID == position.instrumentID &&
+                        order.side.lowercased() == position.side.lowercased()
+                }
+            }
+            guard !hasOwnedPosition else { throw StrategyPackageError.activePackage(normalized) }
+        }
+        for id in matchingIDs {
+            // A paused strategy may still have an entry waiting for the next
+            // candle. Cancel it before deleting the package, otherwise the
+            // orphaned order could open a new position after uninstall.
+            await broker.cancelPendingOrders(strategyID: id)
+        }
+        let removed = try await strategyPackages.uninstall(identifier: normalized)
+        // Paused instances have no live exposure at this point. Remove their
+        // persisted definitions with the package so a later restart cannot
+        // retain an orphan rule.
+        for id in matchingIDs { _ = try? await deleteStrategy(id) }
+        appendLog("策略包已卸载：\(normalized)", level: "strategy")
+        return removed.manifest
+    }
 
     public func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig {
         await restoreRiskIfNeeded()
@@ -751,6 +1230,9 @@ public actor TradingBackend {
 
     public func deleteStrategy(_ id: UUID) async throws -> StrategyConfig {
         await restoreRiskIfNeeded()
+        // Remove the broker's in-memory pending entry and release its
+        // reservation before deleting the persisted strategy instance.
+        await broker.cancelPendingOrders(strategyID: id)
         let removed = try await paper.delete(id)
         await riskEngine.removeStrategy(id)
         // Persist the pool removal so a later service restart cannot recreate
@@ -804,7 +1286,10 @@ public actor TradingBackend {
 
     private static func strategyRuleName(_ type: StrategyType) -> String {
         switch type {
-        case .sweepReversalShort: return "山寨币二次扫顶做空（1h）"
+        case .sweepReversalShort: return "山寨币二次扫顶做空"
+        case .emaAltcoinLong: return "双均线交易山寨币做多"
+        case .hlsr: return "高位扫顶反转做空"
+        case .external(let identifier): return identifier
         }
     }
 
@@ -905,28 +1390,64 @@ public actor TradingBackend {
     /// circuit breaker. Entry signals attach exchange-native SL/TP orders; this
     /// monitor supplies the time exit and retries protection when a remote
     /// position is visible without an attached exit.
-    private func enforceStrategyExits(at timestamp: Date, fallbackPrice: Decimal? = nil) async {
-        guard !globalRiskTripHandled else { return }
+    private func enforceStrategyExits(at timestamp: Date, fallbackPrice: Decimal? = nil, candle: Candle? = nil, candleInstrumentID: String? = nil) async {
+        guard !globalRiskTripHandled, !strategyExitMonitorInFlight else { return }
+        strategyExitMonitorInFlight = true
+        defer { strategyExitMonitorInFlight = false }
         let configs = await paper.allStrategies()
         guard !configs.isEmpty, let positions = try? await market.privatePositions() else { return }
         await settleCompletedRemoteExits(positions: positions, timestamp: timestamp)
+        // A position can disappear outside this service (manual close,
+        // exchange liquidation, or a process restart before the final
+        // settlement poll). Once pending exits have been settled, remove any
+        // persisted HLSR manager whose position key is no longer live.
+        let liveHLSRKeys = Set(positions.filter { abs($0.quantity) > 0 }
+            .map { "\($0.id):\($0.instrumentID)" })
+        let orphanHLSRKeys = hlsrExitStates.keys.filter {
+            !liveHLSRKeys.contains($0) && pendingRemoteExits[$0] == nil
+        }
+        if !orphanHLSRKeys.isEmpty {
+            for key in orphanHLSRKeys { hlsrExitStates.removeValue(forKey: key) }
+            saveHLSRExitStates()
+        }
         guard !positions.isEmpty else { return }
         let orders = await paper.allOrders()
+        // The exit state machine keeps the remote order id so a canceled or
+        // rejected reduce-only leg can be released for retry.  If this read
+        // fails, the state machine falls back to its bounded stale-order
+        // timeout rather than assuming the order filled.
+        let remoteOrders = try? await market.privateOrders()
         guard let account = try? await market.account(), account.mode != .readOnly else { return }
         for position in positions where abs(position.quantity) > 0 {
+            let normalizedPositionSide = position.side.lowercased()
+            let positionIsShort = normalizedPositionSide == "short" || (normalizedPositionSide == "net" && position.quantity < 0)
             guard let order = orders.reversed().first(where: { order in
                 order.instrumentID == position.instrumentID &&
-                    ["submitted", "filled", "pending"].contains(order.status.lowercased())
+                    ["submitted", "filled", "pending"].contains(order.status.lowercased()) &&
+                    (positionIsShort ? order.side.lowercased() == "short" : order.side.lowercased() == "long")
             }),
                   let config = configs.first(where: { $0.id == order.strategyID }) else { continue }
             let status = await paper.status(for: config.id, instrumentID: position.instrumentID)
-            let signal = status?.lastSignal
-            let price = position.markPrice ?? fallbackPrice ?? order.fillPrice
+            let hlsrKey = "\(position.id):\(position.instrumentID)"
+            // After a restart PaperTradingStore intentionally pauses strategy
+            // instances and clears aggregate status. A persisted HLSR manager
+            // still owns the live protective signal and must keep running
+            // until the remote position is flat.
+            let signal = order.signal ?? hlsrExitStates[hlsrKey]?.manager.signal ?? status?.lastSignal
+            let positionCandle = candleInstrumentID == position.instrumentID ? candle : nil
+            let positionFallback = candleInstrumentID == position.instrumentID ? fallbackPrice : nil
+            let price = position.markPrice ?? positionFallback ?? order.fillPrice
             guard let price else { continue }
-            let normalizedSide = position.side.lowercased()
+            if config.type == .hlsr, let signal {
+                await enforceHLSRExit(position: position, config: config, signal: signal,
+                                      order: order, orders: orders, price: price,
+                                      timestamp: timestamp, account: account, candle: positionCandle,
+                                      remoteOrders: remoteOrders)
+                continue
+            }
             // OKX net-mode rows use a signed `pos` value and report side as
             // "net". Infer direction from quantity before applying SL/TP.
-            let isShort = normalizedSide == "short" || (normalizedSide == "net" && position.quantity < 0)
+            let isShort = positionIsShort
             let stopHit: Bool
             let takeHit: Bool
             if isShort {
@@ -943,6 +1464,11 @@ public actor TradingBackend {
             let side = isShort ? "buy" : "sell"
             let request = LiveOrderRequest(instrumentID: position.instrumentID, side: side, orderType: "market", quantity: abs(position.quantity), marginMode: "cross", reduceOnly: true)
             do {
+                let spec = try await market.instrumentSpec(instrumentID: position.instrumentID)
+                guard spec.isLiveUSDTLinearSwap,
+                      spec.accepts(contractQuantity: abs(position.quantity)) else {
+                    throw ATKError.invalidOrder("远端持仓数量不符合 live USDT linear swap 合约规格")
+                }
                 let result: LiveOrderCommandResult
                 if account.mode == .paper {
                     result = try await market.placeDemoOrder(request)
@@ -951,7 +1477,10 @@ public actor TradingBackend {
                 }
                 // Keep the pool reservation until settleCompletedRemoteExits
                 // confirms that the exchange position has disappeared.
-                let exitRisk = signal?.stopPrice.map { abs(position.entryPrice - $0) * abs(position.quantity) } ?? 0
+                let reservedNotional = abs(spec.notional(forContracts: position.quantity, price: position.entryPrice))
+                let exitRisk = signal?.stopPrice.map {
+                    abs(position.entryPrice - $0) * abs(position.quantity) * spec.contractValue
+                } ?? 0
                 pendingRemoteExits[positionKey] = PendingRemoteExit(
                     strategyID: config.id,
                     instrumentID: position.instrumentID,
@@ -959,7 +1488,8 @@ public actor TradingBackend {
                     entryPrice: position.entryPrice,
                     exitPrice: price,
                     side: isShort ? "short" : "long",
-                    reservedNotional: abs(position.quantity * position.entryPrice),
+                    contractValue: spec.contractValue,
+                    reservedNotional: reservedNotional,
                     exitRisk: exitRisk
                 )
                 appendLog("策略平仓已提交，等待成交确认：\(config.name) / \(position.instrumentID) / \(result.orderID) / \(stopHit ? "止损" : takeHit ? "止盈" : "96根时间离场")", level: "exit")
@@ -972,20 +1502,367 @@ public actor TradingBackend {
     }
 
     /// Reduce-only exits are asynchronous. Keep the strategy pool reserved
+    /// HLSR's three exits are submitted as separate reduce-only orders. The
+    /// first target never closes the full position, TP1 moves the stop to
+    /// entry, and TP2 enables a two-bar high trailing stop. This path is also
+    /// used for demo orders because OKX's single native TP field cannot
+    /// represent the strategy's partial plan.
+    private func enforceHLSRExit(position: PositionSnapshot, config: StrategyConfig,
+                                 signal: StrategySignal, order: PaperOrder,
+                                 orders: [PaperOrder], price: Decimal,
+                                 timestamp: Date, account: AccountOverview,
+                                 candle: Candle? = nil,
+                                 remoteOrders: [OrderSnapshot]? = nil) async {
+        let key = "\(position.id):\(position.instrumentID)"
+        let spec: SwapInstrumentSpec
+        do {
+            spec = try await market.instrumentSpec(instrumentID: position.instrumentID)
+            guard spec.isLiveUSDTLinearSwap,
+                  spec.accepts(contractQuantity: abs(position.quantity)) else {
+                throw ATKError.invalidOrder("HLSR 持仓数量不符合合约规格")
+            }
+        } catch {
+            appendLog("HLSR 退出规格读取失败：\(position.instrumentID)：\(error.localizedDescription)", level: "warning")
+            return
+        }
+
+        var runtime = hlsrExitStates[key]
+        if runtime == nil {
+            let requestedQuantity = orders.reversed().first {
+                $0.instrumentID == position.instrumentID &&
+                    $0.strategyID == config.id &&
+                    $0.side.lowercased() == "short" &&
+                    $0.quantity > 0
+            }?.quantity ?? abs(position.quantity)
+            guard let manager = try? HLSRPositionManager(
+                strategyID: config.id,
+                instrumentID: position.instrumentID,
+                signal: signal,
+                spec: spec,
+                requestedQuantity: requestedQuantity,
+                actualFilledQuantity: abs(position.quantity),
+                actualFillPrice: position.entryPrice,
+                openedAt: order.requestedAt
+            ) else { return }
+            runtime = HLSRExitRuntimeState(
+                manager: manager, remoteOrderID: nil,
+                submittedAt: nil, lastExitPrice: nil
+            )
+            hlsrExitStates[key] = runtime!
+            saveHLSRExitStates()
+        }
+        guard var runtime else { return }
+        var manager = runtime.manager
+        let hlsrFeeRate = Decimal(config.parameters["feeRateOneWay"] ?? 0.0005)
+
+        // A submitted order is only an intent. Target progression,
+        // breakeven and trailing are advanced after the position snapshot
+        // confirms that the reduce-only quantity was actually filled.
+        if let pending = manager.pendingLeg {
+            let quantityBeforeConfirmation = manager.remainingQuantity
+            let confirmed = manager.confirm(pending.id, position: position)
+            let observedReduction = max(0, quantityBeforeConfirmation - manager.remainingQuantity)
+            // Accumulate every observed reduction, including partial fills of
+            // the final leg. The pending remote record below is recomputed
+            // from this running total so a later flat snapshot cannot double
+            // count a partial fill.
+            if observedReduction > 0 {
+                let legPnL = hlsrLegRealizedPnL(
+                    quantity: observedReduction,
+                    entryPrice: manager.entryPrice,
+                    exitPrice: pending.price,
+                    side: "short",
+                    contractValue: spec.contractValue,
+                    feeRate: hlsrFeeRate
+                )
+                runtime.realizedExitPnL = (runtime.realizedExitPnL ?? 0) + legPnL
+            }
+            if var pendingRemote = pendingRemoteExits[key] {
+                pendingRemote.realizedPnL = (runtime.realizedExitPnL ?? 0) + hlsrLegRealizedPnL(
+                    quantity: manager.remainingQuantity,
+                    entryPrice: manager.entryPrice,
+                    exitPrice: pendingRemote.exitPrice,
+                    side: pendingRemote.side,
+                    contractValue: pendingRemote.contractValue,
+                    feeRate: hlsrFeeRate
+                )
+                pendingRemoteExits[key] = pendingRemote
+            }
+            runtime.manager = manager
+            if confirmed {
+                runtime.remoteOrderID = nil
+                runtime.submittedAt = nil
+                hlsrExitStates[key] = runtime
+                saveHLSRExitStates()
+                if manager.isFlat {
+                    pendingRemoteExits[key] = PendingRemoteExit(
+                        strategyID: config.id,
+                        instrumentID: position.instrumentID,
+                        quantity: manager.initialQuantity,
+                        entryPrice: manager.entryPrice,
+                        exitPrice: runtime.lastExitPrice ?? price,
+                        side: "short",
+                        contractValue: spec.contractValue,
+                        reservedNotional: abs(spec.notional(forContracts: manager.initialQuantity, price: manager.entryPrice)),
+                        exitRisk: abs(manager.initialStop - manager.entryPrice) *
+                            manager.initialQuantity * spec.contractValue,
+                        realizedPnL: runtime.realizedExitPnL
+                    )
+                }
+            } else {
+                hlsrExitStates[key] = runtime
+                saveHLSRExitStates()
+                // Market reduce-only orders normally settle immediately. A
+                // stale/rejected order must eventually be released so a
+                // later snapshot can retry the same intent.
+                let failedTerminalStates: Set<String> = ["canceled", "cancelled", "rejected", "expired", "failed"]
+                let remoteOrder = runtime.remoteOrderID.flatMap { id in
+                    remoteOrders?.first { $0.id == id }
+                }
+                let failedRemoteOrder = remoteOrder.map {
+                    failedTerminalStates.contains($0.status.lowercased())
+                } ?? false
+                // An absent order row is ambiguous on OKX: the order may be
+                // filled, still propagating, or omitted by a paginated
+                // snapshot. Retry only on an explicit terminal rejection or
+                // cancellation; this fail-closed rule prevents duplicate
+                // reduce-only orders after a transient REST omission.
+                if failedRemoteOrder {
+                    _ = manager.fail(pending.id)
+                    pendingRemoteExits.removeValue(forKey: key)
+                    runtime.manager = manager
+                    runtime.remoteOrderID = nil
+                    runtime.submittedAt = nil
+                    hlsrExitStates[key] = runtime
+                    saveHLSRExitStates()
+                } else {
+                    return
+                }
+            }
+        }
+        guard !manager.isFlat, manager.pendingLeg == nil else { return }
+
+        // Stops and targets may react to an opening update or intrabar
+        // high/low; the manager only permits invalidation on a confirmed close.
+        guard let intent = manager.evaluate(
+            candle: candle, price: price, position: position, now: timestamp
+        ), let leg = manager.claim(intent, now: timestamp) else { return }
+        runtime.manager = manager
+        runtime.lastExitPrice = intent.price
+        runtime.submittedAt = .now
+        hlsrExitStates[key] = runtime
+        saveHLSRExitStates()
+
+        let request = LiveOrderRequest(
+            instrumentID: position.instrumentID,
+            side: "buy",
+            orderType: "market",
+            quantity: leg.quantity,
+            marginMode: "cross",
+            reduceOnly: true
+        )
+        do {
+            let result: LiveOrderCommandResult
+            if account.mode == .paper {
+                result = try await market.placeDemoOrder(request)
+            } else {
+                result = try await market.placeLiveOrder(request)
+            }
+            runtime.remoteOrderID = result.orderID
+            runtime.manager = manager
+            hlsrExitStates[key] = runtime
+            saveHLSRExitStates()
+            // Keep the reservation/fill settlement record before the remote
+            // snapshot can publish the now-flat position.  A final leg may
+            // be acknowledged before the next position poll, so waiting for
+            // manager.confirm(flat) here would lose the settlement event.
+            if leg.expectedRemainingQuantity <= 0 {
+                pendingRemoteExits[key] = PendingRemoteExit(
+                    strategyID: config.id,
+                    instrumentID: position.instrumentID,
+                    quantity: manager.initialQuantity,
+                    entryPrice: manager.entryPrice,
+                    exitPrice: intent.price,
+                    side: "short",
+                    contractValue: spec.contractValue,
+                    reservedNotional: abs(spec.notional(forContracts: manager.initialQuantity, price: manager.entryPrice)),
+                    exitRisk: abs(manager.initialStop - manager.entryPrice) *
+                        manager.initialQuantity * spec.contractValue,
+                    realizedPnL: (runtime.realizedExitPnL ?? 0) + hlsrLegRealizedPnL(
+                        quantity: leg.quantity,
+                        entryPrice: manager.entryPrice,
+                        exitPrice: intent.price,
+                        side: "short",
+                        contractValue: spec.contractValue,
+                        feeRate: hlsrFeeRate
+                    )
+                )
+            }
+            await market.invalidateAccountState()
+            appendLog(
+                "HLSR \(config.name) \(position.instrumentID) 已提交 \(intent.reason.rawValue)，数量 \(leg.quantity)，订单 \(result.orderID)",
+                level: "exit"
+            )
+        } catch {
+            _ = manager.fail(leg.id)
+            // The final-leg pre-settlement record is valid only after the
+            // reduce-only order was accepted. A rejection must remain
+            // retryable and must not settle a phantom flat position later.
+            pendingRemoteExits.removeValue(forKey: key)
+            runtime.manager = manager
+            runtime.remoteOrderID = nil
+            runtime.submittedAt = nil
+            hlsrExitStates[key] = runtime
+            saveHLSRExitStates()
+            appendLog(
+                "HLSR 分批退出失败：\(config.name) / \(position.instrumentID)：\(error.localizedDescription)",
+                level: "warning"
+            )
+        }
+    }
+
     /// until a later position snapshot confirms that the exit completed.
     private func settleCompletedRemoteExits(positions: [PositionSnapshot], timestamp: Date) async {
-        for (key, pending) in pendingRemoteExits {
-            guard !positions.contains(where: { $0.instrumentID == pending.instrumentID && abs($0.quantity) > 0 }) else { continue }
-            let direction: Decimal = pending.side == "short" ? -1 : 1
-            let realized = (pending.exitPrice - pending.entryPrice) * pending.quantity * direction
-                - abs(pending.exitPrice * pending.quantity) * broker.feeRate
-            await riskEngine.recordStrategyRealized(realized, strategyID: pending.strategyID, now: timestamp)
-            await riskEngine.release(instrumentID: pending.instrumentID, notional: pending.reservedNotional, strategyID: pending.strategyID, margin: pending.reservedNotional, riskAmount: pending.exitRisk, closedPosition: true)
-            pendingRemoteExits.removeValue(forKey: key)
-            submittedExitPositionIDs.remove(key)
-            appendLog("策略平仓已成交并结算：\(pending.instrumentID)，已实现盈亏 \(realized)", level: "fill")
+        await withRiskReservationMutation {
+            // Claim completed exits before the first RiskEngine await. The
+            // mutation gate keeps the claim and release atomic with generic
+            // reconciliation and new order authorization.
+            var completed: [(String, PendingRemoteExit)] = []
+            for (key, pending) in pendingRemoteExits {
+                guard !positions.contains(where: { $0.instrumentID == pending.instrumentID && abs($0.quantity) > 0 }) else { continue }
+                pendingRemoteExits.removeValue(forKey: key)
+                submittedExitPositionIDs.remove(key)
+                hlsrExitStates.removeValue(forKey: key)
+                let reservationKeys = remoteReservations.compactMap { reservationKey, reservation in
+                    reservation.strategyID == pending.strategyID &&
+                        reservation.instrumentID == pending.instrumentID &&
+                        !reservation.inFlight ? reservationKey : nil
+                }
+                for reservationKey in reservationKeys { remoteReservations.removeValue(forKey: reservationKey) }
+                completed.append((key, pending))
+            }
+            for (_, pending) in completed {
+                let direction: Decimal = pending.side == "short" ? -1 : 1
+                let fallbackRealized = (pending.exitPrice - pending.entryPrice) * pending.quantity * pending.contractValue * direction
+                    - abs(pending.exitPrice * pending.quantity * pending.contractValue) * broker.feeRate
+                let realized = pending.realizedPnL ?? fallbackRealized
+                await riskEngine.recordStrategyRealized(realized, strategyID: pending.strategyID, now: timestamp)
+                await riskEngine.release(instrumentID: pending.instrumentID, notional: pending.reservedNotional, strategyID: pending.strategyID, margin: pending.reservedNotional, riskAmount: pending.exitRisk, closedPosition: true)
+                if let config = await paper.allStrategies().first(where: { $0.id == pending.strategyID }), config.type == .hlsr {
+                    await paper.setCooldown(strategyID: pending.strategyID, instrumentID: pending.instrumentID, bars: config.type.defaultCooldownBars)
+                }
+                appendLog("策略平仓已成交并结算：\(pending.instrumentID)，已实现盈亏 \(realized)", level: "fill")
+            }
+            await paper.setRisk(await riskEngine.snapshot(now: timestamp))
         }
-        await paper.setRisk(await riskEngine.snapshot(now: timestamp))
+    }
+
+    /// Reconciles global risk reservations made by the manual order APIs.
+    /// Strategy reservations are settled by their strategy-specific exit
+    /// path. If the exchange no longer reports an order and no position for
+    /// its instrument, the reservation is safe to release; otherwise it is
+    /// retained conservatively until the position disappears.
+    private func reconcileRemoteReservations() async throws {
+        // Serialize the complete read/merge transaction logically. Actor
+        // reentrancy still permits the network reads to overlap, so a slower,
+        // older snapshot is discarded using this generation token.
+        reconciliationGeneration &+= 1
+        let generation = reconciliationGeneration
+        // An incomplete authenticated snapshot cannot authorize new exposure.
+        // Propagate read failures instead of silently proceeding from an empty
+        // or stale local ledger.
+        let orders = try await market.privateOrders()
+        let positions = try await market.privatePositions()
+        guard generation == reconciliationGeneration else { return }
+        let terminal: Set<String> = ["filled", "canceled", "cancelled", "rejected", "expired", "failed", "closed"]
+        // Rebuild the global exposure baseline from the authenticated remote
+        // view. This also repairs state after a process restart, when the
+        // in-memory reservation dictionary no longer exists.
+        var exposures: [String: Decimal] = [:]
+        for position in positions where abs(position.quantity) > 0 {
+            let spec = try await market.instrumentSpec(instrumentID: position.instrumentID)
+            guard spec.isLiveUSDTLinearSwap else {
+                throw ATKError.invalidOrder("远端持仓不是可交易的 live USDT linear swap：\(position.instrumentID)")
+            }
+            let notional = abs(spec.notional(forContracts: position.quantity, price: position.entryPrice))
+            guard notional.isFinite, notional > 0 else { continue }
+            exposures[position.instrumentID, default: 0] += notional
+        }
+        for order in orders where !terminal.contains(order.status.lowercased()) {
+            let notional: Decimal?
+            if let reserved = remoteReservations[order.id]?.notional, reserved.isFinite, reserved > 0 {
+                notional = reserved
+            } else if let price = order.price, price.isFinite, price > 0 {
+                let spec = try await market.instrumentSpec(instrumentID: order.instrumentID)
+                guard spec.isLiveUSDTLinearSwap else {
+                    throw ATKError.invalidOrder("远端挂单不是可交易的 live USDT linear swap：\(order.instrumentID)")
+                }
+                notional = abs(spec.notional(forContracts: order.quantity, price: price))
+            } else {
+                // OKX market orders expose px=0/nil. Use a fresh ticker to
+                // conservatively account for externally submitted exposure
+                // instead of silently dropping it from the global cap.
+                let spec = try await market.instrumentSpec(instrumentID: order.instrumentID)
+                let ticker = try await market.ticker(instrumentID: order.instrumentID)
+                guard spec.isLiveUSDTLinearSwap, ticker.last.isFinite, ticker.last > 0 else {
+                    throw ATKError.invalidOrder("远端市价挂单缺少可用于风控的合约规格或价格")
+                }
+                notional = abs(spec.notional(forContracts: order.quantity, price: ticker.last))
+            }
+            guard let notional, notional.isFinite, notional > 0 else { continue }
+            exposures[order.instrumentID, default: 0] += notional
+        }
+        // The remote reads and spec lookups above may take time. Claim and
+        // mutate the local ledger only after them, under the short gate. This
+        // keeps a concurrent authorization/release from being lost, and the
+        // second generation check prevents an older snapshot from winning.
+        guard generation == reconciliationGeneration else { return }
+        await withRiskReservationMutation {
+            guard generation == reconciliationGeneration else { return }
+            var releases: [RemoteReservation] = []
+            for (orderID, reservation) in remoteReservations {
+                guard !reservation.inFlight else { continue }
+                if let strategyID = reservation.strategyID,
+                   pendingRemoteExits.values.contains(where: { $0.strategyID == strategyID && $0.instrumentID == reservation.instrumentID }) {
+                    continue
+                }
+                let order = orders.first(where: { $0.id == orderID })
+                let hasPosition = positions.contains {
+                    $0.instrumentID == reservation.instrumentID && abs($0.quantity) > 0
+                }
+                let shouldRelease: Bool
+                if let order {
+                    shouldRelease = terminal.contains(order.status.lowercased()) && !hasPosition
+                } else {
+                    shouldRelease = !hasPosition && Date().timeIntervalSince(reservation.createdAt) >= 30
+                }
+                guard shouldRelease else { continue }
+                remoteReservations.removeValue(forKey: orderID)
+                releases.append(reservation)
+            }
+            for reservation in releases {
+                await riskEngine.release(
+                    instrumentID: reservation.instrumentID,
+                    notional: reservation.notional,
+                    strategyID: reservation.strategyID,
+                    margin: reservation.margin,
+                    riskAmount: reservation.riskAmount,
+                    closedPosition: reservation.closedPosition
+                )
+            }
+
+            // Include reservations created after the remote snapshot. The
+            // exchange view may lag a just-submitted order, but local risk may
+            // never be reset below that in-flight authorization.
+            for (orderID, reservation) in remoteReservations {
+                if reservation.inFlight || orders.allSatisfy({ $0.id != orderID }) {
+                    guard reservation.inFlight || Date().timeIntervalSince(reservation.createdAt) < 30 else { continue }
+                    exposures[reservation.instrumentID, default: 0] += reservation.notional
+                }
+            }
+            await riskEngine.reconcileGlobalNotionals(exposures)
+            await paper.setRisk(await riskEngine.snapshot())
+        }
     }
 
     public func contracts(forceRefresh: Bool = false) async throws -> [ContractMarket] {
@@ -1010,6 +1887,7 @@ public actor TradingBackend {
         await restoreRiskIfNeeded()
         let value = try await market.account()
         if let equity = value.equityUSD { await riskEngine.synchronizeEquity(equity) }
+        try await reconcileRemoteReservations()
         await enforceGlobalRiskIfNeeded()
         // Persist the latest daily baseline/equity even when the loss limit
         // has not tripped, so a service restart cannot silently forget it.
@@ -1043,46 +1921,79 @@ public actor TradingBackend {
         return await liveStatus()
     }
 
+    private func validatedRemoteOrder(_ request: LiveOrderRequest, ticker: MarketTicker) async throws -> (SwapInstrumentSpec, Decimal) {
+        guard request.quantity.isFinite, request.quantity > 0 else {
+            throw ATKError.invalidOrder("数量必须是有限的正数")
+        }
+        guard ticker.last.isFinite, ticker.last > 0 else {
+            throw ATKError.invalidOrder("市场价格必须是有限的正数")
+        }
+        let spec = try await market.instrumentSpec(instrumentID: request.instrumentID)
+        guard spec.isLiveUSDTLinearSwap else {
+            throw ATKError.invalidOrder("仅支持 live USDT linear swap：\(request.instrumentID)")
+        }
+        guard spec.accepts(contractQuantity: request.quantity) else {
+            throw ATKError.invalidOrder("数量必须按合约 lotSz 对齐且不小于 minSz（当前数量为合约张数）")
+        }
+        for price in [request.price, request.takeProfitTriggerPrice, request.stopLossTriggerPrice].compactMap({ $0 }) {
+            guard spec.accepts(price: price) else {
+                throw ATKError.invalidOrder("价格必须按合约 tickSz 对齐")
+            }
+        }
+        // A buy limit above the current quote may fill at its limit price;
+        // reserve the larger price so a valid limit cannot bypass the cap.
+        let exposurePrice = max(ticker.last, request.price ?? ticker.last)
+        let notional = abs(spec.notional(forContracts: request.quantity, price: exposurePrice))
+        guard notional.isFinite, notional > 0 else {
+            throw ATKError.invalidOrder("无法根据合约规格计算有效名义价值")
+        }
+        return (spec, notional)
+    }
+
     public func placeLiveOrder(_ request: LiveOrderRequest) async throws -> LiveOrderResult {
         guard liveTradingEnabled else { throw ATKError.liveTradingDisabled }
-        guard request.quantity > 0 else { throw ATKError.invalidOrder("数量必须大于 0") }
         let account = try await account()
         guard account.mode == .live else { throw ATKError.demoProfile(profile: account.profile ?? "unknown") }
         let ticker = try await market.ticker(instrumentID: request.instrumentID)
-        let notional = abs(request.quantity * ticker.last)
-        let decision = await riskEngine.authorize(instrumentID: request.instrumentID, notional: notional, margin: notional, reduceOnly: request.reduceOnly)
+        let (_, notional) = try await validatedRemoteOrder(request, ticker: ticker)
+        let (decision, submissionToken) = await authorizeRemoteSubmission(instrumentID: request.instrumentID, notional: notional, reduceOnly: request.reduceOnly)
         guard decision.allowed else { throw ATKError.unavailable(decision.reason ?? "风控拒绝订单") }
+        await paper.setRisk(await riskEngine.snapshot())
         do {
             let result = try await market.placeLiveOrder(request)
-            if request.reduceOnly { await riskEngine.release(instrumentID: request.instrumentID, notional: notional) }
+            await confirmRemoteSubmission(submissionToken, orderID: result.orderID)
             await market.invalidateAccountState()
+            await paper.setRisk(await riskEngine.snapshot())
             appendLog("实盘订单已提交 \(request.instrumentID) \(request.side) \(request.quantity)", level: "warning")
             return LiveOrderResult(orderID: result.orderID, clientOrderID: result.clientOrderID, instrumentID: request.instrumentID, side: request.side, orderType: request.orderType, quantity: request.quantity, message: result.message)
         } catch {
-            await riskEngine.release(instrumentID: request.instrumentID, notional: notional)
+            await failRemoteSubmission(submissionToken)
+            await paper.setRisk(await riskEngine.snapshot())
             throw error
         }
     }
 
     public func placePaperOrder(_ request: PaperOrderRequest) async throws -> PaperOrder {
-        guard request.quantity > 0 else { throw ATKError.invalidOrder("数量必须大于 0") }
         let account = try await account()
         guard account.mode == .paper else { throw ATKError.unavailable("当前不是 OKX 模拟账户") }
         let ticker = try await market.ticker(instrumentID: request.instrumentID)
-        let notional = abs(request.quantity * ticker.last)
-        let decision = await riskEngine.authorize(instrumentID: request.instrumentID, notional: notional, margin: notional, reduceOnly: request.reduceOnly)
-        guard decision.allowed else { throw ATKError.unavailable(decision.reason ?? "风控拒绝模拟订单") }
         let liveRequest = LiveOrderRequest(instrumentID: request.instrumentID, side: request.side, orderType: "market", quantity: request.quantity, marginMode: "cross", reduceOnly: request.reduceOnly)
+        let (_, notional) = try await validatedRemoteOrder(liveRequest, ticker: ticker)
+        let (decision, submissionToken) = await authorizeRemoteSubmission(instrumentID: request.instrumentID, notional: notional, reduceOnly: request.reduceOnly)
+        guard decision.allowed else { throw ATKError.unavailable(decision.reason ?? "风控拒绝模拟订单") }
+        await paper.setRisk(await riskEngine.snapshot())
         do {
             let result = try await market.placeDemoOrder(liveRequest)
-            if request.reduceOnly { await riskEngine.release(instrumentID: request.instrumentID, notional: notional) }
+            await confirmRemoteSubmission(submissionToken, orderID: result.orderID)
             await market.invalidateAccountState()
+            await paper.setRisk(await riskEngine.snapshot())
             let order = PaperOrder(strategyID: UUID(), instrumentID: request.instrumentID, side: request.side.lowercased() == "sell" ? "short" : "long", quantity: request.quantity, status: "submitted", remoteOrderID: result.orderID)
             await paper.record(order)
             appendLog("挂单：OKX 模拟盘 \(request.instrumentID) \(request.side) \(request.quantity)，订单 \(result.orderID)", level: "order")
             return order
         } catch {
-            await riskEngine.release(instrumentID: request.instrumentID, notional: notional)
+            await failRemoteSubmission(submissionToken)
+            await paper.setRisk(await riskEngine.snapshot())
             throw error
         }
     }
@@ -1099,6 +2010,14 @@ public actor TradingBackend {
         let snapshot = try await market.snapshot(instrumentID: instrumentID, interval: interval)
         await candles.ingest(snapshot.candles, instrumentID: instrumentID, interval: interval)
         await paper.prewarm(snapshot)
+        if interval == .fifteenMinutes {
+            // HLSR always has a separately fetched 4H warm-up. Fetching this
+            // series explicitly avoids pretending 500 cached 15m bars are
+            // enough to supply the required 55 completed 4H bars.
+            let fourHour = try await market.snapshot(instrumentID: instrumentID, interval: .fourHours)
+            await candles.ingest(fourHour.candles, instrumentID: instrumentID, interval: .fourHours)
+            await paper.prewarm(fourHour)
+        }
     }
     public func marketSnapshot(instrumentID: String, interval: KlineInterval) async throws -> MarketSnapshot {
         await restoreRiskIfNeeded()
@@ -1115,7 +2034,8 @@ public actor TradingBackend {
         await logNewFills()
         }
         await enforceGlobalRiskIfNeeded(now: latestTimestamp ?? .now)
-        await enforceStrategyExits(at: latestTimestamp ?? .now, fallbackPrice: snapshot.candles.last(where: { $0.confirmed })?.close)
+        let exitCandle = snapshot.interval == .fifteenMinutes ? snapshot.candles.last(where: { $0.confirmed }) : nil
+        await enforceStrategyExits(at: .now, fallbackPrice: snapshot.candles.last(where: { $0.confirmed })?.close, candle: exitCandle, candleInstrumentID: instrumentID)
         let configs = await paper.allStrategies()
         logSignals(statuses, configs: configs, instrumentID: instrumentID)
         let latestConfirmedTimestamp = snapshot.candles.last(where: { $0.confirmed })?.timestamp
@@ -1139,9 +2059,12 @@ public actor TradingBackend {
         let orders = await paper.allOrders()
         var count = 0
         for position in positions where abs(position.quantity) > 0 {
+            let normalizedPositionSide = position.side.lowercased()
+            let positionIsShort = normalizedPositionSide == "short" || (normalizedPositionSide == "net" && position.quantity < 0)
             guard let order = orders.reversed().first(where: { order in
                 order.instrumentID == position.instrumentID &&
-                    ["submitted", "filled", "pending"].contains(order.status.lowercased())
+                    ["submitted", "filled", "pending"].contains(order.status.lowercased()) &&
+                    (positionIsShort ? order.side.lowercased() == "short" : order.side.lowercased() == "long")
             }) else { continue }
             if order.strategyID == strategyID { count += 1 }
         }
@@ -1150,16 +2073,15 @@ public actor TradingBackend {
 
     private func submitDemoStrategyOrder(config: StrategyConfig, signal: StrategySignal, instrumentID: String) async -> Bool {
         guard config.enabled else { return false }
-        // 每标的单仓：两个策略的实验室规则都要求同一品种最多一笔持仓。
+        // 同一币种单仓：策略实例对动态扫描池中的每个币种都只允许一笔。
         if let positions = try? await market.privatePositions(),
            positions.contains(where: { $0.instrumentID == instrumentID && abs($0.quantity) > 0 }) {
             appendLog("策略 \(config.name) 未发送：\(instrumentID) 已有持仓，同一标的只允许一笔", level: "warning")
             return false
         }
-        // 组合上限：同一策略的并发持仓数（实验室：扫顶 ≤20、双均线多头 ≤6）。
-        // 每笔订单的风险预算固定为池权益的固定比例，因此"并发数上限"与
-        // "开放止损风险上限"（双均线多头 6 × 0.5% = 3%）是同一个约束。
-        let maxConcurrent = Int(config.parameters["maxConcurrentPositions"] ?? 20)
+        // 组合上限：动态扫描可以覆盖多个币种，但一个策略实例只允许
+        // 一个活动币种；每笔订单仍按策略池权益和动态止损距离计算。
+        let maxConcurrent = Int(config.parameters["maxConcurrentPositions"] ?? 1)
         guard await openPositionCount(strategyID: config.id) < maxConcurrent else {
             appendLog("策略 \(config.name) 未发送：并发持仓已达上限 \(maxConcurrent)", level: "warning")
             return false
@@ -1168,10 +2090,51 @@ public actor TradingBackend {
             appendLog("策略 \(config.name) 未发送：当前不是 OKX 模拟账户", level: "warning")
             return false
         }
-        guard let ticker = try? await market.ticker(instrumentID: instrumentID) else { return false }
+        guard let ticker = try? await market.ticker(instrumentID: instrumentID),
+              let spec = try? await market.instrumentSpec(instrumentID: instrumentID),
+              spec.isLiveUSDTLinearSwap else {
+            appendLog("策略 \(config.name) 未发送：无法读取可交易的 live USDT linear swap 合约规格", level: "warning")
+            return false
+        }
         let pool = await riskEngine.strategyCapital(config.id, allocationPercent: Decimal(config.capitalPoolPercent))
-        let entry = signal.price
-        let riskDistance = signal.stopPrice.map { abs($0 - entry) } ?? 0
+        guard pool.openPositions < maxConcurrent else {
+            appendLog("策略 \(config.name) 未发送：已有其他币种的挂单或持仓，只允许一个币种下单", level: "warning")
+            return false
+        }
+        // Size against the price that will actually be sent to the exchange.
+        // The signal close can be stale by the time the dynamic-universe
+        // monitor submits it; using that old price understates stop risk after
+        // a gap and can exceed the strategy's risk budget.
+        let entry = ticker.last
+        let isLong = signal.type == "entry_long"
+        // Move protection towards the entry when rounding. This preserves the
+        // risk budget and prevents ATR-derived off-tick prices being rejected.
+        let stopPrice = signal.stopPrice.flatMap { spec.alignedPrice($0, roundingUp: isLong) }
+        // HLSR targets are deliberately managed as three reduce-only legs;
+        // attaching only TP1 as an exchange-native full-position TP would
+        // silently violate the strategy's 30/30/40 exit plan.
+        let takePrice = config.type == .hlsr ? nil : signal.takePrice.flatMap { spec.alignedPrice($0, roundingUp: !isLong) }
+        // HLSR deliberately leaves the exchange-native TP field empty: its
+        // three reduce-only legs are submitted only after the position
+        // snapshot confirms the entry.  Requiring a rounded `takePrice` here
+        // would reject every valid HLSR signal before it ever reaches OKX.
+        guard signal.stopPrice == nil || stopPrice != nil,
+              config.type == .hlsr || signal.takePrice == nil || takePrice != nil else { return false }
+        if let stop = stopPrice {
+            let stopIsOnProtectiveSide = isLong ? stop < entry : stop > entry
+            guard stopIsOnProtectiveSide else {
+                appendLog("策略 \(config.name) 未发送：当前价格已越过保护止损价", level: "warning")
+                return false
+            }
+        }
+        if let take = takePrice {
+            let takeIsOnProfitSide = isLong ? take > entry : take < entry
+            guard takeIsOnProfitSide else {
+                appendLog("策略 \(config.name) 未发送：当前价格已越过止盈价", level: "warning")
+                return false
+            }
+        }
+        let riskDistance = stopPrice.map { abs($0 - entry) } ?? 0
         let riskBudget = pool.equity * Decimal(config.riskPercent) / 100
         let targetNotional: Decimal
         if riskDistance > 0, entry > 0 {
@@ -1179,19 +2142,23 @@ public actor TradingBackend {
         } else {
             targetNotional = pool.availableCapital
         }
-        let minimumQuantity = Decimal(string: "0.001") ?? 0
-        guard targetNotional >= minimumQuantity * ticker.last, ticker.last > 0 else {
+        guard targetNotional > 0, ticker.last > 0 else {
             appendLog("策略 \(config.name) 未发送：资金池无可用余额", level: "warning")
             return false
         }
-        let quantity = max(minimumQuantity, targetNotional / ticker.last)
-        let notional = abs(quantity * ticker.last)
+        // OKX `sz` is a contract count.  Round down to lotSz so the order's
+        // actual notional and stop risk remain below the strategy budget.
+        guard let quantity = spec.contracts(forTargetNotional: targetNotional, price: ticker.last) else {
+            appendLog("策略 \(config.name) 未发送：目标资金不足以覆盖合约最小张数", level: "warning")
+            return false
+        }
+        let notional = abs(spec.notional(forContracts: quantity, price: ticker.last))
         // 本单的止损风险，用于执行策略资金池的"开放风险 ≤ 池权益比例"上限
-        // （双均线多头：3% = 6 并发 × 每笔 0.5%）。
-        let orderRisk = riskDistance > 0 ? quantity * riskDistance : 0
-        let maxOpenRiskPercent: Decimal? = nil
-        let decision = await riskEngine.authorize(
-            instrumentID: instrumentID, notional: notional, margin: notional,
+        // 风险金额用于累计开放止损风险的授权检查。
+        let orderRisk = riskDistance > 0 ? quantity * riskDistance * spec.contractValue : 0
+        let maxOpenRiskPercent: Decimal? = Decimal(config.parameters["maxOpenRiskPercent"] ?? 0)
+        let (decision, submissionToken) = await authorizeRemoteSubmission(
+            instrumentID: instrumentID, notional: notional,
             strategyID: config.id, poolAllocationPercent: Decimal(config.capitalPoolPercent),
             riskAmount: orderRisk, maxOpenRiskPercent: maxOpenRiskPercent,
             maxConcurrentPositions: maxConcurrent
@@ -1200,19 +2167,26 @@ public actor TradingBackend {
             appendLog("策略 \(config.name) 被风控拒绝：\(decision.reason ?? "未知原因")", level: "warning")
             return false
         }
+        // Write the reservation before the remote submission so a process
+        // crash cannot forget the notional cap after OKX has accepted it.
+        await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
         let side = signal.type == "entry_short" ? "sell" : "buy"
-        let request = LiveOrderRequest(instrumentID: instrumentID, side: side, orderType: "market", quantity: quantity, marginMode: "cross", takeProfitTriggerPrice: signal.takePrice, stopLossTriggerPrice: signal.stopPrice)
+        let request = LiveOrderRequest(instrumentID: instrumentID, side: side, orderType: "market", quantity: quantity, marginMode: "cross", takeProfitTriggerPrice: takePrice, stopLossTriggerPrice: stopPrice)
         do {
             let result = try await market.placeDemoOrder(request)
+            // Keep the reservation under the authenticated order ID until a
+            // position disappears.  This covers exchange-native SL/TP exits,
+            // which never pass through enforceStrategyExits.
+            await confirmRemoteSubmission(submissionToken, orderID: result.orderID)
             await market.invalidateAccountState()
-            let order = PaperOrder(strategyID: config.id, instrumentID: instrumentID, side: side == "sell" ? "short" : "long", quantity: quantity, requestedAt: signal.timestamp, status: "submitted", remoteOrderID: result.orderID)
+            let order = PaperOrder(strategyID: config.id, instrumentID: instrumentID, side: side == "sell" ? "short" : "long", quantity: quantity, requestedAt: signal.timestamp, status: "submitted", remoteOrderID: result.orderID, signal: signal)
             await paper.record(order)
             await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
             appendLog("挂单：策略 \(config.name) / \(instrumentID) / \(side) \(quantity)，订单 \(result.orderID)", level: "order")
-            if signal.stopPrice != nil || signal.takePrice != nil { appendLog("策略 \(config.name) 已附带条件止损/止盈；时间离场由策略监控处理", level: "info") }
+            if signal.stopPrice != nil || signal.takePrice != nil || signal.takePrices != nil { appendLog("策略 \(config.name) 已附带保护规则；分批止盈/保本/跟踪由策略监控处理", level: "info") }
             return true
         } catch {
-            await riskEngine.release(instrumentID: instrumentID, notional: notional, strategyID: config.id, margin: notional, riskAmount: orderRisk, closedPosition: true)
+            await failRemoteSubmission(submissionToken)
             await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
             appendLog("策略 \(config.name) OKX 模拟下单失败：\(error.localizedDescription)", level: "warning")
             return false
@@ -1236,13 +2210,15 @@ public actor TradingBackend {
         await broker.mark(instrumentID: instrumentID, price: candle.close, at: candle.timestamp)
         await logNewFills()
         await enforceGlobalRiskIfNeeded(now: candle.timestamp)
-        await enforceStrategyExits(at: candle.timestamp, fallbackPrice: candle.close)
+        let exitCandle = interval == .fifteenMinutes ? candle : nil
+        await enforceStrategyExits(at: .now, fallbackPrice: candle.close, candle: exitCandle, candleInstrumentID: instrumentID)
         await paper.setRisk(await broker.riskSnapshot())
-        if candle.confirmed {
+        let configs = await paper.allStrategies()
+        let shouldEvaluate = candle.confirmed || (interval == .fifteenMinutes && configs.contains { $0.enabled && $0.type == .hlsr })
+        if shouldEvaluate {
             let current = await candles.values(instrumentID: instrumentID, interval: interval)
             let snapshot = MarketSnapshot(instrumentID: instrumentID, interval: interval, candles: current)
             let statuses = await paper.evaluate(snapshot, contracts: contractUniverse)
-            let configs = await paper.allStrategies()
             logSignals(statuses, configs: configs, instrumentID: instrumentID)
             for status in statuses {
             guard status.state == .running, let signal = status.lastSignal, signal.type.hasPrefix("entry_"), signal.timestamp == candle.timestamp, !submittedSignals.contains(signal.id), let config = configs.first(where: { $0.id == status.id }), config.enabled else { continue }
@@ -1360,6 +2336,22 @@ public struct TradingHTTPServer {
             return try request.application.encoder.encode(await backend.market.trades(instrumentID: instrument), from: request)
         }
         app.router.get("api/v1/strategies") { [backend] request in try request.application.encoder.encode(await backend.strategies(), from: request) }
+        app.router.get("api/v1/strategy-packages") { [backend] request in
+            try request.application.encoder.encode(await backend.strategyPackageManifests(), from: request)
+        }
+        app.router.post("api/v1/strategy-packages") { [backend] request in
+            let install = try request.decode(as: StrategyPackageInstallRequest.self)
+            return try request.application.encoder.encode(try await backend.installStrategyPackage(install), from: request)
+        }
+        app.router.delete("api/v1/strategy-packages/:id") { [backend] request in
+            guard let identifier = request.parameters.get("id") else { throw HBHTTPError(.badRequest) }
+            return try request.application.encoder.encode(try await backend.uninstallStrategyPackage(identifier: identifier), from: request)
+        }
+        app.router.post("api/v1/strategy-packages/:id/instances") { [backend] request in
+            guard let identifier = request.parameters.get("id") else { throw HBHTTPError(.badRequest) }
+            let instance = (try? request.decode(as: StrategyPackageInstanceRequest.self)) ?? StrategyPackageInstanceRequest()
+            return try request.application.encoder.encode(try await backend.createStrategyFromPackage(identifier: identifier, request: instance), from: request)
+        }
         app.router.get("api/v1/strategies/status") { [backend] request in try request.application.encoder.encode(await backend.statuses(), from: request) }
         app.router.get("api/v1/strategies/capital") { [backend] request in try request.application.encoder.encode(await backend.strategyCapital(), from: request) }
         app.router.get("api/v1/paper/positions") { [backend] request in try request.application.encoder.encode(await backend.positions(), from: request) }

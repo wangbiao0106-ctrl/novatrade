@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
   "name": "ema_altcoin_long",
-  "display_name": "双均线交易山寨币多（1h）",
+  "display_name": "双均线交易山寨币做多",
   "status": "integrated_paper_only",
   "source_of_truth": "strategies/ema_altcoin_long/STRATEGY.md",
   "runtime_integration": "implemented_paper_only",
@@ -19,9 +19,10 @@
     "protective_orders": "attached_stop_loss_and_take_profit_reduce_only",
     "time_exit_hours": 96,
     "sizing": "min(pool_available_capital, pool_equity * risk_per_trade_pct / 100 / (entry_price - stop_price))",
-    "max_concurrent_positions": 6,
-    "max_open_risk_pct": 3.0,
+    "max_concurrent_positions": 1,
+    "max_open_risk_pct": 0.5,
     "one_position_per_symbol": true,
+    "one_active_symbol_per_strategy": true,
     "live_order_mode": "paper_only"
   },
   "market": {
@@ -38,7 +39,8 @@
     "live_selection": "current eligible altcoins ranked by rolling 24h quote volume",
     "major_symbols": ["BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "TON", "AVAX", "LINK", "DOT", "LTC", "BCH", "ETC", "UNI", "ATOM", "NEAR", "APT", "SUI"],
     "exclude": ["stablecoins", "stocks", "ETFs", "indices", "commodities", "synthetic non-crypto contracts", "symbols without a complete 1h candle history"],
-    "one_position_per_symbol": true
+    "one_position_per_symbol": true,
+    "one_active_symbol_per_strategy": true
   },
   "signal_parameters": {
     "ema_fast": 20,
@@ -66,8 +68,8 @@
   },
   "portfolio": {
     "risk_per_trade_pct": 0.5,
-    "max_concurrent_positions": 6,
-    "max_open_risk_pct": 3.0,
+    "max_concurrent_positions": 1,
+    "max_open_risk_pct": 0.5,
     "sizing_formula": "pool_equity * risk_per_trade_pct / 100 / (entry_price - stop_price)",
     "risk_budget_includes_fees": false
   },

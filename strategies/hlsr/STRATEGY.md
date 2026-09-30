@@ -1,9 +1,10 @@
-# HLSR 高位流动性扫顶反转策略
+# HLSR 高位扫顶反转策略
 
 版本：1.0  
 英文名：HLSR - High-Level Liquidity Sweep Reversal  
 市场：OKX USDT 线性永续合约  
-用途：只用于历史回测、行情扫描和信号生成，不包含真实下单。
+显示名：高位扫顶反转做空
+用途：已接入本地策略引擎的 OKX 模拟盘和信号生成；默认禁用，不自动启用策略或提交真实订单。
 
 ## 1. 核心逻辑
 
@@ -163,5 +164,14 @@ python3 strategies/hlsr/src/hlsr_signal_generator.py \
   --symbol BEAT-USDT-SWAP \
   --config strategies/hlsr/config/strategy.json
 ```
+
+## 11. 运行时集成边界
+
+HLSR 的稳定代码标识为 `hlsr`，领域层类型为 `StrategyType.hlsr`，界面显示为“高位扫顶反转做空”。运行时实现位于 `Sources/TradingDomain/`、`Sources/TradingService/`、`Sources/TradingService/HLSRPositionManager.swift`、`Sources/OKXLocalD/` 和 `Sources/MacTraderApp/`，不会读取本目录文件；规则和默认机器参数分别由本文件与 [`config/strategy.json`](config/strategy.json) 维护。
+
+- 运行范围是每 30 秒刷新、按 24 小时报价成交额排序的动态热门山寨币池；每个策略实例最多一个活动币种，默认每笔风险为策略资金池权益的 0.5%，开放止损风险上限为 5%。
+- 15 分钟确认 K 线和已完成的 4 小时 K 线都必须连续、已确认且不重复；4 小时状态至少需要 55 根历史 K 线。成交额硬筛选只接受 OKX `volCcyQuote`，缺字段或历史不足时关闭信号，不以合约张数成交量替代。
+- 确认后只在下一根 15 分钟 K 线开盘估算市价入场；止损、TP1/TP2/TP3、TP1 后保本、TP2 后两根 K 线高点跟踪、收盘失效和 16 根 K 线冷却均由持仓管理状态机执行。止损优先，分批数量按合约 lot 规格向下取整，重启前持仓腿、目标和冷却状态必须持久化。
+- OKX 模拟盘可由人工启用，真实交易仍需额外手动开关；研究样本外结果目前为 **FAIL**（8 笔、37.5% 胜率、平均净 R +0.455），不能把该结果描述为已证明盈利。
 
 默认只输出最近一个信号。需要导出全部历史信号时添加 `--all`，需要写入文件时添加 `--output path/to/signals.json`。该命令只输出信号、入场参考价、止损、止盈和风险字段，不会连接交易所或提交订单。

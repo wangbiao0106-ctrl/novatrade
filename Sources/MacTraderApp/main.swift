@@ -65,6 +65,7 @@ enum StrategyState: String, CaseIterable, Identifiable {
 enum StrategySymbolCategory: String, CaseIterable, Identifiable {
     case mainstream = "主流币"
     case hotAltcoins = "热门山寨币"
+    case emaAltcoinCandidates = "双均线候选山寨币（前 50）"
     case highGain60 = "高涨幅币（24h +60%）"
     case highGain100 = "高涨幅币（24h +100%）"
 
@@ -74,6 +75,7 @@ enum StrategySymbolCategory: String, CaseIterable, Identifiable {
         switch self {
         case .mainstream: return .mainstream
         case .hotAltcoins: return .hotAltcoins
+        case .emaAltcoinCandidates: return .emaAltcoinCandidates
         case .highGain60: return .highGain60
         case .highGain100: return .highGain100
         }
@@ -137,13 +139,14 @@ struct TradingStrategy: Identifiable {
     var name: String
     var symbol: String
     var rule: String
+    var stopDescription: String
     var state: StrategyState
     var pnl: Double
     var allocation: Double
     var poolAllocation: Double
     var updatedAt: Date = .now
-    init(serviceID: UUID? = nil, name: String, symbol: String, rule: String, state: StrategyState, pnl: Double, allocation: Double, poolAllocation: Double = 100) {
-        self.serviceID = serviceID; self.name = name; self.symbol = symbol; self.rule = rule; self.state = state; self.pnl = pnl; self.allocation = allocation; self.poolAllocation = poolAllocation
+    init(serviceID: UUID? = nil, name: String, symbol: String, rule: String, stopDescription: String = "动态止损", state: StrategyState, pnl: Double, allocation: Double, poolAllocation: Double = 100) {
+        self.serviceID = serviceID; self.name = name; self.symbol = symbol; self.rule = rule; self.stopDescription = stopDescription; self.state = state; self.pnl = pnl; self.allocation = allocation; self.poolAllocation = poolAllocation
     }
 }
 
@@ -152,7 +155,10 @@ final class DashboardModel: ObservableObject {
     /// 策略类型 → 界面规则描述
     nonisolated static func ruleLabel(_ type: StrategyType) -> String {
         switch type {
-        case .sweepReversalShort: return "山寨币二次扫顶做空（1h）"
+        case .sweepReversalShort: return "山寨币二次扫顶做空"
+        case .emaAltcoinLong: return "双均线交易山寨币做多"
+        case .hlsr: return "高位扫顶反转做空"
+        case .external(let identifier): return "\(identifier)（运行时处理器不可用）"
         }
     }
 
@@ -236,6 +242,9 @@ final class DashboardModel: ObservableObject {
         case .hotAltcoins:
             let altcoins = source.filter(Self.isEligibleHotAltcoin)
             return Array(altcoins.sorted { compactVolume($0.volume) > compactVolume($1.volume) }.prefix(20))
+        case .emaAltcoinCandidates:
+            let altcoins = source.filter(Self.isEligibleHotAltcoin)
+            return Array(altcoins.sorted { compactVolume($0.volume) > compactVolume($1.volume) }.prefix(50))
         case .highGain60:
             return source.filter { $0.change >= 60 }.sorted { $0.change > $1.change }
         case .highGain100:
@@ -377,7 +386,7 @@ final class DashboardModel: ObservableObject {
             if let configs = try? await client.strategies() {
                 strategyConfigs = configs
                 strategies = configs.map { config in
-                    TradingStrategy(serviceID: config.id, name: config.displayName, symbol: config.scope.displayName, rule: DashboardModel.ruleLabel(config.type), state: config.enabled ? .running : .paused, pnl: 0, allocation: config.riskPercent, poolAllocation: config.capitalPoolPercent)
+                    TradingStrategy(serviceID: config.id, name: config.displayName, symbol: config.scope.displayName, rule: DashboardModel.ruleLabel(config.type), stopDescription: config.type.stopLossDescription, state: config.enabled ? .running : .paused, pnl: 0, allocation: config.riskPercent, poolAllocation: config.capitalPoolPercent)
                 }
             }
             guard generation == lifecycleGeneration, autoStartBackend else {
@@ -566,7 +575,7 @@ final class DashboardModel: ObservableObject {
     func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig {
         let created = try await client.createStrategy(config)
         strategyConfigs.append(created)
-        strategies.insert(TradingStrategy(serviceID: created.id, name: created.displayName, symbol: created.scope.displayName, rule: DashboardModel.ruleLabel(created.type), state: .paused, pnl: 0, allocation: created.riskPercent, poolAllocation: created.capitalPoolPercent), at: 0)
+        strategies.insert(TradingStrategy(serviceID: created.id, name: created.displayName, symbol: created.scope.displayName, rule: DashboardModel.ruleLabel(created.type), stopDescription: created.type.stopLossDescription, state: .paused, pnl: 0, allocation: created.riskPercent, poolAllocation: created.capitalPoolPercent), at: 0)
         return created
     }
 
@@ -585,6 +594,7 @@ final class DashboardModel: ObservableObject {
             switch category {
             case .mainstream: uiCategory = .mainstream
             case .hotAltcoins: uiCategory = .hotAltcoins
+            case .emaAltcoinCandidates: uiCategory = .emaAltcoinCandidates
             case .highGain60: uiCategory = .highGain60
             case .highGain100: uiCategory = .highGain100
             }
@@ -682,14 +692,14 @@ struct DashboardView: View {
             MarketSidebar(model: model, searchText: $searchText)
         } detail: {
             VStack(spacing: 0) {
-                TopBar(model: model, showingNewStrategy: $showingNewStrategy)
-                Divider().overlay(Color.white.opacity(0.06))
+                DashboardWindowHeader(model: model)
+                AccountPanel(model: model)
                 HStack(alignment: .top, spacing: 0) {
                     GeometryReader { geometry in
                         ScrollView {
                             VStack(alignment: .leading, spacing: 12) {
                                 MarketHeader(model: model)
-                                ChartPanel(model: model, chartHeight: max(280, geometry.size.height - 300))
+                                ChartPanel(model: model, chartHeight: max(280, geometry.size.height - 180))
                                 MarketInsightStrip(model: model)
                             }.padding(16)
                         }
@@ -697,7 +707,9 @@ struct DashboardView: View {
                     Divider().overlay(Color.white.opacity(0.07))
                     RightRail(model: model, showingNewStrategy: $showingNewStrategy)
                 }
-            }.background(Color.appBackground)
+            }
+            .background(Color.appBackground)
+            .ignoresSafeArea(.container, edges: .top)
         }
         .sheet(isPresented: $showingNewStrategy) { NewStrategySheet(model: model) }
         .task { await model.refresh() }
@@ -714,11 +726,13 @@ struct RightRail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Label("策略状态", systemImage: "brain.head.profile").font(.headline)
+                    Label("策略状态", systemImage: "brain.head.profile")
+                        .font(.headline)
                     Spacer()
                     Button { showingNewStrategy = true } label: { Image(systemName: "plus") }
                         .buttonStyle(.bordered).controlSize(.small).help("新建策略")
                 }
+                .padding(.vertical, 4)
                 ForEach(model.strategies) { strategy in
                     StrategyStatusModule(strategy: strategy, status: model.strategyStatuses.first(where: { $0.id == strategy.serviceID }), model: model, toggle: { model.toggleStrategy(strategy.id) }, delete: { closePositions in
                         if let serviceID = strategy.serviceID { model.deleteStrategy(serviceID, closePositions: closePositions) }
@@ -785,6 +799,17 @@ struct StrategyStatusModule: View {
 
     private var openPositions: [PositionSnapshot] { model.strategyOpenPositions(for: strategy) }
 
+    private var stopLossText: String {
+        guard let signal = status?.lastSignal,
+              let stop = signal.stopPrice,
+              signal.price != 0 else {
+            return "策略止损：\(strategy.stopDescription)"
+        }
+        let distance = abs(NSDecimalNumber(decimal: stop).doubleValue - NSDecimalNumber(decimal: signal.price).doubleValue)
+        let entry = abs(NSDecimalNumber(decimal: signal.price).doubleValue)
+        return String(format: "策略止损 %.2f%%（动态）", distance / entry * 100)
+    }
+
     private func requestDelete() {
         guard strategy.state != .running else {
             model.errorMessage = "策略运行中，请先停止策略后再删除"
@@ -823,6 +848,7 @@ struct StrategyStatusModule: View {
             } else {
                 Text("暂无最近信号").font(.caption2).foregroundStyle(.secondary)
             }
+            Text(stopLossText).font(.caption2).foregroundStyle(.secondary)
             HStack {
                 Text("收益 \(formatPnL(status?.pnl ?? 0)) USDT").font(.caption2.monospacedDigit()).foregroundStyle(decimalDouble(status?.pnl ?? 0) >= 0 ? .green : .red)
                 Spacer()
@@ -891,10 +917,6 @@ struct MarketSidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "waveform.path.ecg.rectangle.fill").font(.title2.weight(.bold)).foregroundStyle(.mint)
-                VStack(alignment: .leading, spacing: 2) { Text("NOVA TRADE").font(.headline.weight(.bold)).tracking(1.2); Text("永续合约工作台").font(.caption).foregroundStyle(.secondary) }
-            }.padding(.horizontal, 18).padding(.top, 20).padding(.bottom, 18)
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(searchFocused ? .mint : .secondary)
                 TextField("搜索合约", text: $searchText)
@@ -908,7 +930,7 @@ struct MarketSidebar: View {
             .simultaneousGesture(TapGesture().onEnded { searchFocused = true })
             .background(Color.white.opacity(searchFocused ? 0.1 : 0.06), in: RoundedRectangle(cornerRadius: 7))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(searchFocused ? Color.mint.opacity(0.55) : .clear))
-            .padding(.horizontal, 14).padding(.bottom, 12)
+            .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 12)
             Picker("合约分组", selection: $category) { Text("全部").tag("全部"); Text("热门").tag("热门"); Text("涨幅").tag("涨幅"); Text("跌幅").tag("跌幅") }
                 .pickerStyle(.segmented).controlSize(.small).padding(.horizontal, 14).padding(.bottom, 12)
             HStack { Text("自选").font(.caption.weight(.semibold)).foregroundStyle(.secondary); Spacer(); Text("\(model.favoriteContracts.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
@@ -971,55 +993,6 @@ struct ContractRow: View {
         .padding(.vertical, 9).padding(.horizontal, 9)
         .background(selected ? Color.white.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 7))
         .overlay(alignment: .leading) { if selected { Capsule().fill(.mint).frame(width: 3, height: 26) } }
-    }
-}
-
-struct TopBar: View {
-    @ObservedObject var model: DashboardModel
-    @Binding var showingNewStrategy: Bool
-    var body: some View {
-        HStack(spacing: 18) {
-            HStack(spacing: 10) {
-                Image(systemName: model.accountOverview.mode == .live ? "bolt.shield.fill" : "flask.fill")
-                    .font(.title3).foregroundStyle(model.accountOverview.mode == .live ? .orange : .mint)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(model.accountOverview.mode == .live ? "实盘账户" : "模拟账户").font(.headline)
-                    HStack(spacing: 5) {
-                        Text(accountLabel).lineLimit(1)
-                        Image(systemName: "link").font(.caption2)
-                        Text(model.accountOverview.authenticated ? "OKX 已连接" : "OKX 未连接")
-                    }.font(.caption).foregroundStyle(model.accountOverview.authenticated ? .mint : .orange)
-                }
-            }
-            Divider().frame(height: 30)
-            topMetric("总资产估值", model.accountOverview.totalAssetValueUSD.map(formatUSD) ?? "--")
-            topMetric("今日收益", model.accountOverview.todayPnLUSD.map(formatUSD) ?? "--", color: (model.accountOverview.todayPnLUSD ?? 0) >= 0 ? .green : .red)
-            Spacer(minLength: 8)
-            HStack(spacing: 8) {
-                Circle().fill(model.serviceState.color).frame(width: 8, height: 8)
-                Text(model.serviceState.title).font(.caption.weight(.semibold)).foregroundStyle(model.serviceState.color)
-                Button(model.serviceState == .running || model.serviceState == .starting ? "停止服务" : "启动服务") {
-                    model.toggleBackend()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(model.serviceState == .stopping)
-            }
-        }
-        .padding(.horizontal, 24).padding(.vertical, 12)
-        .background(Color.appBackground)
-    }
-
-    private var accountLabel: String {
-        let parts = [model.accountOverview.profile, model.accountOverview.label, model.accountOverview.site].compactMap { $0 }.filter { !$0.isEmpty }
-        return parts.isEmpty ? "等待 OKX CLI 登录信息" : parts.joined(separator: " · ")
-    }
-
-    private func topMetric(_ title: String, _ value: String, color: Color = .primary) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption2).foregroundStyle(.secondary)
-            Text(value).font(.subheadline.weight(.semibold).monospacedDigit()).foregroundStyle(color)
-        }
     }
 }
 
@@ -1100,64 +1073,100 @@ struct MarketHeader: View {
 struct AccountPanel: View {
     @ObservedObject var model: DashboardModel
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack(spacing: 18) {
-                HStack(spacing: 10) {
-                    Image(systemName: model.accountOverview.mode == .live ? "bolt.shield.fill" : "flask.fill")
-                        .font(.title3).foregroundStyle(model.accountOverview.mode == .live ? .orange : .mint)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(model.accountOverview.mode == .live ? "实盘账户" : "模拟账户").font(.headline)
-                        Text([model.accountOverview.profile, model.accountOverview.label, model.accountOverview.site].compactMap { $0 }.joined(separator: " · ").isEmpty ? "等待 OKX CLI 登录信息" : [model.accountOverview.profile, model.accountOverview.label, model.accountOverview.site].compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-                Divider().frame(height: 30)
-                accountMetric("账户权益", value: model.accountOverview.equityUSD.map { formatUSD($0) } ?? "--")
-                accountMetric("可用权益", value: model.accountOverview.availableEquityUSD.map { formatUSD($0) } ?? "--")
-                accountMetric("资产币种", value: "\(model.accountOverview.assets.count)")
-                Spacer()
-                Label(model.accountOverview.authenticated ? "CLI 已认证" : "未认证", systemImage: model.accountOverview.authenticated ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                    .font(.caption.weight(.semibold)).foregroundStyle(model.accountOverview.authenticated ? .mint : .orange)
+    private var primaryAssets: [AccountAsset] {
+        model.accountOverview.assets
+            .sorted { left, right in
+                NSDecimalNumber(decimal: valuation(for: left) ?? 0).compare(NSDecimalNumber(decimal: valuation(for: right) ?? 0)) == .orderedDescending
             }
-            Divider().overlay(Color.white.opacity(0.06))
-            if model.accountOverview.assets.isEmpty {
-                Text("暂无资产明细").font(.caption).foregroundStyle(.secondary)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 9) {
-                        ForEach(model.accountOverview.assets) { asset in
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(asset.currency).font(.caption.weight(.bold).monospaced())
-                                Text("总余额 \(formatAsset(asset.equity))").font(.caption2.monospacedDigit())
-                                Text("可用 \(formatAsset(asset.available))").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                                if let usdValue = asset.usdValue {
-                                    Text(formatUSD(usdValue)).font(.caption2.monospacedDigit()).foregroundStyle(.mint)
-                                }
-                            }
-                            .frame(minWidth: 118, alignment: .leading)
-                            .padding(.horizontal, 10).padding(.vertical, 8)
-                            .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
-                        }
-                    }
-                }
-            }
+            .prefix(4)
+            .map { $0 }
+    }
+
+    /// OKX does not always include `eqUsd` for demo balances. Keep the
+    /// overview useful by valuing those balances against the latest contract
+    /// ticker already loaded by the market sidebar. Stablecoins are valued at
+    /// one USD and remain available even while the contract list is warming.
+    private func valuation(for asset: AccountAsset) -> Decimal? {
+        if let usdValue = asset.usdValue, usdValue >= 0 { return usdValue }
+        let currency = asset.currency.uppercased()
+        let unitPrice: Double
+        if ["USD", "USDT", "USDC", "DAI"].contains(currency) {
+            unitPrice = 1
+        } else if let contract = model.contracts.first(where: { $0.shortName.uppercased() == currency }) {
+            unitPrice = contract.price
+        } else {
+            return nil
         }
-        .padding(15)
-        .background(Color.panelBackground, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(model.accountOverview.mode == .live ? Color.orange.opacity(0.35) : Color.mint.opacity(0.22)))
+        guard unitPrice.isFinite, unitPrice > 0 else { return nil }
+        let quantity = NSDecimalNumber(decimal: asset.equity).doubleValue
+        guard quantity.isFinite, quantity >= 0 else { return nil }
+        return Decimal(quantity * unitPrice)
     }
 
-    private func accountMetric(_ title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) { Text(title).font(.caption2).foregroundStyle(.secondary); Text(value).font(.subheadline.weight(.semibold).monospacedDigit()) }
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider().overlay(Color.white.opacity(0.08))
+            HStack(spacing: 0) {
+                accountMetric("估计总资产", value: model.accountOverview.totalAssetValueUSD.map(formatUSD) ?? "--")
+                    .frame(width: 126, alignment: .leading)
+                metricDivider
+                accountMetric("今日收益", value: model.accountOverview.todayPnLUSD.map(signedUSD) ?? "--", color: pnlColor)
+                    .frame(width: 112, alignment: .leading)
+                metricDivider
+                HStack(spacing: 12) {
+                    if primaryAssets.isEmpty {
+                        Text("暂无资产明细")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(primaryAssets, content: assetMetric)
+                    }
+                }
+                .layoutPriority(1)
+                Spacer(minLength: 10)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            Divider().overlay(Color.white.opacity(0.08))
+        }
     }
-}
 
-private func formatAsset(_ value: Decimal) -> String {
-    let number = NSDecimalNumber(decimal: value).doubleValue
-    if abs(number) >= 1000 { return String(format: "%,.2f", number) }
-    if abs(number) >= 1 { return String(format: "%.6f", number).replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression).replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression) }
-    return String(format: "%.8f", number).replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression).replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
+    private var metricDivider: some View {
+        Divider()
+            .frame(height: 30)
+            .overlay(Color.white.opacity(0.1))
+            .padding(.horizontal, 14)
+    }
+
+    private var pnlColor: Color {
+        (model.accountOverview.todayPnLUSD ?? 0) >= 0 ? .green : .red
+    }
+
+    private func accountMetric(_ title: String, value: String, color: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.subheadline.weight(.semibold).monospacedDigit()).foregroundStyle(color)
+        }
+        .lineLimit(1)
+    }
+
+    private func assetMetric(_ asset: AccountAsset) -> some View {
+        let usdValue = valuation(for: asset)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(asset.currency)
+                .font(.caption.weight(.bold).monospaced())
+            Text(usdValue.map(formatUSD) ?? "估值待同步")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(usdValue == nil ? Color.secondary : Color.mint)
+        }
+        .frame(minWidth: 82, alignment: .leading)
+        .lineLimit(1)
+    }
+
+    private func signedUSD(_ value: Decimal) -> String {
+        let number = NSDecimalNumber(decimal: value).doubleValue
+        return String(format: "%@$%.2f", number >= 0 ? "+" : "-", abs(number))
+    }
 }
 
 private func formatPnL(_ value: Decimal) -> String {
@@ -1414,7 +1423,8 @@ struct StrategyCard: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("资金池 \(poolEquityText)").font(.caption2).foregroundStyle(.secondary)
                     Text("已占用 \(occupiedFundsText)").font(.caption2).foregroundStyle(.secondary)
-                    Text(String(format: "单笔风险 %.1f%%", strategy.allocation)).font(.caption2).foregroundStyle(.secondary)
+                    Text(String(format: "风险预算 %.1f%%", strategy.allocation)).font(.caption2).foregroundStyle(.secondary)
+                    Text("策略止损：\(strategy.stopDescription)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     Button(strategy.state == .running ? "暂停" : "启动", action: toggle).buttonStyle(.bordered).controlSize(.mini)
                 }
             }
@@ -1531,42 +1541,110 @@ struct OperationsSection: View {
 struct NewStrategySheet: View {
     @ObservedObject var model: DashboardModel
     @Environment(\.dismiss) private var dismiss
-    @State private var allocation = 1.0
+    @State private var allocation = StrategyType.sweepReversalShort.defaultRiskPercent
     @State private var capitalPoolPercent = 100.0
     @State private var selectedRule: StrategyType = .sweepReversalShort
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack { Text("新建策略").font(.title2.weight(.bold)); Spacer(); Button("取消") { dismiss() }.buttonStyle(.plain).foregroundStyle(.secondary) }
-            Text("启动后按信号向当前 OKX 模拟账户提交入场单，并按策略规则执行保护止损、止盈和时间离场。").font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.title3)
+                    .foregroundStyle(.mint)
+                Text("新建策略").font(.title2.weight(.semibold))
+                Spacer()
+                Button("取消", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+
             Form {
-                Picker("策略规则", selection: $selectedRule) {
-                    ForEach(StrategyType.availableCases, id: \.self) { strategyType in
-                        Text("\(strategyType.displayName)\(model.hasStrategyType(strategyType) ? "（已有实例）" : "")")
-                            .tag(strategyType)
+                Section("策略配置") {
+                    Picker("策略规则", selection: $selectedRule) {
+                        ForEach(StrategyType.availableCases, id: \.self) { strategyType in
+                            Text("\(strategyType.displayName)\(model.hasStrategyType(strategyType) ? "（已有实例）" : "")")
+                                .tag(strategyType)
+                        }
+                    }
+                    LabeledContent("实例范围", value: "动态扫描多个适合币种，单次只允许一个币种下单/持仓")
+                    LabeledContent("扫描范围", value: scopeDescription)
+                    LabeledContent("信号周期", value: signalIntervalDescription)
+                    LabeledContent("保护规则") {
+                        Text(selectedRule.stopLossDescription)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
                     }
                 }
-                LabeledContent("扫描范围") {
-                    Text(scopeDescription)
-                        .foregroundStyle(.secondary)
+
+                Section("资金分配") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("策略资金池")
+                            Spacer()
+                            Text("账户权益的 \(String(format: "%.0f", capitalPoolPercent))%")
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 10) {
+                            Slider(value: $capitalPoolPercent, in: 1...100, step: 1)
+                            TextField("", value: $capitalPoolPercent, format: .number.precision(.fractionLength(0)))
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 54)
+                            Text("%").foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Stepper(value: $allocation, in: 0.1...maxRiskForRule, step: 0.1) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("单笔风险预算")
+                                Text("按策略资金池权益计算；止损位置由策略规则提供")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(String(format: "%.1f", effectiveRisk))%")
+                                .font(.body.monospacedDigit().weight(.semibold))
+                        }
+                    }
+
+                    LabeledContent("仓位计算", value: "风险金额 ÷ 入场到止损距离")
+                    LabeledContent("组合上限", value: portfolioLimitDescription)
                 }
-                Text("策略运行期间会定期刷新合规山寨币成交额榜，自动跟踪命中的合约，不需要手动指定币种。")
+
+                Section("风险换算") {
+                    Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
+                        GridRow {
+                            riskMetric("账户权益", value: formatted(accountEquity))
+                            riskMetric("策略资金池", value: formatted(poolEquity))
+                        }
+                        Divider().gridCellUnsizedAxes(.horizontal)
+                        GridRow {
+                            riskMetric("单笔最大风险", value: formatted(perTradeLoss), detail: "账户权益 \(accountRiskPercentText)")
+                            riskMetric("组合开放风险", value: formatted(maxOpenRisk), detail: maxOpenRiskDetail)
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .onChange(of: selectedRule) { _, newRule in
+                allocation = newRule.defaultRiskPercent
+            }
+
+            HStack {
+                Label("仅提交至当前 OKX 模拟账户", systemImage: "shield.checkered")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                VStack(alignment: .leading) {
-                    Text("单笔风险 \(String(format: "%.1f", effectiveRisk))%")
-                    Slider(value: $allocation, in: 0.1...maxRiskForRule, step: 0.1)
-                }
-                VStack(alignment: .leading) {
-                    Text("策略资金池 \(String(format: "%.0f", capitalPoolPercent))%")
-                    Slider(value: $capitalPoolPercent, in: 1...100, step: 1)
-                }
-            }.formStyle(.grouped)
-        .onChange(of: selectedRule) { _, _ in allocation = min(allocation, maxRiskForRule) }
-            Spacer(); HStack { Spacer(); Button("创建并保存") { create() }.buttonStyle(.borderedProminent).tint(.mint).disabled(!canCreate) }
+                Spacer()
+                Button("创建并保存") { create() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.mint)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canCreate)
+            }
         }
         .padding(24)
-        .frame(width: 560, height: 480)
+        .frame(width: 650, height: 650)
         .preferredColorScheme(.dark)
     }
 
@@ -1576,14 +1654,84 @@ struct NewStrategySheet: View {
 
     private var effectiveRisk: Double { min(allocation, maxRiskForRule) }
 
-    /// 实验室规则给出的单笔风险上限：扫顶 1%，双均线多头 0.5%。
-    private var maxRiskForRule: Double { 1.0 }
+    /// 实验室规则给出的风险预算硬上限。
+    private var maxRiskForRule: Double { selectedRule.maxRiskPercent }
 
-    private var scopeDescription: String { "动态扫描热门榜前 20 个山寨币" }
+    private var scopeDescription: String {
+        switch selectedRule {
+        case .hlsr:
+            return "动态扫描合规山寨币；24h 涨幅 >40% 且成交额 >3,000 万 USDT"
+        case .sweepReversalShort, .emaAltcoinLong:
+            return "动态扫描合规热门榜前 20 个山寨币"
+        case .external:
+            return "策略包运行时不可用（暂停）"
+        }
+    }
+
+    private var signalIntervalDescription: String {
+        switch selectedRule {
+        case .hlsr:
+            return "15 分钟入场；4 小时市场状态"
+        case .sweepReversalShort, .emaAltcoinLong:
+            return "1 小时收盘确认"
+        case .external:
+            return "运行时处理器不可用"
+        }
+    }
+
+    private var maxConcurrentPositions: Int {
+        Int(selectedRule.defaultParameters["maxConcurrentPositions"] ?? 1)
+    }
+
+    private var portfolioLimitDescription: String {
+        "最多 \(maxConcurrentPositions) 笔，开放止损风险不超过资金池 \(String(format: "%.1f", maxOpenRiskPercent))%"
+    }
+
+    private var accountEquity: Decimal? { model.accountOverview.equityUSD }
+
+    private var poolEquity: Decimal? {
+        accountEquity.map { $0 * Decimal(capitalPoolPercent) / 100 }
+    }
+
+    private var perTradeLoss: Decimal? {
+        poolEquity.map { $0 * Decimal(effectiveRisk) / 100 }
+    }
+
+    private var maxOpenRisk: Decimal? {
+        poolEquity.map { $0 * Decimal(maxOpenRiskPercent) / 100 }
+    }
+
+    private var maxOpenRiskPercent: Double {
+        selectedRule.defaultParameters["maxOpenRiskPercent"] ?? selectedRule.maxRiskPercent
+    }
+
+    private var accountRiskPercentText: String {
+        String(format: "%.2f%%", capitalPoolPercent * effectiveRisk / 100)
+    }
+
+    private var maxOpenRiskDetail: String {
+        "账户权益 \(String(format: "%.2f%%", capitalPoolPercent * maxOpenRiskPercent / 100))"
+    }
+
+    private func formatted(_ value: Decimal?) -> String {
+        value.map(formatUSD) ?? "--"
+    }
+
+    @ViewBuilder
+    private func riskMetric(_ title: String, value: String, detail: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.headline.monospacedDigit())
+            if let detail {
+                Text(detail).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
     private func create() {
         // 参数默认值来自领域层（与实验室 config 对齐），不再在界面里重复一份。
-        let config = StrategyConfig(name: selectedRule.displayName, scope: .dynamic(.hotAltcoins), interval: .oneHour, type: selectedRule, parameters: selectedRule.defaultParameters, enabled: false, riskPercent: effectiveRisk, capitalPoolPercent: capitalPoolPercent, cooldownBars: 96)
+        let config = StrategyConfig(name: selectedRule.displayName, scope: .dynamic(.hotAltcoins), interval: selectedRule.entryInterval, type: selectedRule, parameters: selectedRule.defaultParameters, enabled: false, riskPercent: effectiveRisk, capitalPoolPercent: capitalPoolPercent, cooldownBars: selectedRule.defaultCooldownBars)
         Task {
             do { _ = try await model.createStrategy(config); dismiss() }
             catch { model.errorMessage = error.localizedDescription }
@@ -1613,6 +1761,7 @@ extension Color {
     static let panelBackground = Color(red: 0.09, green: 0.102, blue: 0.12)
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
@@ -1639,5 +1788,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct MacTraderApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    var body: some Scene { WindowGroup("NovaTrade") { DashboardView() }.defaultSize(width: 1480, height: 900) }
+    var body: some Scene {
+        WindowGroup("NovaTrade") {
+            DashboardView()
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1480, height: 900)
+    }
 }
