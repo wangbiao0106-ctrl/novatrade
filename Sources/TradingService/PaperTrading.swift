@@ -317,7 +317,10 @@ public actor RiskEngine {
                 allocationPercent: capital.allocationPercent,
                 initialCapital: capital.initialCapital,
                 equity: capital.equity,
-                reservedCapital: capital.reservedCapital,
+                // Pending orders and positions are runtime-only and are not
+                // restored with this ledger. Keeping their old reservation
+                // would permanently strand pool capital after a restart.
+                reservedCapital: 0,
                 realizedPnL: capital.realizedPnL,
                 // PaperBroker positions are runtime-only and are not restored
                 // alongside the risk snapshot. Do not expose an old mark as
@@ -357,7 +360,7 @@ public actor RiskEngine {
             dayStartBoundary = dayStart
         }
         let daily = dayStartEquity == 0 ? 0 : (equity - dayStartEquity) / dayStartEquity * 100
-        let drawdown = equityPeak == 0 ? 0 : (equityPeak - equity) / equityPeak * 100
+        _ = equityPeak == 0 ? 0 : (equityPeak - equity) / equityPeak * 100
         // The account-level hard stop is deliberately limited to the
         // calendar-day loss rule. Strategy-specific stops (including its
         // ATR stop, take-profit and time exit) own all other exits. Keep the

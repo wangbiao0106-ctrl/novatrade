@@ -77,8 +77,8 @@ func tradingBackendCannotRestartStrategyWhileAccountKillSwitchIsLatched() async 
     do {
         _ = try await backend.startStrategy(config.id)
         Issue.record("expected strategy start to be blocked by the account kill switch")
-    } catch ATKError.unavailable {
-        // Expected.
+    } catch {
+        #expect(error.localizedDescription.contains("熔断"))
     }
 }
 
@@ -296,7 +296,7 @@ func riskEngineRestoreDoesNotCarryStalePoolMarkAfterRestart() async {
                 allocationPercent: 50,
                 initialCapital: 5_000,
                 equity: 5_000,
-                reservedCapital: 0,
+                reservedCapital: 125,
                 unrealizedPnL: 275
             )
         ]
@@ -307,6 +307,7 @@ func riskEngineRestoreDoesNotCarryStalePoolMarkAfterRestart() async {
     let pool = await risk.strategyCapital(strategyID)
     #expect(pool.equity == Decimal(5_000))
     #expect(pool.unrealizedPnL == 0)
+    #expect(pool.reservedCapital == 0)
     #expect(pool.availableCapital == Decimal(5_000))
 }
 

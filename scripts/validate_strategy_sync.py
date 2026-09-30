@@ -178,6 +178,9 @@ def main() -> int:
             fail(errors, f"{strategy} 的 NON_CRYPTO 与规范排除清单不一致：缺少 {missing}，多出 {extra}")
     main_source = (ROOT / "Sources" / "MacTraderApp" / "main.swift").read_text()
     service_source = (ROOT / "Sources" / "TradingService" / "TradingService.swift").read_text()
+    runtime_sources = domain + engine + service_source + main_source + stream
+    if re.search(r"emaAltcoinLong|evaluateEmaAltcoinLong|双均线交易山寨币多", runtime_sources):
+        fail(errors, "运行时代码仍包含已归档的 EMA 山寨币多头策略")
     if re.search(r"case\s+trendFollowing|case\s+rsiReversal|\.trendFollowing|\.rsiReversal", domain + engine + service_source + main_source):
         fail(errors, "运行时代码仍包含已清理的演示策略入口")
     if ".dynamic(.hotAltcoins)" not in main_source:
@@ -201,34 +204,7 @@ def main() -> int:
     if "enforceGlobalRiskIfNeeded" not in service_source or "closeDemoPosition" not in service_source:
         fail(errors, "后端未接入账户级熔断处置")
 
-    # ---- 双均线交易山寨币多（ema_altcoin_long）运行时映射 ----
-    ema_config = json.loads((ROOT / "strategies" / "ema_altcoin_long" / "config" / "strategy.json").read_text())
-    ema_runtime = ema_config.get("runtime", {})
-    ema_doc = (ROOT / "strategies" / "ema_altcoin_long" / "STRATEGY.md").read_text()
-    if ema_runtime.get("strategy_type") != "emaAltcoinLong":
-        fail(errors, "ema_altcoin_long 的 runtime.strategy_type 必须是 emaAltcoinLong")
-    if "## 8. 运行时映射契约" not in ema_doc:
-        fail(errors, "ema_altcoin_long/STRATEGY.md 缺少 §8 运行时映射契约")
-    if "evaluateEmaAltcoinLong" not in engine:
-        fail(errors, "StrategyEngine 未实现 evaluateEmaAltcoinLong")
-    for helper in ("btcEmaGateAllows", "hasEmaPullbackSetup"):
-        if helper not in engine:
-            fail(errors, f"StrategyEngine 缺少 {helper}")
-    if "engine.evaluateEmaAltcoinLong(config: config, candles: snapshot.candles" not in service_source:
-        fail(errors, "后端未在已确认 1h K 线上评估双均线多头")
-    if "config.type == .emaAltcoinLong" not in stream:
-        fail(errors, "后台未为双均线多头订阅 BTC 1h 门控数据")
-    if "maxConcurrentPositions" not in service_source:
-        fail(errors, "后端未实现策略并发持仓上限")
-    if "maxOpenRiskPercent" not in service_source or "riskAmount: orderRisk" not in service_source:
-        fail(errors, "后端未把每笔止损风险交给风险引擎做开放风险上限判定")
     paper_source = (ROOT / "Sources" / "TradingService" / "PaperTrading.swift").read_text()
-    if "openRisk" not in paper_source or "openPositions" not in paper_source:
-        fail(errors, "RiskEngine 未按策略资金池累计开放风险与并发笔数")
-    if "策略开放止损风险超过上限" not in paper_source:
-        fail(errors, "RiskEngine 未执行开放止损风险上限")
-    if "closedPosition: true" not in service_source:
-        fail(errors, "平仓时未释放并发名额与开放风险")
     if "同一标的只允许一笔" not in service_source:
         fail(errors, "后端未实现每标的单仓约束")
     if "timedOut" not in service_source or "96 * 3600" not in service_source:
@@ -257,36 +233,6 @@ def main() -> int:
                 fail(errors, f"{label} 运行时默认参数缺少 {swift_key}")
             elif abs(got - want) > 1e-9:
                 fail(errors, f"{label} 参数 {swift_key}={got} 与实验室 {lab_key}={lab[lab_key]} 不一致")
-
-    ema_swift = swift_default_parameters("case .emaAltcoinLong:")
-    compare_parameters(
-        "双均线多头",
-        ema_config["signal_parameters"],
-        ema_swift,
-        {
-            "ema_fast": ("emaFast", 1), "ema_slow": ("emaSlow", 1), "ema_trend": ("emaTrend", 1),
-            "atr_period": ("atrPeriod", 1), "cluster_atr": ("clusterATR", 1),
-            "breakout_bars": ("breakoutBars", 1), "pullback_bars": ("pullbackBars", 1),
-            "pullback_atr": ("pullbackATR", 1), "min_atr_pct": ("minATRPct", 100),
-            "min_breakout_atr": ("minBreakoutATR", 1), "min_spread_atr": ("minSpreadATR", 1),
-            "stop_atr": ("stopATR", 1), "target_r": ("targetR", 1), "max_hold_bars": ("maxHoldBars", 1),
-        },
-    )
-    ema_gate = ema_config["regime_gate"]
-    if ema_swift.get("minimumHistoryBars") != float(ema_gate["minimum_history_bars"]):
-        fail(errors, "双均线多头的 minimumHistoryBars 与实验室 regime_gate 不一致")
-    if ema_swift.get("gateSlopeBars") != float(ema_gate["slope_bars"]):
-        fail(errors, "双均线多头的 gateSlopeBars 与实验室 regime_gate 不一致")
-    ema_portfolio = ema_config["portfolio"]
-    if ema_swift.get("maxConcurrentPositions") != float(ema_portfolio["max_concurrent_positions"]):
-        fail(errors, "双均线多头的 maxConcurrentPositions 与实验室 portfolio 不一致")
-    if abs(float(ema_portfolio["risk_per_trade_pct"]) - 0.5) > 1e-9:
-        fail(errors, "双均线多头实验室单笔风险必须是 0.5%")
-    if "case .emaAltcoinLong: return 0.5" not in domain:
-        fail(errors, "领域层未把双均线多头的单笔风险上限固定为 0.5%")
-    available_cases = re.search(r"availableCases[^\n]*", domain)
-    if available_cases is None or ".emaAltcoinLong" not in available_cases.group(0):
-        fail(errors, "StrategyType.availableCases 未包含 emaAltcoinLong")
 
     parameter_checks = {
         "L": r'parameters\["L"\].*fallback:\s*10',

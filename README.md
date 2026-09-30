@@ -115,15 +115,6 @@ python3 strategies/hlsr/src/hlsr_signal_generator.py \
 - 单元测试：`Tests/OKXGatewayTests/SweepReversalStrategyTests.swift`（含门控、假突破、15m 确认窗口边界、冷却幂等、跨标的信号隔离）
 - 研究与回测：已上线规则口径为 177 个历史快照 54 个结构 → 41 笔、胜率 56.1%、盈亏比 1.53R、期望 +0.37R/笔（复现入口 `strategies/sweep_reversal_short/research/report_live_rule.py`）；不代表动态榜单未来绩效
 
-## 双均线交易山寨币多（1h）（已集成，仅模拟盘）
-
-- 规则与运行时映射契约：`strategies/ema_altcoin_long/STRATEGY.md`（§8）
-- 参数配置：`strategies/ema_altcoin_long/config/strategy.json`
-- 引擎实现：`Sources/TradingService/StrategyEngine.swift`（`evaluateEmaAltcoinLong`：EMA20/60/120 + ATR14，密集 → 突破 → 首次回踩 EMA20 收盘确认）
-- 执行边界：确认 1h 收盘后市价做多，随单附带 `入场价 − 1.25×ATR` 止损与 `2.5R` 止盈；BTC 1h 门控（`close > EMA60` 且 EMA60 高于 6 小时前）只关闭新开仓；96 小时时间离场；每标的单仓；资金池按 3% 开放止损风险与 6 笔并发封顶
-- 稳定策略标识：`emaAltcoinLong`；UI 显示名称：`双均线交易山寨币多（1h）`
-- 研究与回测：177 币快照训练 73 笔 +9.2756R / 样本外 35 笔 +8.2944R（胜率 37.14%，低于该策略 40% 门槛）→ **只允许模拟盘，未开放实盘自动下单**
-
 以后修改策略必须先更新策略实验室，再同步代码。完成同步后运行 `python3 scripts/validate_strategy_sync.py`、`swift test` 和 `git diff --check`；校验失败时不得用代码反向回填实验室规则。
 
 ## 本机运行

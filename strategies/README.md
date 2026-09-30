@@ -23,7 +23,7 @@ git diff --check
 
 - [`hlsr/`](hlsr/)：高位流动性扫顶反转。
 - [`sweep_reversal_short/`](sweep_reversal_short/)：山寨币二次扫顶做空（1h），已接入策略引擎。生产范围是每 30 秒刷新、按 24h 报价成交额排序的动态热门榜前 20 个合规山寨币；`config/universe_recommended.json` 的 177 个标的只用于历史回测基线，不是运行时绑定名单。
-- [`ema_altcoin_long/`](ema_altcoin_long/)：双均线交易山寨币多（EMA20/60/120、1h），规则已冻结并接入运行时（`StrategyType.emaAltcoinLong`），仅纸面/模拟盘运行；样本外胜率低于其 40% 门槛，禁止实盘自动下单。
+- [`ema_altcoin_long/`](ema_altcoin_long/)：双均线交易山寨币多的历史研究归档，不属于当前运行时规则。
 - [`ema_3line_pullback/`](ema_3line_pullback/)：EMA 回踩策略族的四方向历史研究归档，不是规则真源，未接入运行时。
 
 `hlsr/` 仍是研究中的临时策略，不属于当前可选的运行时规则。资产类别排除清单（主流币、稳定币、股票/ETF/指数/商品）的唯一真源是 [`sweep_reversal_short/config/universe.json`](sweep_reversal_short/config/universe.json) 的 `exclude`，`Sources/TradingDomain/StrategyUniverseRules.swift`、`research/live_signal.py` 和两个 EMA 研究脚本都只是副本，由 `scripts/validate_strategy_sync.py` 逐一对齐。

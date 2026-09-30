@@ -37,18 +37,6 @@ public enum IndicatorCalculator {
         return result
     }
 
-    /// Causal exponential moving average used by the EMA altcoin strategy.
-    public static func ema(_ values: [Double], period: Int) -> [Double] {
-        guard !values.isEmpty, period > 0 else { return [] }
-        let alpha = 2.0 / Double(period + 1)
-        var result: [Double] = []
-        result.reserveCapacity(values.count)
-        for value in values {
-            result.append(result.last.map { alpha * value + (1 - alpha) * $0 } ?? value)
-        }
-        return result
-    }
-
     /// 滚动窗口最大值（前 period 根用已有数据的最大值）
     public static func rollingMax(_ values: [Double], period: Int) -> [Double] {
         guard !values.isEmpty, period > 0 else { return [] }
@@ -69,18 +57,6 @@ public enum IndicatorCalculator {
         return sma(trueRanges, period: period)
     }
 
-    /// ATR with the EMA smoothing used by the formal EMA strategy.
-    public static func atrEMA(_ candles: [Candle], period: Int = 14) -> [Double] {
-        guard !candles.isEmpty else { return [] }
-        var trueRanges = [Double](); trueRanges.reserveCapacity(candles.count)
-        for (index, candle) in candles.enumerated() {
-            let high = NSDecimalNumber(decimal: candle.high).doubleValue
-            let low = NSDecimalNumber(decimal: candle.low).doubleValue
-            let previousClose = index > 0 ? NSDecimalNumber(decimal: candles[index - 1].close).doubleValue : NSDecimalNumber(decimal: candle.close).doubleValue
-            trueRanges.append(max(high - low, max(abs(high - previousClose), abs(low - previousClose))))
-        }
-        return ema(trueRanges, period: period)
-    }
 }
 
 public struct StrategyEngine: Sendable {
@@ -201,131 +177,6 @@ public struct StrategyEngine: Sendable {
         // represent one hour in the execution path.
         let cooldown = max(0, config.cooldownBars) * 4
         return evaluated(StrategyStatus(id: status.id, state: .running, direction: "short", cooldown: cooldown, pnl: status.pnl, lastSignal: signal, indicators: indicators))
-    }
-
-    // MARK: - EMA altcoin long
-
-    // Strategy lab source: ema_altcoin_long v1.0.0.
-    // 同步记录 2026-09：按实验室 STRATEGY.md §8「运行时映射契约」实现。
-    // 与 Python 回测 `src/backtest.py` 的差异只有两处，均为运行时约定：
-    // 1) 回测入场价取"确认 K 线的下一根开盘价 + 滑点"，运行时在确认收盘后立即
-    //    市价成交，时点等价，差异体现在滑点；
-    // 2) 回测按分钟级逐格撮合保护价，运行时用交易所条件单 + 心跳监控离场。
-
-    /// 均线密集 → 突破 → 首次回踩 EMA20 确认的多头入场。
-    /// 只在一根**新的**已确认 1h K 线上推进；门控只关闭新开仓。
-    public func evaluateEmaAltcoinLong(config: StrategyConfig, candles: [Candle], previous: StrategyStatus? = nil, btcCandles: [Candle]? = nil) -> StrategyStatus {
-        let confirmed = candles.filter(\.confirmed)
-        let status = previous ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
-        guard confirmed.count >= 3 else { return status }
-        let closes = confirmed.map { NSDecimalNumber(decimal: $0.close).doubleValue }
-        let highs = confirmed.map { NSDecimalNumber(decimal: $0.high).doubleValue }
-        let lows = confirmed.map { NSDecimalNumber(decimal: $0.low).doubleValue }
-        let fastPeriod = Self.period(config.parameters["emaFast"], fallback: 20)
-        let slowPeriod = Self.period(config.parameters["emaSlow"], fallback: 60)
-        let trendPeriod = Self.period(config.parameters["emaTrend"], fallback: 120)
-        let atrPeriod = Self.period(config.parameters["atrPeriod"], fallback: 14)
-        let fast = IndicatorCalculator.ema(closes, period: fastPeriod)
-        let slow = IndicatorCalculator.ema(closes, period: slowPeriod)
-        let trend = IndicatorCalculator.ema(closes, period: trendPeriod)
-        let atr = IndicatorCalculator.atrEMA(confirmed, period: atrPeriod)
-        let indicators = ["emaFast": Self.trimmed(fast), "emaSlow": Self.trimmed(slow), "emaTrend": Self.trimmed(trend), "atr": Self.trimmed(atr)]
-
-        guard let latestBar = confirmed.last?.timestamp else { return status }
-        if let lastEvaluated = status.lastEvaluatedBar, latestBar <= lastEvaluated {
-            return status.evaluated(at: lastEvaluated)
-        }
-        let idle = StrategyStatus(id: status.id, state: config.enabled ? .running : .paused, direction: status.direction, cooldown: status.cooldown, pnl: status.pnl, lastSignal: status.lastSignal, indicators: indicators)
-        let marked = { (value: StrategyStatus) in value.evaluated(at: latestBar) }
-        guard config.enabled, config.type == .emaAltcoinLong else { return marked(idle) }
-
-        // 完整小时：最后一根已确认 K 线必须与前一根正好相隔 1 小时，且累计达到
-        // minimumHistoryBars（对应实验室的"每小时必须完整、不足 120 根不发信号"）。
-        let minimumBars = Self.period(config.parameters["minimumHistoryBars"], fallback: 120)
-        guard confirmed.count >= max(minimumBars, trendPeriod + 1), confirmed.count >= 2,
-              latestBar.timeIntervalSince(confirmed[confirmed.count - 2].timestamp) == 3600 else {
-            return marked(idle)
-        }
-        // 冷却只作为重复提交的兜底：入场后 maxHoldBars 根内不再产生新信号，
-        // 与"同一标的只允许一笔持仓"一致（真正的判定在下单前检查远端持仓）。
-        if status.cooldown > 0 {
-            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction, cooldown: status.cooldown - 1, pnl: status.pnl, lastSignal: status.lastSignal, indicators: indicators))
-        }
-        let index = confirmed.count - 1
-        guard Self.btcEmaGateAllows(at: latestBar, btcCandles: btcCandles, slowPeriod: slowPeriod,
-                                    slopeBars: Self.period(config.parameters["gateSlopeBars"], fallback: 6),
-                                    minimumHistoryBars: minimumBars) else {
-            return marked(idle)
-        }
-        let minATRPct = (config.parameters["minATRPct"] ?? 0.4) / 100
-        let atrOK = closes[index] > 0 && atr[index] / closes[index] >= minATRPct
-        let aligned = closes[index] > fast[index] && fast[index] > slow[index] && slow[index] > trend[index]
-        guard Self.hasEmaPullbackSetup(config: config, closes: closes, highs: highs, lows: lows, fast: fast, slow: slow, trend: trend, atr: atr, minATRPct: minATRPct, atrOK: atrOK, aligned: aligned, index: index) else {
-            return marked(idle)
-        }
-        let entry = closes[index]
-        let risk = (config.parameters["stopATR"] ?? 1.25) * atr[index]
-        guard entry > 0, risk > 0 else { return marked(idle) }
-        let signal = StrategySignal(
-            strategyID: config.id,
-            type: "entry_long",
-            price: Decimal(entry),
-            reason: "均线密集后突破，首次回踩 EMA20 收盘确认（市价做多）",
-            timestamp: latestBar,
-            stopPrice: Decimal(entry - risk),
-            takePrice: Decimal(entry + (config.parameters["targetR"] ?? 2.5) * risk)
-        )
-        return marked(StrategyStatus(id: status.id, state: .running, direction: "long",
-                                     cooldown: max(0, Self.period(config.parameters["maxHoldBars"], fallback: 96)),
-                                     pnl: status.pnl, lastSignal: signal, indicators: indicators))
-    }
-
-    /// BTC 门控：`BTC close > BTC EMA(slow)` 且 `EMA(slow)` 高于 `slopeBars` 根之前。
-    /// fail-closed：BTC 缺失、历史不足或无法按时刻对齐时不通过（只关闭新开仓）。
-    private static func btcEmaGateAllows(at timestamp: Date, btcCandles: [Candle]?, slowPeriod: Int, slopeBars: Int, minimumHistoryBars: Int) -> Bool {
-        guard let btcCandles else { return false }
-        let confirmedBTC = btcCandles.filter(\.confirmed)
-        guard confirmedBTC.count >= minimumHistoryBars,
-              let index = confirmedBTC.lastIndex(where: { $0.timestamp <= timestamp }),
-              index >= minimumHistoryBars - 1, index >= slopeBars else { return false }
-        let closes = confirmedBTC.map { NSDecimalNumber(decimal: $0.close).doubleValue }
-        let slow = IndicatorCalculator.ema(closes, period: slowPeriod)
-        guard index < closes.count, index < slow.count else { return false }
-        return closes[index] > slow[index] && slow[index] > slow[index - slopeBars]
-    }
-
-    /// 当前 bar 是否构成"窗口内首个有效回踩确认"：窗口内最近一次突破 b，
-    /// (b, i) 之间排列未失效且没有触及过 EMA20 容差区，而当前 bar 首次触及并收在其上方。
-    private static func hasEmaPullbackSetup(config: StrategyConfig, closes: [Double], highs: [Double], lows: [Double], fast: [Double], slow: [Double], trend: [Double], atr: [Double], minATRPct: Double, atrOK: Bool, aligned: Bool, index i: Int) -> Bool {
-        guard aligned, atrOK, i >= 1 else { return false }
-        let breakoutBars = period(config.parameters["breakoutBars"], fallback: 4)
-        let pullbackBars = period(config.parameters["pullbackBars"], fallback: 6)
-        let clusterATR = config.parameters["clusterATR"] ?? 0.75
-        let pullbackATR = config.parameters["pullbackATR"] ?? 0.35
-        let minBreakoutATR = config.parameters["minBreakoutATR"] ?? 0.3
-        let minSpreadATR = config.parameters["minSpreadATR"] ?? 0.5
-
-        func span(_ k: Int) -> Double { max(fast[k], slow[k], trend[k]) - min(fast[k], slow[k], trend[k]) }
-        func isAligned(_ k: Int) -> Bool { closes[k] > fast[k] && fast[k] > slow[k] && slow[k] > trend[k] }
-        func isBreakout(_ b: Int) -> Bool {
-            guard b >= breakoutBars, b - 1 >= 0, atr[b] > 0, atr[b - 1] > 0, closes[b] > 0 else { return false }
-            let priorHigh = highs[(b - breakoutBars)..<b].max() ?? highs[b]
-            let strength = (closes[b] - priorHigh) / atr[b]
-            let atrAtB = atr[b] / closes[b] >= minATRPct
-            return span(b - 1) <= clusterATR * atr[b - 1]
-                && closes[b] > priorHigh && isAligned(b) && atrAtB
-                && strength >= minBreakoutATR && span(b) >= minSpreadATR * atr[b]
-        }
-
-        let lowest = max(breakoutBars, i - pullbackBars)
-        guard lowest <= i - 1 else { return false }
-        guard let b = stride(from: i - 1, through: lowest, by: -1).first(where: isBreakout) else { return false }
-        for k in (b + 1)..<i {
-            // 排列失效或提前触及即取消该 setup，不在同一突破后重试。
-            if !isAligned(k) { return false }
-            if lows[k] <= fast[k] + pullbackATR * atr[k] { return false }
-        }
-        return lows[i] <= fast[i] + pullbackATR * atr[i] && closes[i] > fast[i]
     }
 
     /// 高位流动性二次扫顶反转（做空）——与 Python 回测 `engine.py` 逐条一致。

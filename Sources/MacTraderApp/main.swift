@@ -153,7 +153,6 @@ final class DashboardModel: ObservableObject {
     nonisolated static func ruleLabel(_ type: StrategyType) -> String {
         switch type {
         case .sweepReversalShort: return "山寨币二次扫顶做空（1h）"
-        case .emaAltcoinLong: return "双均线交易山寨币多（1h）"
         }
     }
 
@@ -1578,7 +1577,7 @@ struct NewStrategySheet: View {
     private var effectiveRisk: Double { min(allocation, maxRiskForRule) }
 
     /// 实验室规则给出的单笔风险上限：扫顶 1%，双均线多头 0.5%。
-    private var maxRiskForRule: Double { selectedRule == .emaAltcoinLong ? 0.5 : 1.0 }
+    private var maxRiskForRule: Double { 1.0 }
 
     private var scopeDescription: String { "动态扫描热门榜前 20 个山寨币" }
 

@@ -163,10 +163,6 @@ private final class StreamHub: @unchecked Sendable {
                     if config.type == .sweepReversalShort && (config.parameters["btcGateEnabled"] ?? 1) >= 1 {
                         targets.insert(StrategyTarget(instrumentID: "BTC-USDT-SWAP", interval: .oneHour))
                     }
-                    if config.type == .emaAltcoinLong {
-                        // 双均线多头同样需要 BTC 1h 做 regime 门控。
-                        targets.insert(StrategyTarget(instrumentID: "BTC-USDT-SWAP", interval: .oneHour))
-                    }
                 }
                 self.updateStrategyTargets(targets)
                 do { try await Task.sleep(for: .seconds(30)) }

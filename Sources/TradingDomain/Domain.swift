@@ -330,26 +330,14 @@ public struct LiveTradingStatus: Codable, Equatable, Sendable {
 
 public enum StrategyType: String, Codable, CaseIterable, Sendable {
     case sweepReversalShort
-    case emaAltcoinLong
 
-    public static var availableCases: [StrategyType] { [.sweepReversalShort, .emaAltcoinLong] }
+    public static var availableCases: [StrategyType] { [.sweepReversalShort] }
 
     /// Stable machine-readable identifier. Keep this independent from UI copy.
     public var identifier: String { rawValue }
 
-    /// The lab directory that owns this rule's STRATEGY.md / config.
-    public var labDirectory: String {
-        switch self {
-        case .sweepReversalShort: return "strategies/sweep_reversal_short"
-        case .emaAltcoinLong: return "strategies/ema_altcoin_long"
-        }
-    }
-
     public var displayName: String {
-        switch self {
-        case .sweepReversalShort: return "山寨币二次扫顶做空（1h）"
-        case .emaAltcoinLong: return "双均线交易山寨币多（1h）"
-        }
+        "山寨币二次扫顶做空（1h）"
     }
 
     /// 运行时参数默认值，逐项复制自各自实验室 `config/strategy.json` 的
@@ -367,33 +355,17 @@ public enum StrategyType: String, Codable, CaseIterable, Sendable {
                 "entryTimeframeMinutes": 60, "confirmationTimeframeMinutes": 15,
                 "confirmationWindowMinutes": 60,
             ]
-        case .emaAltcoinLong:
-            return [
-                "emaFast": 20, "emaSlow": 60, "emaTrend": 120, "atrPeriod": 14,
-                "clusterATR": 0.75, "breakoutBars": 4, "pullbackBars": 6, "pullbackATR": 0.35,
-                "minATRPct": 0.4, "minBreakoutATR": 0.3, "minSpreadATR": 0.5,
-                "stopATR": 1.25, "targetR": 2.5, "maxHoldBars": 96,
-                "minimumHistoryBars": 120, "gateSlopeBars": 6,
-                // 组合上限：6 个并发 × 每笔 0.5% 风险 = 池权益 3% 的开放止损风险。
-                "maxConcurrentPositions": 6,
-            ]
         }
     }
 
     /// 实验室给出的单笔风险上限（%），运行时会按此值收敛用户输入。
     public var maxRiskPercent: Double {
-        switch self {
-        case .sweepReversalShort: return 1.0
-        case .emaAltcoinLong: return 0.5
-        }
+        1.0
     }
 
     /// 实验室给出的单笔风险默认值（%）。
     public var defaultRiskPercent: Double {
-        switch self {
-        case .sweepReversalShort: return 1.0
-        case .emaAltcoinLong: return 0.5
-        }
+        1.0
     }
 }
 public enum StrategyState: String, Codable, Sendable { case draft, running, paused, error }

@@ -43,13 +43,6 @@ public actor PaperTradingStore {
             normalized.instrumentID = ""
             normalized.scope = .dynamic(.hotAltcoins)
             normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
-        case .emaAltcoinLong:
-            normalized.name = config.type.displayName
-            normalized.interval = .oneHour
-            normalized.instrumentID = ""
-            normalized.scope = .dynamic(.hotAltcoins)
-            // 实验室规则：每笔订单风险上限为资金池权益的 0.5%。
-            normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
         }
         normalized.capitalPoolPercent = min(max(normalized.capitalPoolPercent, 0.1), 100.0)
         return normalized
@@ -57,7 +50,7 @@ public actor PaperTradingStore {
 
     private static func supports(_ config: StrategyConfig) -> Bool {
         switch config.type {
-        case .sweepReversalShort, .emaAltcoinLong:
+        case .sweepReversalShort:
             return config.interval == .oneHour && config.scope == .dynamic(.hotAltcoins)
         }
     }
@@ -274,26 +267,6 @@ public actor PaperTradingStore {
                 let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
                     ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
                 let next = engine.evaluateWithConfirmation(config: config, structureCandles: structure, confirmationCandles: snapshot.candles, previous: previous, btcCandles: btcHourlyCandles)
-                statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
-                evaluatedStatuses.append(next)
-                if statuses[config.id] != next {
-                    statuses[config.id] = next
-                    changed = true
-                }
-                continue
-            }
-            if config.type == .emaAltcoinLong {
-                // 只在已确认 1h K 线上评估；BTC 门控用同一份 BTC 1h 缓存。
-                guard snapshot.interval == .oneHour else {
-                    let current = statusesByInstrument[config.id]?[snapshot.instrumentID]
-                        ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
-                    statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = current
-                    evaluatedStatuses.append(current)
-                    continue
-                }
-                let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
-                    ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
-                let next = engine.evaluateEmaAltcoinLong(config: config, candles: snapshot.candles, previous: previous, btcCandles: btcHourlyCandles)
                 statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
                 evaluatedStatuses.append(next)
                 if statuses[config.id] != next {
@@ -709,6 +682,17 @@ public actor TradingBackend {
     private var globalRiskTripHandled = false
     private var globalRiskRemoteCleanupComplete = false
     private var submittedExitPositionIDs: Set<String> = []
+    private struct PendingRemoteExit {
+        let strategyID: UUID
+        let instrumentID: String
+        let quantity: Decimal
+        let entryPrice: Decimal
+        let exitPrice: Decimal
+        let side: String
+        let reservedNotional: Decimal
+        let exitRisk: Decimal
+    }
+    private var pendingRemoteExits: [String: PendingRemoteExit] = [:]
     private var riskRestored = false
 
     private static let submittedSignalLimit = 500
@@ -821,7 +805,6 @@ public actor TradingBackend {
     private static func strategyRuleName(_ type: StrategyType) -> String {
         switch type {
         case .sweepReversalShort: return "山寨币二次扫顶做空（1h）"
-        case .emaAltcoinLong: return "双均线交易山寨币多（1h）"
         }
     }
 
@@ -925,7 +908,9 @@ public actor TradingBackend {
     private func enforceStrategyExits(at timestamp: Date, fallbackPrice: Decimal? = nil) async {
         guard !globalRiskTripHandled else { return }
         let configs = await paper.allStrategies()
-        guard !configs.isEmpty, let positions = try? await market.privatePositions(), !positions.isEmpty else { return }
+        guard !configs.isEmpty, let positions = try? await market.privatePositions() else { return }
+        await settleCompletedRemoteExits(positions: positions, timestamp: timestamp)
+        guard !positions.isEmpty else { return }
         let orders = await paper.allOrders()
         guard let account = try? await market.account(), account.mode != .readOnly else { return }
         for position in positions where abs(position.quantity) > 0 {
@@ -958,30 +943,49 @@ public actor TradingBackend {
             let side = isShort ? "buy" : "sell"
             let request = LiveOrderRequest(instrumentID: position.instrumentID, side: side, orderType: "market", quantity: abs(position.quantity), marginMode: "cross", reduceOnly: true)
             do {
+                let result: LiveOrderCommandResult
                 if account.mode == .paper {
-                    _ = try await market.placeDemoOrder(request)
+                    result = try await market.placeDemoOrder(request)
                 } else {
-                    _ = try await market.placeLiveOrder(request)
+                    result = try await market.placeLiveOrder(request)
                 }
-                // The exchange accepts the reduce-only exit asynchronously.
-                // Credit an estimated realized result to this pool now so the
-                // next entry can compound it; account equity itself is left to
-                // the next authenticated snapshot for exact reconciliation.
-                let direction: Decimal = isShort ? -1 : 1
-                let exitNotional = abs(price * position.quantity)
-                let estimatedRealized = (price - position.entryPrice) * abs(position.quantity) * direction - exitNotional * broker.feeRate
-                await riskEngine.recordStrategyRealized(estimatedRealized, strategyID: config.id, now: timestamp)
-                // 平仓同时释放资金池占用、该笔的开放止损风险与一个并发名额。
+                // Keep the pool reservation until settleCompletedRemoteExits
+                // confirms that the exchange position has disappeared.
                 let exitRisk = signal?.stopPrice.map { abs(position.entryPrice - $0) * abs(position.quantity) } ?? 0
-                await riskEngine.release(instrumentID: position.instrumentID, notional: abs(position.quantity * position.entryPrice), strategyID: config.id, margin: abs(position.quantity * position.entryPrice), riskAmount: exitRisk, closedPosition: true)
-                await paper.setRisk(await riskEngine.snapshot(now: timestamp))
-                appendLog("策略平仓：\(config.name) / \(position.instrumentID) / \(stopHit ? "止损" : takeHit ? "止盈" : "96根时间离场")", level: "exit")
+                pendingRemoteExits[positionKey] = PendingRemoteExit(
+                    strategyID: config.id,
+                    instrumentID: position.instrumentID,
+                    quantity: abs(position.quantity),
+                    entryPrice: position.entryPrice,
+                    exitPrice: price,
+                    side: isShort ? "short" : "long",
+                    reservedNotional: abs(position.quantity * position.entryPrice),
+                    exitRisk: exitRisk
+                )
+                appendLog("策略平仓已提交，等待成交确认：\(config.name) / \(position.instrumentID) / \(result.orderID) / \(stopHit ? "止损" : takeHit ? "止盈" : "96根时间离场")", level: "exit")
                 await market.invalidateAccountState()
             } catch {
                 submittedExitPositionIDs.remove(positionKey)
                 appendLog("策略平仓失败：\(config.name) / \(position.instrumentID)：\(error.localizedDescription)", level: "warning")
             }
         }
+    }
+
+    /// Reduce-only exits are asynchronous. Keep the strategy pool reserved
+    /// until a later position snapshot confirms that the exit completed.
+    private func settleCompletedRemoteExits(positions: [PositionSnapshot], timestamp: Date) async {
+        for (key, pending) in pendingRemoteExits {
+            guard !positions.contains(where: { $0.instrumentID == pending.instrumentID && abs($0.quantity) > 0 }) else { continue }
+            let direction: Decimal = pending.side == "short" ? -1 : 1
+            let realized = (pending.exitPrice - pending.entryPrice) * pending.quantity * direction
+                - abs(pending.exitPrice * pending.quantity) * broker.feeRate
+            await riskEngine.recordStrategyRealized(realized, strategyID: pending.strategyID, now: timestamp)
+            await riskEngine.release(instrumentID: pending.instrumentID, notional: pending.reservedNotional, strategyID: pending.strategyID, margin: pending.reservedNotional, riskAmount: pending.exitRisk, closedPosition: true)
+            pendingRemoteExits.removeValue(forKey: key)
+            submittedExitPositionIDs.remove(key)
+            appendLog("策略平仓已成交并结算：\(pending.instrumentID)，已实现盈亏 \(realized)", level: "fill")
+        }
+        await paper.setRisk(await riskEngine.snapshot(now: timestamp))
     }
 
     public func contracts(forceRefresh: Bool = false) async throws -> [ContractMarket] {
@@ -1155,7 +1159,7 @@ public actor TradingBackend {
         // 组合上限：同一策略的并发持仓数（实验室：扫顶 ≤20、双均线多头 ≤6）。
         // 每笔订单的风险预算固定为池权益的固定比例，因此"并发数上限"与
         // "开放止损风险上限"（双均线多头 6 × 0.5% = 3%）是同一个约束。
-        let maxConcurrent = Int(config.parameters["maxConcurrentPositions"] ?? (config.type == .emaAltcoinLong ? 6 : 20))
+        let maxConcurrent = Int(config.parameters["maxConcurrentPositions"] ?? 20)
         guard await openPositionCount(strategyID: config.id) < maxConcurrent else {
             appendLog("策略 \(config.name) 未发送：并发持仓已达上限 \(maxConcurrent)", level: "warning")
             return false
@@ -1185,7 +1189,7 @@ public actor TradingBackend {
         // 本单的止损风险，用于执行策略资金池的"开放风险 ≤ 池权益比例"上限
         // （双均线多头：3% = 6 并发 × 每笔 0.5%）。
         let orderRisk = riskDistance > 0 ? quantity * riskDistance : 0
-        let maxOpenRiskPercent: Decimal? = config.type == .emaAltcoinLong ? Decimal(string: "3.0") : nil
+        let maxOpenRiskPercent: Decimal? = nil
         let decision = await riskEngine.authorize(
             instrumentID: instrumentID, notional: notional, margin: notional,
             strategyID: config.id, poolAllocationPercent: Decimal(config.capitalPoolPercent),
