@@ -3,8 +3,11 @@
 1) 静态分层：按全期总成交额把山寨币池分为 Top50/Top100/Top200/全部 + 后50%
 2) 因果口径：每笔交易入场时点的"过去30天日均成交额"全市场排名 → 验证 Top100 规则
 
-注意：本脚本按 `engine.simulate` 的 1h 收盘入场口径统计，不是已上线规则（15m 确认）。
-已上线规则的分层结论见 `report_live_rule.py --by-tier`（`STRATEGY_SPEC.md` §7.5）。
+注意：本脚本按 `engine.simulate` 的 1h 收盘入场口径统计，不是已上线规则（15m 确认），
+只作历史对照。已上线规则的分层结论见：
+
+- 静态分层：`report_live_rule.py --by-tier`（`STRATEGY_SPEC.md` §7.5）
+- 因果分层（按入场时点排名）：`report_live_rule.py --rolling-rank`（§7.6）
 """
 import json, os
 import numpy as np

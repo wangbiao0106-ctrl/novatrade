@@ -152,6 +152,35 @@ def liquidity_tiers() -> dict[str, list[str]]:
     return tiers
 
 
+def daily_quote_volume(data1: dict) -> dict[str, pd.Series]:
+    """每个标的按 UTC 日聚合的报价成交额（用于因果排名）。"""
+    out: dict[str, pd.Series] = {}
+    for sym, d in data1.items():
+        series = pd.Series(d["qv"], index=pd.to_datetime(d["t"], unit="ms", utc=True))
+        out[sym] = series.resample("1D").sum()
+    return out
+
+
+def rolling_rank(rows: list[dict], daily: dict[str, pd.Series], lookback_days: int = 30) -> list[int]:
+    """每笔交易入场时点的**因果**全市场排名。
+
+    只用入场时点之前的日线成交额（`index <= entry`，取最近 `lookback_days` 天的中位数），
+    并且在包含未交易合约在内的全部标的里排名，因此不使用任何未来信息；排名只用于
+    报告分组，不参与选币。
+    """
+    ranks: list[int] = []
+    for row in rows:
+        entry = pd.to_datetime(row["entry_ts"], unit="ms", utc=True)
+        values = {}
+        for sym, series in daily.items():
+            past = series[series.index <= entry].tail(lookback_days)
+            values[sym] = float(past.median()) if len(past) else 0.0
+        mine = values.get(row["symbol"], 0.0)
+        ranked = sorted(values.values(), reverse=True)
+        ranks.append(int(np.searchsorted(-np.array(ranked), -mine)) + 1)
+    return ranks
+
+
 def stats(df: pd.DataFrame) -> dict:
     if df.empty:
         return {"trades": 0}
@@ -185,6 +214,8 @@ def main() -> None:
     parser.add_argument("--fee", type=float, default=FEE, help="单边手续费率，默认 0.0005")
     parser.add_argument("--by-tier", action="store_true",
                         help="按全期日均成交额五等分输出分层结果（只用于报告分组，不参与选币）")
+    parser.add_argument("--rolling-rank", action="store_true",
+                        help="按入场时点过去 30 天成交额的因果全市场排名分层（STRATEGY_SPEC §7.5）")
     parser.add_argument("--out", default=RESULTS)
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
@@ -209,6 +240,41 @@ def main() -> None:
         with open(os.path.join(args.out, "live_rule_report_tiers.json"), "w") as handle:
             json.dump(summary, handle, ensure_ascii=False, indent=2)
         print("已写入:", os.path.join(args.out, "live_rule_report_tiers.json"))
+        return
+
+    if args.rolling_rank:
+        rows, counters = collect("all", data1, data15, btc, args.fee)
+        if not rows:
+            raise SystemExit("没有可复现的成交")
+        daily = daily_quote_volume(data1)
+        ranked = pd.DataFrame(rows)
+        ranked["rank_at_entry"] = rolling_rank(rows, daily)
+        ranked["split"] = np.where(ranked.signal_ts < SPLIT_TS, "train", "test")
+        ranked.sort_values("entry_ts").to_csv(
+            os.path.join(args.out, "live_rule_trades_rolling_rank.csv"), index=False)
+        buckets = {"top50": ranked.rank_at_entry <= 50, "top100": ranked.rank_at_entry <= 100,
+                   "top200": ranked.rank_at_entry <= 200,
+                   "rest_after_top100": ranked.rank_at_entry > 100}
+        summary = {"rule": "1h structure + first 15m bearish close confirmation + market short",
+                   "universe": "all alts, ranked causally at entry",
+                   "costs": {"fee_per_side": args.fee, "slippage": 0.0},
+                   "ranking": {"metric": "median daily quote volume",
+                               "lookback_days": 30, "causal": True,
+                               "note": "只用入场时点之前的日线成交额；排名只用于报告分组"},
+                   "structures": counters, "buckets": {}}
+        for name, mask in buckets.items():
+            part = stats(ranked[mask])
+            part["train"] = stats(ranked[mask & (ranked.split == "train")])
+            part["test"] = stats(ranked[mask & (ranked.split == "test")])
+            summary["buckets"][name] = part
+            print(f"{name:18s} 笔数={part['trades']:3d} 胜率={part['win_rate']:.1%} "
+                  f"盈亏比={part['ratio_R'] or 0:.2f} 期望={part['expect_R']:+.2f}R "
+                  f"回撤={part['max_drawdown_R']:.2f}R | 训练 {part['train']['trades']} 笔 "
+                  f"{part['train'].get('expect_R') or 0:+.2f}R / 测试 {part['test']['trades']} 笔 "
+                  f"{part['test'].get('expect_R') or 0:+.2f}R")
+        with open(os.path.join(args.out, "live_rule_report_rolling_rank.json"), "w") as handle:
+            json.dump(summary, handle, ensure_ascii=False, indent=2)
+        print("已写入:", os.path.join(args.out, "live_rule_report_rolling_rank.json"))
         return
 
     rows, counters = collect(args.pool, data1, data15, btc, args.fee)

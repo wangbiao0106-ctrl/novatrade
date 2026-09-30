@@ -385,6 +385,16 @@ def main() -> int:
     market = (hlsr_lab / "src" / "hlsr_market_export.py").read_text()
     if "parameter_grid(" not in market or "export_grid" in market:
         fail(errors, "HLSR 的市场导出与回测未共用同一套参数网格")
+    # 分层证据必须能由已上线规则复现：静态分层 + 因果（按入场时点排名）两个入口，
+    # 规范里要指向产物，否则旧的 1h 基线数字会被当成现行结论。
+    report_rule = (LAB / "research" / "report_live_rule.py").read_text()
+    for flag in ("--by-tier", "--rolling-rank"):
+        if flag not in report_rule:
+            fail(errors, f"report_live_rule.py 缺少 {flag} 分层入口")
+    spec_text = (LAB / "research" / "STRATEGY_SPEC.md").read_text()
+    for artifact in ("live_rule_report_tiers.json", "live_rule_report_rolling_rank.json"):
+        if artifact not in spec_text:
+            fail(errors, f"STRATEGY_SPEC 未指向分层产物 {artifact}")
     if "universe.json" not in live_signal or "EXCLUDED_BASES" not in live_signal:
         fail(errors, "实验室实时扫描器未复用 universe.json 的排除清单")
     # 研究脚本不得各自硬编码一套参数：必须从 config/strategy.json 派生，否则改了
