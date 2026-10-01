@@ -67,6 +67,11 @@ cat > "$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
+# SwiftPM signs the executable before the hand-built app bundle exists. Sign
+# the completed bundle so its Info.plist, helper and icon resources validate
+# together when it is copied or mounted from the installer.
+codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
 }
