@@ -1,0 +1,16 @@
+{
+  "family": "combined",
+  "entry": {
+    "mode": "ema_retest",
+    "pump_memory_bars": 192,
+    "swing_lookback_bars": 3,
+    "rsi_max": 70.0
+  },
+  "exit": {
+    "mode": "runner",
+    "tp1_fraction": 0.5,
+    "trail_mode": "atr",
+    "trail_distance": 3.5,
+    "max_hold_bars": 192
+  }
+}

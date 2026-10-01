@@ -42,6 +42,7 @@ Swift 应用不会直接打开配置文件，也不会持久化或展示密钥�
 - macOS SwiftUI 交易工作台：支持永续合约搜索、自选收藏、合约切换、周期切换、行情指标和策略配置/启停。
 - K 线使用 SwiftUI 原生 Canvas：红涨绿跌、连续拖拽、悬停十字线、日期/价格轴、成交量和 EMA。历史数据首次通过 API 预热；实时 K 柱仅使用 OKX V5 Business WSS 的 candle 频道，没有 K 线轮询或 ticker 拼接。WSS 不提供历史查询，因此首次历史加载仍需 API。
 - `okx-locald` 使用 Hummingbird 提供 REST 和本地 WebSocket；上游订阅、断线、重连状态会传到图表底栏。使用 OKX 文本 ping/pong 保活，断线后指数退避并重新订阅。多个本地客户端订阅同一合约/周期时共享同一个上游 OKX 连接和辅助轮询（StreamHub 扇出），实时 K 柱只在服务端摄入一次。
+- 策略扫描池按策略类型独立解析并缓存；K 线评估和 StreamHub 订阅共用同一份解析结果，避免每根 K 线重复筛选全量合约。可用 `GET /api/v1/strategies/targets?fresh=true` 查看后台实际使用的 instrument ID、策略专属 universe 和刷新时间。
 - 本地服务对 ATK CLI 调用带 TTL 缓存和单飞去重（ticker 2s、账户/持仓/挂单 5s、合约列表与历史预热 60s），多个客户端并发轮询时不再重复拉起 CLI 进程；下单成功后立即失效账户缓存。盘口和逐笔成交通过 OKX REST 提供。
 - 运行日志按 JSONL 持久化到状态目录的 `runtime-log.jsonl`，服务重启后自动回读；策略状态、订单账本和状态审计仍分别写入 `paper-state.json`、`paper-ledger.json` 和 `audit.jsonl`。
 - 风控：日亏/回撤熔断按 UTC 日界滚动日初权益基线；模拟撮合支持部分平仓（保留剩余仓位）和同向加仓均价合并，已实现盈亏扣除手续费。

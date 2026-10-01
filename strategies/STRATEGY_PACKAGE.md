@@ -22,8 +22,8 @@
   "entry_timeframe_minutes": 15,
   "signal_parameters": {},
   "position_management": {
-    "risk_per_trade_pct": 0.5,
-    "risk_per_trade_max_pct": 5.0,
+    "risk_per_trade_pct": 1.0,
+    "risk_per_trade_max_pct": 1.0,
     "cooldown_bars": 16
   }
 }

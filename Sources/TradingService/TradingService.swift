@@ -51,6 +51,13 @@ public actor PaperTradingStore {
     /// HLSR keeps a dedicated completed 4H history. It must not be inferred
     /// from the bounded 15m cache because 55 4H bars require 880 children.
     private var hlsrFourHourCandlesByInstrument: [String: [Candle]] = [:]
+    /// Resolved once per contract-universe refresh and reused by every candle
+    /// evaluation. Re-filtering and sorting the full OKX contract list for
+    /// every incoming bar was the previous hot path for dynamic strategies.
+    private var resolvedTargetsByStrategy: [UUID: Set<String>] = [:]
+    private var resolvedUniverseSnapshots: [UUID: StrategyUniverseSnapshot] = [:]
+    private var resolvedContractsByID: [String: ContractMarket] = [:]
+    private var universeResolved = false
 
     public nonisolated var stateDirectory: URL { directory }
 
@@ -76,21 +83,22 @@ public actor PaperTradingStore {
         case .sweepReversalShort, .emaAltcoinLong:
             normalized.name = config.type.displayName
             normalized.interval = .oneHour
-            // Strategy instances scan the live universe. Fixed-symbol inputs
-            // are migrated to the dynamic scope when legacy state is loaded.
+            // Strategy instances scan their own live universe. Fixed-symbol
+            // inputs and stale generic scopes are migrated to the strategy's
+            // canonical scope when state is loaded or saved.
             normalized.instrumentID = ""
-            normalized.scope = .dynamic(.hotAltcoins)
+            normalized.scope = config.type.defaultScope
             if config.type == .emaAltcoinLong {
                 normalized.riskPercent = config.type.maxRiskPercent
                 normalized.cooldownBars = 96
             } else {
                 normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
             }
-        case .hlsr:
+        case .hlsr, .doublePumpExhaustionShort:
             normalized.name = config.type.displayName
-            normalized.interval = .fifteenMinutes
+            normalized.interval = config.type.entryInterval
             normalized.instrumentID = ""
-            normalized.scope = .dynamic(.hotAltcoins)
+            normalized.scope = config.type.defaultScope
             normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
             normalized.cooldownBars = config.type.defaultCooldownBars
         case .external:
@@ -103,16 +111,20 @@ public actor PaperTradingStore {
         // policy allows only one active symbol at a time. Override stale
         // persisted concurrency values during migration.
         normalized.parameters["maxConcurrentPositions"] = 1
-        normalized.parameters["maxOpenRiskPercent"] = config.type == .emaAltcoinLong ? 0.5 : 5.0
+        normalized.parameters["maxOpenRiskPercent"] = 1.0
         normalized.capitalPoolPercent = min(max(normalized.capitalPoolPercent, 0.1), 100.0)
         return normalized
     }
 
     private static func supports(_ config: StrategyConfig, allowLegacyDynamic: Bool = false) -> Bool {
         if case .external = config.type { return true }
-        let validInterval = config.type == .hlsr ? config.interval == .fifteenMinutes : config.interval == .oneHour
+        let validInterval = (config.type == .hlsr || config.type == .doublePumpExhaustionShort) ? config.interval == .fifteenMinutes : config.interval == .oneHour
         guard validInterval else { return false }
-        let validDynamic = config.scope == .dynamic(.hotAltcoins)
+        // The exact category is canonicalized below from the strategy type.
+        // Accept any dynamic category at the input boundary so older saved
+        // configs and package callers can migrate without losing the instance;
+        // fixed single/multiple scopes remain rejected.
+        let validDynamic = config.scope.mode == .dynamicCategory
         let legacySingle = allowLegacyDynamic && Self.singleInstrumentID(in: config.scope) != nil
         switch config.type {
         case .sweepReversalShort:
@@ -120,6 +132,8 @@ public actor PaperTradingStore {
         case .emaAltcoinLong:
             return validDynamic || legacySingle
         case .hlsr:
+            return validDynamic || legacySingle
+        case .doublePumpExhaustionShort:
             return validDynamic || legacySingle
         case .external:
             return true
@@ -190,6 +204,43 @@ public actor PaperTradingStore {
     public func allOrders() -> [PaperOrder] { orders }
     public func allFills() -> [PaperFill] { fills }
     public func allStatuses() -> [StrategyStatus] { strategies.compactMap { statuses[$0.id] } }
+
+    /// Rebuilds every strategy's concrete scan pool from one contract snapshot.
+    /// StreamHub, REST diagnostics, and candle evaluation all consume this same
+    /// cache, so displayed targets and subscribed targets cannot drift apart.
+    public func refreshStrategyUniverse(_ contracts: [ContractMarket], now: Date = .now) {
+        var targets: [UUID: Set<String>] = [:]
+        var snapshots: [UUID: StrategyUniverseSnapshot] = [:]
+        for config in strategies {
+            let ids = config.scope.resolvedInstrumentIDs(from: contracts)
+            targets[config.id] = Set(ids)
+            snapshots[config.id] = StrategyUniverseSnapshot(
+                strategyID: config.id,
+                strategyName: config.name,
+                strategyType: config.type,
+                enabled: config.enabled,
+                universeCategory: config.scope.category,
+                instrumentIDs: ids,
+                refreshedAt: now
+            )
+        }
+        resolvedTargetsByStrategy = targets
+        resolvedUniverseSnapshots = snapshots
+        resolvedContractsByID = Dictionary(uniqueKeysWithValues: contracts.map { ($0.id, $0) })
+        universeResolved = true
+    }
+
+    public func strategyUniverseTargets() -> [StrategyUniverseSnapshot] {
+        strategies.compactMap { resolvedUniverseSnapshots[$0.id] }
+            .sorted { $0.strategyName.localizedStandardCompare($1.strategyName) == .orderedAscending }
+    }
+
+    private func invalidateStrategyUniverse() {
+        resolvedTargetsByStrategy.removeAll(keepingCapacity: true)
+        resolvedUniverseSnapshots.removeAll(keepingCapacity: true)
+        resolvedContractsByID.removeAll(keepingCapacity: true)
+        universeResolved = false
+    }
     public func status(for id: UUID) -> StrategyStatus? { statuses[id] }
     /// Returns the status for one instrument when a strategy runs over a
     /// dynamic universe. The aggregate status is retained for the dashboard,
@@ -250,6 +301,7 @@ public actor PaperTradingStore {
         guard !strategies.contains(where: { $0.type == normalized.type }) else { throw StoreError.conflict }
         strategies.append(normalized)
         statuses[normalized.id] = StrategyStatus(id: normalized.id, state: .paused)
+        invalidateStrategyUniverse()
         save()
         return normalized
     }
@@ -272,6 +324,7 @@ public actor PaperTradingStore {
         let wasEnabled = strategies[index].enabled
         strategies[index] = normalized
         statusesByInstrument[normalized.id] = [:]
+        invalidateStrategyUniverse()
         if let previous = statuses[normalized.id] {
             let lastSignal = !wasEnabled && normalized.enabled ? nil : previous.lastSignal
             statuses[normalized.id] = StrategyStatus(id: previous.id, state: normalized.enabled ? .running : .paused, direction: previous.direction, cooldown: previous.cooldown, pnl: previous.pnl, lastSignal: lastSignal, indicators: previous.indicators)
@@ -300,6 +353,7 @@ public actor PaperTradingStore {
         let removed = strategies.remove(at: index)
         statuses.removeValue(forKey: id)
         statusesByInstrument.removeValue(forKey: id)
+        invalidateStrategyUniverse()
         // Deleting an instance must not leave a live pending entry that can
         // fill after its strategy/package has been removed. Keep the order in
         // the audit ledger, but make it ineligible for PaperBroker execution.
@@ -318,7 +372,7 @@ public actor PaperTradingStore {
     public func setState(_ id: UUID, running: Bool) throws -> StrategyConfig {
         guard let index = strategies.firstIndex(where: { $0.id == id }) else { throw StoreError.notFound }
         guard strategies[index].type.hasRuntimeHandler else { throw StoreError.unsupported }
-        if running, strategies[index].scope != .dynamic(.hotAltcoins) {
+        if running, strategies[index].scope != strategies[index].type.defaultScope {
             throw StoreError.unsupported
         }
         strategies[index].enabled = running
@@ -381,6 +435,13 @@ public actor PaperTradingStore {
     @discardableResult
     public func evaluate(_ snapshot: MarketSnapshot, contracts: [ContractMarket] = []) -> [StrategyStatus] {
         let engine = StrategyEngine()
+        // Direct callers (tests and one-off REST evaluations) may not have
+        // gone through TradingBackend.contracts(). Warm the cache lazily once;
+        // the realtime path refreshes it explicitly when the contract list
+        // changes, so this branch is never reached for every candle.
+        if !universeResolved, !contracts.isEmpty {
+            refreshStrategyUniverse(contracts)
+        }
         // 缓存 BTC 1 小时 K 线，供扫顶反转策略的 BTC<SMA200 门控使用
         if snapshot.instrumentID == "BTC-USDT-SWAP", snapshot.interval == .oneHour {
             btcHourlyCandles = snapshot.candles
@@ -397,7 +458,15 @@ public actor PaperTradingStore {
         }
         var changed = false
         var evaluatedStatuses: [StrategyStatus] = []
-        for config in strategies where config.scope.matches(snapshot.instrumentID, contracts: contracts) {
+        for config in strategies where resolvedTargetsByStrategy[config.id]?.contains(snapshot.instrumentID) == true {
+            if config.type == .doublePumpExhaustionShort {
+                // The formal DME rule requires at least 10m USDT rolling
+                // quote volume. Fail closed when the contract snapshot is
+                // missing or below the guardrail; this keeps low-liquidity
+                // instruments out even if they briefly appear in hot20.
+                guard let contract = resolvedContractsByID[snapshot.instrumentID],
+                      StrategyUniverseRules.isEligibleDoublePump(contract) else { continue }
+            }
             if !config.type.hasRuntimeHandler {
                 // An installed package can outlive its compiled adapter. Keep
                 // the orphan visible and paused, while leaving its orders,
@@ -473,6 +542,24 @@ public actor PaperTradingStore {
                 let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
                     ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
                 let next = engine.evaluateEmaAltcoinLong(config: config, candles: snapshot.candles, previous: previous, btcCandles: btcHourlyCandles)
+                statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
+                evaluatedStatuses.append(next)
+                if statuses[config.id] != next {
+                    statuses[config.id] = next
+                    changed = true
+                }
+                continue
+            }
+            if config.type == .doublePumpExhaustionShort {
+                guard snapshot.interval == .fifteenMinutes else {
+                    let current = statusesByInstrument[config.id]?[snapshot.instrumentID]
+                        ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+                    evaluatedStatuses.append(current)
+                    continue
+                }
+                let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
+                    ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+                let next = engine.evaluate(config: config, candles: snapshot.candles, previous: previous)
                 statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
                 evaluatedStatuses.append(next)
                 if statuses[config.id] != next {
@@ -575,7 +662,7 @@ public actor PaperTradingStore {
             case .conflict: return "每种策略规则只允许创建一个实例"
             case .notFound: return "策略实例不存在"
             case .running: return "策略运行中，请先停止策略后再删除"
-            case .unsupported: return "当前仅支持 1 小时山寨币策略；运行时扫描动态合规币种池，每次只允许一个币种下单或持仓，单笔风险不得超过规则上限"
+            case .unsupported: return "当前支持确认的 1 小时或 15 分钟山寨币策略；运行时扫描动态合规币种池，每次只允许一个币种下单或持仓，单笔风险固定为账户权益的 1%"
         }
         }
     }
@@ -1564,6 +1651,7 @@ public actor TradingBackend {
         case .sweepReversalShort: return "山寨币二次扫顶做空"
         case .emaAltcoinLong: return "双均线交易山寨币做多"
         case .hlsr: return "高位扫顶反转做空"
+        case .doublePumpExhaustionShort: return "日内翻倍动能衰竭确认做空"
         case .external(let identifier): return identifier
         }
     }
@@ -2454,10 +2542,19 @@ public actor TradingBackend {
             return ContractMarket(id: item.id, name: item.name, baseCurrency: item.baseCurrency, quoteCurrency: item.quoteCurrency, last: item.last, changePercent: item.changePercent, volume24h: item.volume24h, category: category, updatedAt: item.updatedAt)
         }.sorted { $0.volume24h > $1.volume24h }
         contractUniverse = enriched
+        await paper.refreshStrategyUniverse(enriched)
         return enriched
     }
 
     public func cachedContracts() -> [ContractMarket] { contractUniverse }
+
+    /// Returns the concrete targets currently used by the scanner. `fresh=true`
+    /// is intended for operator verification and performs one contract refresh;
+    /// normal runtime callers reuse the backend's last contract snapshot.
+    public func strategyUniverseTargets(fresh: Bool = false) async throws -> [StrategyUniverseSnapshot] {
+        if fresh { _ = try await contracts(forceRefresh: true) }
+        return await paper.strategyUniverseTargets()
+    }
 
     public func account() async throws -> AccountOverview {
         await restoreRiskIfNeeded()
@@ -2739,7 +2836,12 @@ public actor TradingBackend {
             }
         }
         let riskDistance = stopPrice.map { abs($0 - entry) } ?? 0
-        let riskBudget = pool.equity * Decimal(config.riskPercent) / 100
+        // The strategy rule expresses risk as a percentage of the authenticated
+        // account equity. Capital pools still cap the cash/margin that a
+        // strategy may reserve, but they must not silently shrink or enlarge
+        // the stop-loss budget used for position sizing.
+        let accountEquity = (await riskEngine.snapshot(now: signal.timestamp)).equity
+        let riskBudget = accountEquity * Decimal(config.riskPercent) / 100
         let targetNotional: Decimal
         if riskDistance > 0, entry > 0 {
             targetNotional = min(pool.availableCapital, riskBudget * entry / riskDistance)
@@ -2947,6 +3049,10 @@ public struct TradingHTTPServer {
             return try request.application.encoder.encode(await backend.market.trades(instrumentID: instrument), from: request)
         }
         app.router.get("api/v1/strategies") { [backend] request in try request.application.encoder.encode(await backend.strategies(), from: request) }
+        app.router.get("api/v1/strategies/targets") { [backend] request in
+            let fresh = request.uri.queryParameters.get("fresh") == "true"
+            return try request.application.encoder.encode(await backend.strategyUniverseTargets(fresh: fresh), from: request)
+        }
         app.router.get("api/v1/strategy-packages") { [backend] request in
             try request.application.encoder.encode(await backend.strategyPackageManifests(), from: request)
         }

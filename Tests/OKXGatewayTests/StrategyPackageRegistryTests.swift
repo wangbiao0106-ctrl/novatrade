@@ -19,7 +19,7 @@ func experimentManifestIsParsed() throws {
       },
       "entry_timeframe_minutes": 15,
       "signal_parameters": { "swing_lookback": 6, "allow_range": true },
-      "position_management": { "leverage": 2.0, "risk_per_trade_pct": 0.5, "risk_per_trade_max_pct": 5.0, "cooldown_bars": 16 }
+      "position_management": { "leverage": 2.0, "risk_per_trade_pct": 1.0, "risk_per_trade_max_pct": 1.0, "cooldown_bars": 16 }
     }
     """.data(using: .utf8)!
     let manifest = try StrategyPackageRegistry.decodeManifest(json)

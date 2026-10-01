@@ -7,6 +7,13 @@ import Foundation
 /// update it from `strategies/sweep_reversal_short/config/universe.json` when
 /// the lab changes its asset-class exclusions.
 public enum StrategyUniverseRules {
+    /// Strategy-specific production guardrails. They are applied after the
+    /// common altcoin asset-class filter; none of these pools are a generic
+    /// top-20 fallback.
+    public static let hlsrMinimumGainPercent: Decimal = 40
+    public static let hlsrMinimumQuoteVolume24h: Decimal = 30_000_000
+    public static let doublePumpMinimumGainPercent: Decimal = 100
+    public static let doublePumpMinimumQuoteVolume24h: Decimal = 10_000_000
     public static let mainstreamSymbols: Set<String> = [
         "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "TON", "AVAX",
         "LINK", "DOT", "LTC", "BCH", "ETC", "UNI", "ATOM", "NEAR", "APT", "SUI"
@@ -46,5 +53,17 @@ public enum StrategyUniverseRules {
             && !base.hasSuffix("USD")
             && !mainstreamSymbols.contains(base)
             && !excludedNonCryptoSymbols.contains(base)
+    }
+
+    public static func isEligibleDoublePump(_ contract: ContractMarket) -> Bool {
+        isEligibleHotAltcoin(contract)
+            && contract.changePercent > doublePumpMinimumGainPercent
+            && contract.volume24h >= doublePumpMinimumQuoteVolume24h
+    }
+
+    public static func isEligibleHLSR(_ contract: ContractMarket) -> Bool {
+        isEligibleHotAltcoin(contract)
+            && contract.changePercent > hlsrMinimumGainPercent
+            && contract.volume24h > hlsrMinimumQuoteVolume24h
     }
 }

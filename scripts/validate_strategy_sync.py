@@ -85,19 +85,19 @@ def main() -> int:
         fail(errors, "扫顶策略实验室杠杆必须为 2 倍")
     if position_management.get("risk_per_trade_pct") != 1.0:
         fail(errors, "策略实验室单笔风险默认值必须为 1%")
-    if position_management.get("risk_per_trade_max_pct") != 5.0:
-        fail(errors, "策略实验室单笔风险硬上限必须为 5%")
+    if position_management.get("risk_per_trade_max_pct") != 1.0:
+        fail(errors, "策略实验室单笔风险硬上限必须为 1%")
     if position_management.get("max_concurrent_positions") != 1:
         fail(errors, "策略实验室必须限制策略实例同时只持有一个币种")
-    if position_management.get("max_open_risk_percent") != 5.0:
-        fail(errors, "策略实验室单币种开放止损风险上限必须为 5%")
+    if position_management.get("max_open_risk_percent") != 1.0:
+        fail(errors, "策略实验室单币种开放止损风险上限必须为 1%")
     if position_management.get("risk_per_trade_scope") != "each_entry_order":
         fail(errors, "策略实验室必须把单笔风险定义为每个入场订单")
-    if position_management.get("risk_per_trade_basis") != "strategy_pool_equity_at_authorization":
+    if position_management.get("risk_per_trade_basis") != "account_equity_at_authorization":
         fail(errors, "策略实验室单笔风险基准必须是授权时策略资金池权益")
-    expected_sizing = "min(available_capital, pool_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))"
+    expected_sizing = "min(available_capital, account_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))"
     if position_management.get("sizing_formula") != expected_sizing:
-        fail(errors, "策略实验室 sizing 公式未明确按相对止损距离和资金池可用余额封顶")
+        fail(errors, "策略实验室 sizing 公式未明确按相对止损距离和可用余额封顶")
     if position_management.get("risk_budget_costs_included") is not False:
         fail(errors, "策略实验室必须明确单笔止损预算不包含成交成本，账户熔断负责 mark-to-market 成本")
     risk_policy = config.get("risk_policy", {})
@@ -191,14 +191,14 @@ def main() -> int:
         fail(errors, "运行时代码未注册 EMA 山寨币多头策略")
     if re.search(r"case\s+trendFollowing|case\s+rsiReversal|\.trendFollowing|\.rsiReversal", domain + engine + service_source + main_source):
         fail(errors, "运行时代码仍包含已清理的演示策略入口")
-    if "scope: .dynamic(.hotAltcoins)" not in main_source:
-        fail(errors, "新建策略表单未固定为动态热门山寨币 scope")
+    if "scope: selectedRule.defaultScope" not in main_source:
+        fail(errors, "新建策略表单未使用策略类型对应的动态标的范围")
     if "ForEach(StrategyType.availableCases" not in main_source:
         fail(errors, "新建策略表单未从可用策略规则列表选择规则")
     if "StrategyUniverseRules.isEligibleHotAltcoin" not in main_source:
         fail(errors, "前台热门山寨币筛选未使用统一资产类别过滤")
-    if "config.scope == .dynamic(.hotAltcoins)" not in service_source:
-        fail(errors, "后端未校验动态热门山寨币范围")
+    if "config.scope.mode == .dynamicCategory" not in service_source or "config.type.defaultScope" not in service_source:
+        fail(errors, "后端未校验并 canonicalize 策略类型对应的动态标的范围")
     if "pool.openPositions < maxConcurrent" not in service_source or "已有其他币种的挂单或持仓" not in service_source:
         fail(errors, "后端未限制策略实例同时只允许一个活动币种")
     if "case .emaAltcoinLong" not in service_source or "evaluateEmaAltcoinLong" not in service_source:
@@ -209,12 +209,12 @@ def main() -> int:
         fail(errors, "后台热门榜未使用统一资产类别过滤")
     if "config.type.maxRiskPercent" not in service_source:
         fail(errors, "后端未按策略类型收敛单笔风险上限")
-    if "maxRiskPercent" not in domain or "5.0" not in domain[domain.index("public var maxRiskPercent"):domain.index("public var defaultRiskPercent")]:
-        fail(errors, "领域层策略风险上限未同步为 5%")
+    if "maxRiskPercent" not in domain or "1.0" not in domain[domain.index("public var maxRiskPercent"):domain.index("public var defaultRiskPercent")]:
+        fail(errors, "领域层策略风险上限未同步为 1%")
     if "capitalPoolPercent" not in service_source or "strategyCapital" not in service_source:
         fail(errors, "后端未接入策略资金池")
-    if "let riskBudget = pool.equity * Decimal(config.riskPercent) / 100" not in service_source:
-        fail(errors, "后端未以授权时策略池权益计算单笔风险预算")
+    if "let riskBudget = accountEquity * Decimal(config.riskPercent) / 100" not in service_source:
+        fail(errors, "后端未以授权时账户权益计算单笔风险预算")
     if "targetNotional = min(pool.availableCapital, riskBudget * entry / riskDistance)" not in service_source:
         fail(errors, "后端未按止损距离 sizing 并受资金池可用余额封顶")
     if "enforceGlobalRiskIfNeeded" not in service_source or "closeDemoPosition" not in service_source:
@@ -229,17 +229,17 @@ def main() -> int:
         fail(errors, "新建策略表单未使用领域层的规则默认参数")
     if "stopLossDescription" not in domain or "stopLossDescription" not in main_source:
         fail(errors, "策略自带止损规则未在领域层和前台展示")
-    if '"maxConcurrentPositions": 1' not in domain or '"maxOpenRiskPercent": 5.0' not in domain:
+    if '"maxConcurrentPositions": 1' not in domain or '"maxOpenRiskPercent": 1.0' not in domain:
         fail(errors, "运行时默认参数未同步策略级单币种并发和开放风险上限")
 
     ema_config_path = ROOT / "strategies" / "ema_altcoin_long" / "config" / "strategy.json"
     try:
         ema_config = json.loads(ema_config_path.read_text())
         ema_runtime = ema_config.get("runtime", {})
-        if ema_runtime.get("scope") != "dynamic.hotAltcoins":
-            fail(errors, "EMA 策略实验室运行范围必须是 dynamic.hotAltcoins")
-        if ema_runtime.get("max_concurrent_positions") != 1 or ema_runtime.get("max_open_risk_pct") != 0.5:
-            fail(errors, "EMA 策略实验室必须限制为单币种和 0.5% 开放风险")
+        if ema_runtime.get("scope") != "dynamic.emaAltcoinCandidates":
+            fail(errors, "EMA 策略实验室运行范围必须是 dynamic.emaAltcoinCandidates")
+        if ema_runtime.get("max_concurrent_positions") != 1 or ema_runtime.get("max_open_risk_pct") != 1.0:
+            fail(errors, "EMA 策略实验室必须限制为单币种和 1% 开放风险")
         if ema_config.get("portfolio", {}).get("leverage") != 2.0:
             fail(errors, "EMA 策略实验室杠杆必须为 2 倍")
         if ema_config.get("universe", {}).get("one_active_symbol_per_strategy") is not True:
@@ -442,12 +442,80 @@ def main() -> int:
             fail(errors, f"{label} 未明确 BTC 历史不足时关闭门控")
         if "15m" not in document or "市价" not in document:
             fail(errors, f"{label} 未明确 15m 收盘确认和市价入场")
-        if "每个入场订单" not in document or "授权时" not in document or "策略资金池权益" not in document:
-            fail(errors, f"{label} 未明确单笔风险的订单范围和资金池基准")
+        if "每个入场订单" not in document or "授权时" not in document or ("账户权益" not in document and "策略资金池权益" not in document):
+            fail(errors, f"{label} 未明确单笔风险的订单范围和权益基准")
         if "未实现浮盈" not in document or "已实现盈亏" not in document or "滚仓" not in document:
             fail(errors, f"{label} 未明确资金池滚仓和浮盈不可释放规则")
     if not ("执行边界" in strategy_doc or "执行状态" in strategy_doc) or "保护单" not in strategy_doc:
         fail(errors, "STRATEGY.md 未明确当前执行层边界")
+
+    # All strategy packages share the current account-level risk contract and
+    # must describe their eligible instruments next to the human rule source.
+    # Historical result JSON is deliberately excluded: it records the risk
+    # convention used when that report was produced and is not a live config.
+    strategy_dirs = [
+        ROOT / "strategies" / name for name in (
+            "sweep_reversal_short", "hlsr", "intraday_pump_retest_short",
+            "extreme_wick_short", "ema_altcoin_long", "double_pump_exhaustion_short",
+            "ema_3line_pullback",
+        )
+    ]
+    for strategy_dir in strategy_dirs:
+        config_path = strategy_dir / "config" / "strategy.json"
+        if not config_path.is_file() and strategy_dir.name == "ema_3line_pullback":
+            # This is a historical four-variant archive whose machine source
+            # predates the single-strategy config schema.
+            config_path = strategy_dir / "config" / "variants.json"
+        doc_path = strategy_dir / "STRATEGY.md"
+        if not config_path.is_file() or not doc_path.is_file():
+            fail(errors, f"{strategy_dir.name} 缺少策略真源或 config/strategy.json")
+            continue
+        try:
+            strategy_config = json.loads(config_path.read_text())
+        except Exception as exc:
+            fail(errors, f"无法读取 {config_path.relative_to(ROOT)}：{exc}")
+            continue
+        risk_blocks = [strategy_config.get("position_management", {}),
+                       strategy_config.get("portfolio", {})]
+        for block in risk_blocks:
+            if "risk_per_trade_pct" in block and block.get("risk_per_trade_pct") != 1.0:
+                fail(errors, f"{strategy_dir.name} 单笔风险必须为账户权益 1%")
+            for key in ("risk_per_trade_max_pct", "max_open_risk_pct", "max_open_risk_percent"):
+                if key in block and block.get(key) != 1.0:
+                    fail(errors, f"{strategy_dir.name} 的 {key} 必须为 1%")
+            if "risk_per_trade_basis" in block and block.get("risk_per_trade_basis") != "account_equity_at_authorization":
+                fail(errors, f"{strategy_dir.name} 单笔风险基准必须是授权时账户权益")
+        if strategy_dir.name != "ema_3line_pullback" and not any(key in strategy_config for key in ("universe", "runtime_universe", "market")):
+            fail(errors, f"{strategy_dir.name} 未声明适合标的范围")
+        document = doc_path.read_text()
+        if "USDT" not in document or ("山寨币" not in document and "适合标的" not in document):
+            fail(errors, f"{strategy_dir.name}/STRATEGY.md 未明确适合标的")
+
+    dme_config_path = ROOT / "strategies" / "double_pump_exhaustion_short" / "config" / "strategy.json"
+    try:
+        dme_config = json.loads(dme_config_path.read_text())
+        dme_runtime = dme_config.get("runtime", {})
+        if dme_config.get("status") != "finalized" or dme_config.get("runtime_integration") != "implemented_paper_only":
+            fail(errors, "DME 策略必须标记为 finalized 且仅纸面运行时")
+        for key, want in {
+            "strategy_type": "doublePumpExhaustionShort",
+            "scope": "dynamic.doublePumpCandidates",
+            "evaluation_interval": "confirmed_15m_close",
+            "live_order_mode": "paper_only",
+            "auto_submit_live_orders": False,
+            "enabled_by_default": False,
+            "max_open_risk_pct": 1.0,
+        }.items():
+            if dme_runtime.get(key) != want:
+                fail(errors, f"DME runtime.{key} 未同步为 {want!r}")
+    except Exception as exc:
+        fail(errors, f"无法读取 DME config/strategy.json：{exc}")
+    if "doublePumpExhaustionShort" not in domain or "evaluateDoublePumpExhaustionShort" not in engine:
+        fail(errors, "DME 未注册领域层和 StrategyEngine 运行时处理器")
+    if "isEligibleDoublePump" not in universe_rules or "doublePumpCandidates" not in domain or "strategyUniverseTargets" not in stream or "targetsByStrategy" not in stream:
+        fail(errors, "DME 未接入策略专属的 10m USDT 报价成交额标的监控缓存")
+    if "isEligibleHLSR" not in universe_rules or "hlsrCandidates" not in domain:
+        fail(errors, "HLSR 未接入策略专属的涨幅和报价成交额标的监控")
 
     # HLSR（高位扫顶反转）是独立的 15m + 4H 策略。实验室规则仍然是
     # 唯一真源，但接入后必须由领域层、信号引擎、服务和前台共同注册；
@@ -476,7 +544,7 @@ def main() -> int:
         runtime = hlsr_config.get("runtime", {})
         runtime_expectations = {
             "strategy_type": "hlsr",
-            "scope": "dynamic.hotAltcoins",
+            "scope": "dynamic.hlsrCandidates",
             "universe_refresh_seconds": 30,
             "evaluation_interval": "confirmed_15m_close",
             "higher_timeframe": "4H",
@@ -505,10 +573,10 @@ def main() -> int:
             "partial_targets": [0.3, 0.3, 0.4],
             "move_stop_to_entry_after_tp1": True,
             "cooldown_bars": 16,
-            "risk_per_trade_pct": 0.5,
-            "risk_per_trade_max_pct": 5.0,
+            "risk_per_trade_pct": 1.0,
+            "risk_per_trade_max_pct": 1.0,
             "max_concurrent_positions": 1,
-            "max_open_risk_percent": 5.0,
+            "max_open_risk_percent": 1.0,
         }.items():
             if hlsr_position.get(key) != want:
                 fail(errors, f"HLSR position_management.{key} 未同步规则真源")
@@ -611,7 +679,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("策略实验室与运行时代码同步检查通过（sweep_reversal_short v1.3 + HLSR 1.0）")
+    print("策略实验室与运行时代码同步检查通过（全策略 1% 风险契约 + sweep v1.3 + HLSR 1.0 + DME 1.0）")
     return 0
 
 

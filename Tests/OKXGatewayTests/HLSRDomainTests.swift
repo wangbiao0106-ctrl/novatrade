@@ -15,8 +15,8 @@ func hlsrDefaults() {
     let type = StrategyType.hlsr
     #expect(type.entryInterval == .fifteenMinutes)
     #expect(type.defaultCooldownBars == 16)
-    #expect(type.defaultRiskPercent == 0.5)
-    #expect(type.maxRiskPercent == 5.0)
+    #expect(type.defaultRiskPercent == 1.0)
+    #expect(type.maxRiskPercent == 1.0)
     #expect(type.defaultParameters["structureTimeframeMinutes"] == 240)
     #expect(type.defaultParameters["gain24hGt"] == 0.4)
     #expect(type.defaultParameters["quoteVolume24hGt"] == 30_000_000)

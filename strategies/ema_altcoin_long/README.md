@@ -21,4 +21,4 @@ python3 strategies/ema_altcoin_long/src/backtest.py
 
 回测用训练期报价成交额前 50 个合规山寨币选定标的，测试期冻结该名单；实盘观察应改用当前滚动 24 小时成交额榜，并逐根确认 1 小时 K 线完整性。回测不含资金费率、盘口冲击、退市存活偏差和真实组合保证金占用，因此不得直接切换为实盘下单。
 
-研究结果和限制见 [`results/summary.csv`](results/summary.csv) 以及 [`STRATEGY.md`](STRATEGY.md)。运行时实现位于 `Sources/TradingService/StrategyEngine.swift`（`evaluateEmaAltcoinLong`）、`Sources/TradingService/TradingService.swift`（动态多币种扫描、市价单、条件止损/止盈、96 小时时间离场、策略级单币种并发限制）与 `RiskEngine`（资金池按 `openRisk` / `openPositions` 执行 0.5% 开放风险与 1 笔并发上限），界面入口在 `Sources/MacTraderApp/main.swift`；参数默认值与实验室映射由 `python3 scripts/validate_strategy_sync.py` 逐项校验。
+研究结果和限制见 [`results/summary.csv`](results/summary.csv) 以及 [`STRATEGY.md`](STRATEGY.md)。运行时实现位于 `Sources/TradingService/StrategyEngine.swift`（`evaluateEmaAltcoinLong`）、`Sources/TradingService/TradingService.swift`（动态多币种扫描、市价单、条件止损/止盈、96 小时时间离场、策略级单币种并发限制）与 `RiskEngine`（资金池按 `openRisk` / `openPositions` 执行 1% 开放风险与 1 笔并发上限），界面入口在 `Sources/MacTraderApp/main.swift`；参数默认值与实验室映射由 `python3 scripts/validate_strategy_sync.py` 逐项校验。

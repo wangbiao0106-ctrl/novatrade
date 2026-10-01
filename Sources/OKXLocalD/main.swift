@@ -143,16 +143,21 @@ private final class StreamHub: @unchecked Sendable {
             guard let self else { return }
             while !Task.isCancelled {
                 let configs = await backend.strategies()
-                let contracts: [ContractMarket]
                 do {
-                    contracts = try await backend.contracts(forceRefresh: true)
+                    _ = try await backend.contracts(forceRefresh: true)
                 } catch {
-                    contracts = await backend.cachedContracts()
                     await backend.appendLog("策略币种范围刷新失败，继续使用上次合约列表：\(error.localizedDescription)", level: "warning")
                 }
+                let resolvedTargets = try? await backend.strategyUniverseTargets()
+                let targetsByStrategy = Dictionary(uniqueKeysWithValues: (resolvedTargets ?? []).map { ($0.strategyID, $0.instrumentIDs) })
                 var targets = Set<StrategyTarget>()
                 for config in configs where config.enabled {
-                    for instrumentID in config.scope.resolvedInstrumentIDs(from: contracts) {
+                    // Consume the same resolved cache exposed by
+                    // /api/v1/strategies/targets and used by
+                    // PaperTradingStore.evaluate. This avoids a second full
+                    // universe filter and makes actual subscriptions auditable.
+                    let instrumentIDs = targetsByStrategy[config.id] ?? []
+                    for instrumentID in instrumentIDs {
                         targets.insert(StrategyTarget(instrumentID: instrumentID, interval: config.interval))
                         if config.type == .sweepReversalShort {
                             // 1h establishes the structure; 15m is the only

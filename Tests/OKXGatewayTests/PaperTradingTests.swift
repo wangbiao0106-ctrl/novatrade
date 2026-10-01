@@ -18,6 +18,54 @@ func strategyScopesResolveSingleMultipleAndDynamicTargets() throws {
 }
 
 @Test
+func strategySpecificScopesDoNotReuseTheHot20Pool() {
+    let contracts = [
+        ContractMarket(id: "SWEEP-USDT-SWAP", name: "SWEEP", baseCurrency: "SWEEP", quoteCurrency: "USDT", last: 1, changePercent: 5, volume24h: 80_000_000),
+        ContractMarket(id: "EMA-USDT-SWAP", name: "EMA", baseCurrency: "EMA", quoteCurrency: "USDT", last: 1, changePercent: 8, volume24h: 60_000_000),
+        ContractMarket(id: "HLSR-USDT-SWAP", name: "HLSR", baseCurrency: "HLSR", quoteCurrency: "USDT", last: 1, changePercent: 41, volume24h: 31_000_001),
+        ContractMarket(id: "HLSR-LOW-VOLUME-USDT-SWAP", name: "HLSR low volume", baseCurrency: "HLSR-LOW-VOLUME", quoteCurrency: "USDT", last: 1, changePercent: 80, volume24h: 29_000_000),
+        ContractMarket(id: "DME-USDT-SWAP", name: "DME", baseCurrency: "DME", quoteCurrency: "USDT", last: 1, changePercent: 101, volume24h: 10_000_000),
+        ContractMarket(id: "DME-LOW-VOLUME-USDT-SWAP", name: "DME low volume", baseCurrency: "DME-LOW-VOLUME", quoteCurrency: "USDT", last: 1, changePercent: 120, volume24h: 9_000_000),
+    ]
+
+    #expect(StrategyType.sweepReversalShort.defaultUniverseCategory == .hotAltcoins)
+    #expect(StrategyType.emaAltcoinLong.defaultUniverseCategory == .emaAltcoinCandidates)
+    #expect(StrategyType.hlsr.defaultUniverseCategory == .hlsrCandidates)
+    #expect(StrategyType.doublePumpExhaustionShort.defaultUniverseCategory == .doublePumpCandidates)
+    #expect(StrategyScope.dynamic(.hlsrCandidates).resolvedInstrumentIDs(from: contracts) == ["HLSR-USDT-SWAP"])
+    #expect(StrategyScope.dynamic(.doublePumpCandidates).resolvedInstrumentIDs(from: contracts) == ["DME-USDT-SWAP"])
+}
+
+@Test
+func paperStoreReportsAndRefreshesTheConcreteScanPool() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("novatrade-universe-cache-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let store = PaperTradingStore(directory: directory)
+    let config = StrategyConfig(name: "HLSR", scope: .dynamic(.hlsrCandidates),
+                                interval: .fifteenMinutes, type: .hlsr)
+    _ = try await store.create(config)
+
+    let eligible = ContractMarket(id: "TARGET-USDT-SWAP", name: "TARGET", baseCurrency: "TARGET",
+                                  quoteCurrency: "USDT", last: 1, changePercent: 55, volume24h: 40_000_000)
+    let excluded = ContractMarket(id: "EXCLUDED-USDT-SWAP", name: "EXCLUDED", baseCurrency: "EXCLUDED",
+                                  quoteCurrency: "USDT", last: 1, changePercent: 55, volume24h: 20_000_000)
+    await store.refreshStrategyUniverse([eligible, excluded])
+    let first = await store.strategyUniverseTargets()
+    #expect(first.count == 1)
+    #expect(first[0].instrumentIDs == [eligible.id])
+    #expect(first[0].targetCount == 1)
+
+    let replacement = ContractMarket(id: "REPLACEMENT-USDT-SWAP", name: "REPLACEMENT", baseCurrency: "REPLACEMENT",
+                                     quoteCurrency: "USDT", last: 1, changePercent: 60, volume24h: 50_000_000)
+    await store.refreshStrategyUniverse([replacement])
+    let second = await store.strategyUniverseTargets()
+    #expect(second[0].instrumentIDs == [replacement.id])
+    #expect(second[0].instrumentIDs.contains(eligible.id) == false)
+}
+
+@Test
 func unknownStrategyTypeDoesNotDiscardLedgerOrKnownStrategies() async throws {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("novatrade-unknown-strategy-state-\(UUID().uuidString)", isDirectory: true)
@@ -73,11 +121,23 @@ func emaAltcoinLongIsAvailableAndCanonicalized() async throws {
     let input = StrategyConfig(name: "EMA", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .emaAltcoinLong, riskPercent: 0.5)
     let created = try await store.create(input)
     #expect(created.name == "双均线交易山寨币做多")
-    #expect(created.scope == .dynamic(.hotAltcoins))
+    #expect(created.scope == .dynamic(.emaAltcoinCandidates))
     #expect(created.instrumentID.isEmpty)
-    #expect(created.riskPercent == 0.5)
+    #expect(created.riskPercent == 1.0)
     #expect(created.parameters["maxConcurrentPositions"] == 1)
     #expect(created.parameters["leverage"] == 2)
+}
+
+@Test
+func storeCanonicalizesEveryRuntimeStrategyToItsOwnUniverse() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-universe-(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PaperTradingStore(directory: directory)
+
+    let hlsr = try await store.create(StrategyConfig(name: "HLSR", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .hlsr))
+    #expect(hlsr.scope == .dynamic(.hlsrCandidates))
+    let dme = try await store.create(StrategyConfig(name: "DME", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .doublePumpExhaustionShort))
+    #expect(dme.scope == .dynamic(.doublePumpCandidates))
 }
 
 @Test("Strategy store keeps a user-selected leverage override")
@@ -262,16 +322,16 @@ func deletingStrategyPersistsRemovalOfItsCapitalPool() async throws {
 }
 
 @Test
-func strategyStoreAcceptsRiskUpToFivePercentAndRejectsAboveIt() async throws {
+func strategyStoreAcceptsOnePercentRiskAndRejectsAboveIt() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-risk-(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = PaperTradingStore(directory: directory)
-    let accepted = StrategyConfig(name: "上限内", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 5.0)
+    let accepted = StrategyConfig(name: "上限内", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 1.0)
     _ = try await store.create(accepted)
-    let config = StrategyConfig(name: "超限", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 5.1)
+    let config = StrategyConfig(name: "超限", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 1.1)
     do {
         _ = try await store.create(config)
-        Issue.record("expected risk above five percent to be rejected")
+        Issue.record("expected risk above one percent to be rejected")
     } catch PaperTradingStore.StoreError.unsupported {
         // Expected.
     }

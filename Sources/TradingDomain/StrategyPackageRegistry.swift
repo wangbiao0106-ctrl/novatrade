@@ -111,7 +111,7 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
         let cooldown = defaultCooldownBars ?? type.defaultCooldownBars
         return StrategyConfig(id: id,
                               name: name ?? displayName,
-                              scope: requestedScope ?? .dynamic(.hotAltcoins),
+                              scope: requestedScope ?? type.defaultScope,
                               interval: interval,
                               type: type,
                               parameters: parameters,
@@ -153,6 +153,7 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
         case "hlsr": return "hlsr"
         case "sweepreversalshort": return "sweepReversalShort"
         case "emaaltcoinlong": return "emaAltcoinLong"
+        case "doublepumpexhaustionshort": return "doublePumpExhaustionShort"
         default: return trimmed
         }
     }

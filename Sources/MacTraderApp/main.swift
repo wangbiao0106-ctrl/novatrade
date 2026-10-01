@@ -66,6 +66,8 @@ enum StrategySymbolCategory: String, CaseIterable, Identifiable {
     case mainstream = "主流币"
     case hotAltcoins = "热门山寨币"
     case emaAltcoinCandidates = "双均线候选山寨币（前 50）"
+    case hlsrCandidates = "高位扫顶候选山寨币"
+    case doublePumpCandidates = "翻倍衰竭候选山寨币"
     case highGain60 = "高涨幅币（24h +60%）"
     case highGain100 = "高涨幅币（24h +100%）"
 
@@ -76,6 +78,8 @@ enum StrategySymbolCategory: String, CaseIterable, Identifiable {
         case .mainstream: return .mainstream
         case .hotAltcoins: return .hotAltcoins
         case .emaAltcoinCandidates: return .emaAltcoinCandidates
+        case .hlsrCandidates: return .hlsrCandidates
+        case .doublePumpCandidates: return .doublePumpCandidates
         case .highGain60: return .highGain60
         case .highGain100: return .highGain100
         }
@@ -158,6 +162,7 @@ final class DashboardModel: ObservableObject {
         case .sweepReversalShort: return "山寨币二次扫顶做空"
         case .emaAltcoinLong: return "双均线交易山寨币做多"
         case .hlsr: return "高位扫顶反转做空"
+        case .doublePumpExhaustionShort: return "日内翻倍动能衰竭确认做空"
         case .external(let identifier): return "\(identifier)（运行时处理器不可用）"
         }
     }
@@ -228,8 +233,8 @@ final class DashboardModel: ObservableObject {
     func contracts(for category: String) -> [PerpetualContract] {
         let source = contracts
         switch category {
-        case "主流": return source.filter(Self.isMainstream).sorted { compactVolume($0.volume) > compactVolume($1.volume) }
-        case "热门": return source.sorted { compactVolume($0.volume) > compactVolume($1.volume) }.prefix(20).map { $0 }
+        case "主流": return source.filter(Self.isMainstream).sorted { Self.compactVolume($0.volume) > Self.compactVolume($1.volume) }
+        case "热门": return source.sorted { Self.compactVolume($0.volume) > Self.compactVolume($1.volume) }.prefix(20).map { $0 }
         case "合约", "全部": return source
         case "涨幅": return source.sorted { $0.change > $1.change }.prefix(20).map { $0 }
         case "跌幅": return source.sorted { $0.change < $1.change }.prefix(20).map { $0 }
@@ -245,17 +250,25 @@ final class DashboardModel: ObservableObject {
         let source = displayContracts
         switch category {
         case .mainstream:
-            return source.filter(Self.isMainstream).sorted { compactVolume($0.volume) > compactVolume($1.volume) }
+            return source.filter(Self.isMainstream).sorted { Self.compactVolume($0.volume) > Self.compactVolume($1.volume) }
         case .hotAltcoins:
             let altcoins = source.filter(Self.isEligibleHotAltcoin)
-            return Array(altcoins.sorted { compactVolume($0.volume) > compactVolume($1.volume) }.prefix(20))
+            return Array(altcoins.sorted { Self.compactVolume($0.volume) > Self.compactVolume($1.volume) }.prefix(20))
         case .emaAltcoinCandidates:
             let altcoins = source.filter(Self.isEligibleHotAltcoin)
-            return Array(altcoins.sorted { compactVolume($0.volume) > compactVolume($1.volume) }.prefix(50))
+            return Array(altcoins.sorted { Self.compactVolume($0.volume) > Self.compactVolume($1.volume) }.prefix(50))
+        case .hlsrCandidates:
+            return source
+                .filter { StrategyUniverseRules.isEligibleHLSR(Self.domainContract(from: $0)) }
+                .sorted { $0.change > $1.change }
+        case .doublePumpCandidates:
+            return source
+                .filter { StrategyUniverseRules.isEligibleDoublePump(Self.domainContract(from: $0)) }
+                .sorted { $0.change > $1.change }
         case .highGain60:
-            return source.filter { $0.change >= 60 }.sorted { $0.change > $1.change }
+            return source.filter { Self.isEligibleHotAltcoin($0) && $0.change >= 60 }.sorted { $0.change > $1.change }
         case .highGain100:
-            return source.filter { $0.change >= 100 }.sorted { $0.change > $1.change }
+            return source.filter { Self.isEligibleHotAltcoin($0) && $0.change >= 100 }.sorted { $0.change > $1.change }
         }
     }
 
@@ -269,7 +282,18 @@ final class DashboardModel: ObservableObject {
         return StrategyUniverseRules.isEligibleHotAltcoin(instrumentID: contract.id, baseCurrency: contract.shortName, quoteCurrency: quote)
     }
 
-    private func compactVolume(_ value: String) -> Double {
+    private static func domainContract(from contract: PerpetualContract) -> ContractMarket {
+        ContractMarket(id: contract.id,
+                       name: contract.name,
+                       baseCurrency: contract.shortName,
+                       quoteCurrency: contract.id.split(separator: "-").dropFirst().first.map(String.init) ?? "USDT",
+                       last: Decimal(contract.price),
+                       changePercent: Decimal(contract.change),
+                       volume24h: Decimal(Self.compactVolume(contract.volume)),
+                       category: contract.category)
+    }
+
+    private static func compactVolume(_ value: String) -> Double {
         let suffix = value.last
         let multiplier: Double = suffix == "B" ? 1_000_000_000 : suffix == "M" ? 1_000_000 : suffix == "K" ? 1_000 : 1
         let number = Double(value.dropLast(suffix == "B" || suffix == "M" || suffix == "K" ? 1 : 0)) ?? 0
@@ -623,6 +647,8 @@ final class DashboardModel: ObservableObject {
             case .mainstream: uiCategory = .mainstream
             case .hotAltcoins: uiCategory = .hotAltcoins
             case .emaAltcoinCandidates: uiCategory = .emaAltcoinCandidates
+            case .hlsrCandidates: uiCategory = .hlsrCandidates
+            case .doublePumpCandidates: uiCategory = .doublePumpCandidates
             case .highGain60: uiCategory = .highGain60
             case .highGain100: uiCategory = .highGain100
             }
@@ -2102,6 +2128,7 @@ struct NewStrategySheet: View {
         case .sweepReversalShort: return "arrow.down.right.and.arrow.up.left"
         case .emaAltcoinLong: return "chart.line.uptrend.xyaxis"
         case .hlsr: return "waveform.path.ecg"
+        case .doublePumpExhaustionShort: return "chart.bar.xaxis"
         case .external: return "questionmark"
         }
     }
@@ -2114,6 +2141,8 @@ struct NewStrategySheet: View {
             return "用快慢均线找上涨趋势，回踩确认后做多，达到目标止盈。"
         case .hlsr:
             return "观察高位流动性扫顶，反转确认后分批做空并逐步止盈。"
+        case .doublePumpExhaustionShort:
+            return "观察滚动 24 小时翻倍后的 15 分钟冲高衰竭，确认收盘后做空。"
         case .external:
             return "策略包暂不可用。"
         }
@@ -2121,7 +2150,7 @@ struct NewStrategySheet: View {
 
     private func orderTypeDescription(_ strategyType: StrategyType) -> String {
         switch strategyType {
-        case .sweepReversalShort, .emaAltcoinLong, .hlsr:
+        case .sweepReversalShort, .emaAltcoinLong, .hlsr, .doublePumpExhaustionShort:
             return "市价下单"
         case .external:
             return "不可用"
@@ -2130,7 +2159,7 @@ struct NewStrategySheet: View {
 
     private func orderTypeIcon(_ strategyType: StrategyType) -> String {
         switch strategyType {
-        case .sweepReversalShort, .emaAltcoinLong, .hlsr: return "bolt.fill"
+        case .sweepReversalShort, .emaAltcoinLong, .hlsr, .doublePumpExhaustionShort: return "bolt.fill"
         case .external: return "questionmark"
         }
     }
@@ -2138,6 +2167,7 @@ struct NewStrategySheet: View {
     private func signalIntervalDescription(for strategyType: StrategyType) -> String {
         switch strategyType {
         case .hlsr: return "15 分钟检查"
+        case .doublePumpExhaustionShort: return "15 分钟检查"
         case .sweepReversalShort, .emaAltcoinLong: return "1 小时检查"
         case .external: return "不可用"
         }
@@ -2159,8 +2189,12 @@ struct NewStrategySheet: View {
     private var scopeDescription: String {
         switch selectedRule {
         case .hlsr:
-            return "动态扫描合规山寨币；24h 涨幅 >40% 且成交额 >3,000 万 USDT"
-        case .sweepReversalShort, .emaAltcoinLong:
+            return "动态扫描 24h 涨幅 >40%、报价成交额 >3,000 万 USDT 的山寨币"
+        case .doublePumpExhaustionShort:
+            return "动态扫描 24h 涨幅 >100%、报价成交额 ≥1,000 万 USDT 的山寨币"
+        case .emaAltcoinLong:
+            return "动态扫描合规山寨币成交额前 50"
+        case .sweepReversalShort:
             return "动态扫描合规热门榜前 20 个山寨币"
         case .external:
             return "策略包运行时不可用（暂停）"
@@ -2171,6 +2205,8 @@ struct NewStrategySheet: View {
         switch selectedRule {
         case .hlsr:
             return "15 分钟入场；4 小时市场状态"
+        case .doublePumpExhaustionShort:
+            return "15 分钟收盘确认；翻倍后衰竭做空"
         case .sweepReversalShort, .emaAltcoinLong:
             return "1 小时收盘确认"
         case .external:
@@ -2222,7 +2258,7 @@ struct NewStrategySheet: View {
         // 参数默认值来自领域层（与实验室 config 对齐），不再在界面里重复一份。
         var parameters = selectedRule.defaultParameters
         parameters["leverage"] = leverage
-        let config = StrategyConfig(name: selectedRule.displayName, scope: .dynamic(.hotAltcoins), interval: selectedRule.entryInterval, type: selectedRule, parameters: parameters, enabled: false, riskPercent: effectiveRisk, capitalPoolPercent: effectiveCapitalPoolPercent, cooldownBars: selectedRule.defaultCooldownBars)
+        let config = StrategyConfig(name: selectedRule.displayName, scope: selectedRule.defaultScope, interval: selectedRule.entryInterval, type: selectedRule, parameters: parameters, enabled: false, riskPercent: effectiveRisk, capitalPoolPercent: effectiveCapitalPoolPercent, cooldownBars: selectedRule.defaultCooldownBars)
         isCreating = true
         model.errorMessage = nil
         Task { @MainActor in

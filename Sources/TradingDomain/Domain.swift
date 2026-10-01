@@ -496,6 +496,8 @@ public struct LiveTradingStatus: Codable, Equatable, Sendable {
 public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sendable {
     case sweepReversalShort
     case emaAltcoinLong
+    /// 日内翻倍后 15m 动能衰竭确认做空。
+    case doublePumpExhaustionShort
     /// High-Level Liquidity Sweep Reversal.  Keep the short identifier stable
     /// because it is persisted in strategy files and used by the service
     /// router; UI copy belongs in ``displayName``.
@@ -508,6 +510,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
         switch rawValue {
         case "sweepReversalShort": self = .sweepReversalShort
         case "emaAltcoinLong": self = .emaAltcoinLong
+        case "doublePumpExhaustionShort": self = .doublePumpExhaustionShort
         case "hlsr": self = .hlsr
         default: self = .external(rawValue)
         }
@@ -517,6 +520,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
         switch self {
         case .sweepReversalShort: return "sweepReversalShort"
         case .emaAltcoinLong: return "emaAltcoinLong"
+        case .doublePumpExhaustionShort: return "doublePumpExhaustionShort"
         case .hlsr: return "hlsr"
         case .external(let identifier): return identifier
         }
@@ -539,7 +543,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
 
     public static var allCases: [StrategyType] { availableCases }
 
-    public static var availableCases: [StrategyType] { [.sweepReversalShort, .emaAltcoinLong, .hlsr] }
+    public static var availableCases: [StrategyType] { [.sweepReversalShort, .emaAltcoinLong, .hlsr, .doublePumpExhaustionShort] }
 
     /// Stable machine-readable identifier. Keep this independent from UI copy.
     public var identifier: String { rawValue }
@@ -553,11 +557,27 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// Default leverage shown when creating a new instance.
     public var defaultLeverage: Double { defaultParameters["leverage"] ?? 2.0 }
 
+    /// Each runtime strategy owns its eligible-market definition. The scope
+    /// is compiled from this rule and cannot silently fall back to the generic
+    /// hot-altcoin ranking used by a different strategy.
+    public var defaultUniverseCategory: StrategyUniverseCategory {
+        switch self {
+        case .sweepReversalShort: return .hotAltcoins
+        case .emaAltcoinLong: return .emaAltcoinCandidates
+        case .hlsr: return .hlsrCandidates
+        case .doublePumpExhaustionShort: return .doublePumpCandidates
+        case .external: return .hotAltcoins
+        }
+    }
+
+    public var defaultScope: StrategyScope { .dynamic(defaultUniverseCategory) }
+
     public var displayName: String {
         switch self {
         case .sweepReversalShort: return "山寨币二次扫顶做空"
         case .emaAltcoinLong: return "双均线交易山寨币做多"
         case .hlsr: return "高位扫顶反转做空"
+        case .doublePumpExhaustionShort: return "日内翻倍动能衰竭确认做空"
         case .external(let identifier): return identifier
         }
     }
@@ -568,6 +588,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
         case .sweepReversalShort: return "Sweep Reversal Short"
         case .emaAltcoinLong: return "EMA Altcoin Long"
         case .hlsr: return "High-Level Liquidity Sweep Reversal"
+        case .doublePumpExhaustionShort: return "Double Pump Exhaustion Short"
         case .external(let identifier): return identifier
         }
     }
@@ -588,7 +609,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "confirmationWindowMinutes": 60,
                 "leverage": 2,
                 "maxConcurrentPositions": 1,
-                "maxOpenRiskPercent": 5.0,
+                "maxOpenRiskPercent": 1.0,
             ]
         case .emaAltcoinLong:
             return [
@@ -599,7 +620,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "minimumHistoryBars": 120, "gateSlopeBars": 6,
                 "leverage": 2,
                 "maxConcurrentPositions": 1,
-                "maxOpenRiskPercent": 0.5,
+                "maxOpenRiskPercent": 1.0,
             ]
         case .hlsr:
             // Values mirror strategies/hlsr/config/strategy.json.  Boolean
@@ -633,7 +654,16 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "slippage": 0.0002,
                 "fundingRate": 0,
                 "maxConcurrentPositions": 1,
-                "maxOpenRiskPercent": 5.0,
+                "maxOpenRiskPercent": 1.0,
+            ]
+        case .doublePumpExhaustionShort:
+            return [
+                "atrPeriod": 14, "rsiPeriod": 14, "volumePeriod": 20,
+                "gain24Gt": 1.0, "upperWickMin": 0.4, "closePositionMax": 0.5,
+                "rsiMin": 50.0, "volumeMultiple": 0.5, "stopATR": 0.45,
+                "targetR": 1.0, "minRiskATR": 0.5, "maxRiskATR": 3.0,
+                "minimumHistoryBars": 97, "leverage": 2,
+                "maxConcurrentPositions": 1, "maxOpenRiskPercent": 1.0,
             ]
         case .external: return [:]
         }
@@ -642,9 +672,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// 实验室给出的单笔风险上限（%），运行时会按此值收敛用户输入。
     public var maxRiskPercent: Double {
         switch self {
-        case .sweepReversalShort: return 5.0
-        case .emaAltcoinLong: return 0.5
-        case .hlsr: return 5.0
+        case .sweepReversalShort, .emaAltcoinLong, .hlsr, .doublePumpExhaustionShort: return 1.0
         case .external: return 0
         }
     }
@@ -653,8 +681,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var defaultRiskPercent: Double {
         switch self {
         case .sweepReversalShort: return 1.0
-        case .emaAltcoinLong: return 0.5
-        case .hlsr: return 0.5
+        case .emaAltcoinLong, .hlsr, .doublePumpExhaustionShort: return 1.0
         case .external: return 0
         }
     }
@@ -670,6 +697,8 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
             return "动态：入场价下方 1.25 × ATR14，止盈 2.5R"
         case .hlsr:
             return "动态：扫顶高点 + 0.25 × ATR14；TP1 后保本，TP2 后跟踪最近 2 根 15 分钟高点"
+        case .doublePumpExhaustionShort:
+            return "动态：确认 K 线高点 + 0.45 × ATR14，止盈 1R"
         case .external:
             return "运行时处理器不可用，策略已暂停"
         }
@@ -680,7 +709,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// events are driven by confirmed 15m bars.
     public var entryInterval: KlineInterval {
         switch self {
-        case .hlsr: return .fifteenMinutes
+        case .hlsr, .doublePumpExhaustionShort: return .fifteenMinutes
         case .sweepReversalShort, .emaAltcoinLong: return .oneHour
         case .external: return .oneHour
         }
@@ -691,7 +720,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// configs that predate the strategy-specific cooldown.
     public var defaultCooldownBars: Int {
         switch self {
-        case .hlsr: return 16
+        case .hlsr, .doublePumpExhaustionShort: return 16
         case .sweepReversalShort, .emaAltcoinLong: return 96
         case .external: return 0
         }
@@ -709,6 +738,8 @@ public enum StrategyUniverseCategory: String, Codable, CaseIterable, Sendable {
     case mainstream
     case hotAltcoins
     case emaAltcoinCandidates
+    case hlsrCandidates
+    case doublePumpCandidates
     case highGain60
     case highGain100
 
@@ -716,7 +747,9 @@ public enum StrategyUniverseCategory: String, Codable, CaseIterable, Sendable {
         switch self {
         case .mainstream: return "主流币"
         case .hotAltcoins: return "热门榜前 20 个山寨币"
-        case .emaAltcoinCandidates: return "双均线候选前 50 个山寨币"
+        case .emaAltcoinCandidates: return "双均线候选榜前 50 个山寨币"
+        case .hlsrCandidates: return "高位扫顶候选（24h 涨幅 >40%、成交额 >3000 万）"
+        case .doublePumpCandidates: return "翻倍衰竭候选（24h 涨幅 >100%、成交额 ≥1000 万）"
         case .highGain60: return "高涨幅币（24h +60%）"
         case .highGain100: return "高涨幅币（24h +100%）"
         }
@@ -755,8 +788,15 @@ public struct StrategyScope: Codable, Equatable, Sendable {
             return instrumentIDs.filter { available.isEmpty || available.contains($0) }
         case .dynamicCategory:
             guard let category else { return [] }
-            let limit = category == .emaAltcoinCandidates ? 50 : 20
-            return Self.contracts(for: category, in: contracts).prefix(limit).map(\.id)
+            let ranked = Self.contracts(for: category, in: contracts)
+            switch category {
+            case .hotAltcoins:
+                return ranked.prefix(20).map(\.id)
+            case .emaAltcoinCandidates:
+                return ranked.prefix(50).map(\.id)
+            case .mainstream, .hlsrCandidates, .doublePumpCandidates, .highGain60, .highGain100:
+                return ranked.map(\.id)
+            }
         }
     }
 
@@ -774,11 +814,54 @@ public struct StrategyScope: Codable, Equatable, Sendable {
         case .emaAltcoinCandidates:
             let altcoins = contracts.filter(StrategyUniverseRules.isEligibleHotAltcoin)
             return altcoins.sorted { $0.volume24h > $1.volume24h }
+        case .hlsrCandidates:
+            return contracts
+                .filter(StrategyUniverseRules.isEligibleHLSR)
+                .sorted { $0.changePercent > $1.changePercent }
+        case .doublePumpCandidates:
+            return contracts
+                .filter(StrategyUniverseRules.isEligibleDoublePump)
+                .sorted { $0.changePercent > $1.changePercent }
         case .highGain60:
-            return contracts.filter { $0.changePercent >= 60 }.sorted { $0.changePercent > $1.changePercent }
+            return contracts
+                .filter { StrategyUniverseRules.isEligibleHotAltcoin($0) && $0.changePercent >= 60 }
+                .sorted { $0.changePercent > $1.changePercent }
         case .highGain100:
-            return contracts.filter { $0.changePercent >= 100 }.sorted { $0.changePercent > $1.changePercent }
+            return contracts
+                .filter { StrategyUniverseRules.isEligibleHotAltcoin($0) && $0.changePercent >= 100 }
+                .sorted { $0.changePercent > $1.changePercent }
         }
+    }
+}
+
+/// The resolved instrument set used by the running scanner for one strategy
+/// instance. This read-only diagnostic model lets operators verify the actual
+/// backend scan pool instead of inferring it from the scope label.
+public struct StrategyUniverseSnapshot: Codable, Equatable, Sendable {
+    public let strategyID: UUID
+    public let strategyName: String
+    public let strategyType: StrategyType
+    public let enabled: Bool
+    public let universeCategory: StrategyUniverseCategory?
+    public let instrumentIDs: [String]
+    public let targetCount: Int
+    public let refreshedAt: Date
+
+    public init(strategyID: UUID,
+                strategyName: String,
+                strategyType: StrategyType,
+                enabled: Bool,
+                universeCategory: StrategyUniverseCategory?,
+                instrumentIDs: [String],
+                refreshedAt: Date = .now) {
+        self.strategyID = strategyID
+        self.strategyName = strategyName
+        self.strategyType = strategyType
+        self.enabled = enabled
+        self.universeCategory = universeCategory
+        self.instrumentIDs = instrumentIDs
+        self.targetCount = instrumentIDs.count
+        self.refreshedAt = refreshedAt
     }
 }
 

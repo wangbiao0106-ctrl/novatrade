@@ -8,7 +8,7 @@
   "runtime": {
     "contract": "STRATEGY.md §8 运行时映射契约",
     "strategy_type": "emaAltcoinLong",
-    "scope": "dynamic.hotAltcoins",
+    "scope": "dynamic.emaAltcoinCandidates",
     "universe_refresh_seconds": 30,
     "evaluation_interval": "confirmed_1h_close",
     "adjacent_bar_gap_action": "skip_that_hour",
@@ -18,9 +18,9 @@
     "entry_order": "market",
     "protective_orders": "attached_stop_loss_and_take_profit_reduce_only",
     "time_exit_hours": 96,
-    "sizing": "min(pool_available_capital, pool_equity * risk_per_trade_pct / 100 / (entry_price - stop_price))",
+    "sizing": "min(pool_available_capital, account_equity * risk_per_trade_pct / 100 / (entry_price - stop_price))",
     "max_concurrent_positions": 1,
-    "max_open_risk_pct": 0.5,
+    "max_open_risk_pct": 1.0,
     "one_position_per_symbol": true,
     "one_active_symbol_per_strategy": true,
     "live_order_mode": "paper_only"
@@ -37,8 +37,37 @@
     "backtest_selection": "non_major_crypto_symbols ranked by training-period quote volume",
     "backtest_top_n": 50,
     "live_selection": "current eligible altcoins ranked by rolling 24h quote volume",
-    "major_symbols": ["BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "TON", "AVAX", "LINK", "DOT", "LTC", "BCH", "ETC", "UNI", "ATOM", "NEAR", "APT", "SUI"],
-    "exclude": ["stablecoins", "stocks", "ETFs", "indices", "commodities", "synthetic non-crypto contracts", "symbols without a complete 1h candle history"],
+    "major_symbols": [
+      "BTC",
+      "ETH",
+      "BNB",
+      "SOL",
+      "XRP",
+      "DOGE",
+      "ADA",
+      "TRX",
+      "TON",
+      "AVAX",
+      "LINK",
+      "DOT",
+      "LTC",
+      "BCH",
+      "ETC",
+      "UNI",
+      "ATOM",
+      "NEAR",
+      "APT",
+      "SUI"
+    ],
+    "exclude": [
+      "stablecoins",
+      "stocks",
+      "ETFs",
+      "indices",
+      "commodities",
+      "synthetic non-crypto contracts",
+      "symbols without a complete 1h candle history"
+    ],
     "one_position_per_symbol": true,
     "one_active_symbol_per_strategy": true
   },
@@ -67,12 +96,14 @@
     "open_positions_are_managed_regardless_of_gate": true
   },
   "portfolio": {
-    "risk_per_trade_pct": 0.5,
+    "risk_per_trade_pct": 1.0,
     "max_concurrent_positions": 1,
-    "max_open_risk_pct": 0.5,
+    "max_open_risk_pct": 1.0,
     "leverage": 2.0,
-    "sizing_formula": "pool_equity * risk_per_trade_pct / 100 / (entry_price - stop_price)",
-    "risk_budget_includes_fees": false
+    "sizing_formula": "account_equity * risk_per_trade_pct / 100 / (entry_price - stop_price)",
+    "risk_budget_includes_fees": false,
+    "risk_per_trade_basis": "account_equity_at_authorization",
+    "risk_per_trade_max_pct": 1.0
   },
   "costs": {
     "fee_rate": 0.0005,

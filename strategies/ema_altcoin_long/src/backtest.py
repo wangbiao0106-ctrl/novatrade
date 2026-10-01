@@ -230,7 +230,7 @@ def portfolio_filter(trades: list[Trade], max_concurrent: int, max_open_r: float
 
     仓位按固定风险比例缩放，每个入场订单的止损风险都等于同一份预算，因此一笔在
     持仓中的交易恰好占用 1R 的开放风险预算；`max_open_r` 就是
-    `max_open_risk_pct / risk_per_trade_pct`（默认 3.0 / 0.5 = 6R），与
+    `max_open_risk_pct / risk_per_trade_pct`（默认 1.0 / 1.0 = 1R），与
     `max_concurrent` 数值相同是设计结果，不是巧合。两者都保留：前者限制笔数，
     后者在风险比例被调小时自动收紧。
     """

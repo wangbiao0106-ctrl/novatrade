@@ -1,0 +1,3254 @@
+{
+  "strategy": "intraday_pump_retest_short",
+  "version": "0.1.0",
+  "status": "research_only",
+  "config_sha256": "c6a60de1a92c36a8371d80ad5dd0626212898a48a9e222d1b2a2218c8b6d89cd",
+  "parameters": {
+    "strategy": "intraday_pump_retest_short",
+    "version": "0.1.0",
+    "name_zh": "日内大涨震荡回落后二次拉升缩量做空",
+    "source_of_truth": "strategies/intraday_pump_retest_short/STRATEGY.md",
+    "status": "research_candidate",
+    "runtime_integration": "not_integrated",
+    "market": "OKX_USDT_LINEAR_PERPETUAL",
+    "input_timeframe_minutes": 5,
+    "entry_timeframe_minutes": 15,
+    "observation_filter": {
+      "intraday_gain_gt": 0.6,
+      "gain_measure": "running_confirmed_day_high_over_utc_day_open",
+      "requires_prior_day_high_over_gain": true,
+      "same_utc_day_required": true
+    },
+    "signal_parameters": {
+      "down_bars": 6,
+      "down_net_min": 0.005,
+      "down_net_max": 0.15,
+      "down_negative_fraction_min": 0.5,
+      "down_bar_body_max": 0.05,
+      "down_range_max": 0.2,
+      "pump_close_gain_min": 0.15,
+      "day_high_touch_tolerance": 0.01,
+      "confirmation_volume_ratio_max": 0.7,
+      "confirmation_close_to_own_high_max": 0.05,
+      "volume_field": "contract_volume"
+    },
+    "risk": {
+      "atr_period": 14,
+      "stop_atr": 0.3,
+      "min_risk_atr": 0.5,
+      "max_risk_atr": 3.0,
+      "target_r": 2.0,
+      "max_hold_bars": 24,
+      "cooldown_bars": 16
+    },
+    "position_management": {
+      "leverage": 2.0,
+      "initial_equity": 10000.0,
+      "risk_per_trade_pct": 0.5,
+      "max_concurrent_positions": 1,
+      "one_position_per_symbol": true,
+      "sizing": "notional = min(equity * leverage, equity * risk_pct / stop_distance_pct)",
+      "daily_realized_loss_limit_pct": 5.0
+    },
+    "costs": {
+      "fee_rate_one_way": 0.0006,
+      "slippage_one_way": 0.0002,
+      "funding_rate_round_trip": 0.0
+    },
+    "research": {
+      "minimum_validation_trades": 30,
+      "grid": {
+        "pump_close_gain_min": [
+          0.2,
+          0.3
+        ],
+        "down_bars": [
+          4,
+          6,
+          8,
+          12
+        ],
+        "confirmation_volume_ratio_max": [
+          0.5,
+          0.7,
+          0.9
+        ],
+        "confirmation_close_to_own_high_max": [
+          0.02,
+          0.05,
+          0.1
+        ]
+      }
+    }
+  },
+  "data": {
+    "symbols": 295,
+    "complete_15m_bars": 4770913,
+    "start_utc": "2026-03-31T07:00:00+00:00",
+    "end_utc": "2026-09-30T19:00:00+00:00",
+    "load_seconds": 55.332117000000004,
+    "market_data_read_passes": 1,
+    "quality": {
+      "complete_day_bars": 4751511,
+      "cached_pumps": 21,
+      "observation_bars_above_anchor": 4521,
+      "observation_bars_gt60": 4521,
+      "pump_bars_after_anchor": 21,
+      "pump_bars_after_gt60": 21
+    },
+    "source_files": [
+      {
+        "symbol": "0G",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/0G_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1239347,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "1INCH",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/1INCH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1335504,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "2Z",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/2Z_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1312068,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "A",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/A_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1278061,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AAVE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AAVE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1421358,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ACH",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ACH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1236103,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ACT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ACT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1423496,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ACU",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ACU_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1299935,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ADA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ADA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1244122,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AEON",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AEON_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 508584,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 18810,
+          "complete_15m_bars": 6270
+        }
+      },
+      {
+        "symbol": "AERO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AERO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1234385,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AEVO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AEVO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1234541,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AGLD",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AGLD_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1183614,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1040518,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 44436,
+          "complete_15m_bars": 14812
+        }
+      },
+      {
+        "symbol": "AIXBT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AIXBT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1244639,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AKE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AKE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 116070,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 4176,
+          "complete_15m_bars": 1392
+        }
+      },
+      {
+        "symbol": "ALGO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ALGO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1388610,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ALLO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ALLO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1500422,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ANIME",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ANIME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1275252,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "APE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/APE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1545093,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "API3",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/API3_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1190049,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "APR",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/APR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1219757,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "APT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/APT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1384298,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AR",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1226450,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ARB",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ARB_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1509269,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ARKM",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ARKM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1423834,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ARX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ARX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 656157,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 28878,
+          "complete_15m_bars": 9626
+        }
+      },
+      {
+        "symbol": "ASTER",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ASTER_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1313875,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1034800,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ATH",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ATH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1306012,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ATOM",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ATOM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1108822,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AUCTION",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AUCTION_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1148554,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AVAX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AVAX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1390048,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AVNT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AVNT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1321370,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AXS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AXS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1439297,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "AZTEC",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/AZTEC_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1035149,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BABY",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BABY_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1244598,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BAND",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BAND_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1099871,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BARD",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BARD_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1176775,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BASED",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BASED_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1461581,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BAT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BAT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1292516,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BCH",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BCH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1210268,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BEAT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BEAT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1516605,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BERA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BERA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1332618,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BICO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BICO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1339493,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BIGTIME",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BIGTIME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1255214,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BILL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BILL_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1061968,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 42468,
+          "complete_15m_bars": 14156
+        }
+      },
+      {
+        "symbol": "BIO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BIO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1381156,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BLEND",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BLEND_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1023587,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 44460,
+          "complete_15m_bars": 14820
+        }
+      },
+      {
+        "symbol": "BLUR",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BLUR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1226118,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BMNR",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BMNR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 776826,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 44976,
+          "complete_15m_bars": 14992
+        }
+      },
+      {
+        "symbol": "BNB",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BNB_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1254859,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BOME",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BOME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1360470,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BONK",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BONK_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1339082,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BOT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BOT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 438353,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 26028,
+          "complete_15m_bars": 8676
+        }
+      },
+      {
+        "symbol": "BRETT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BRETT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1211166,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BREV",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BREV_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1262232,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "BSB",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BSB_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1341950,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 52236,
+          "complete_15m_bars": 17412
+        }
+      },
+      {
+        "symbol": "BSP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/BSP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 394187,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 24888,
+          "complete_15m_bars": 8296
+        }
+      },
+      {
+        "symbol": "CAP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CAP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 716475,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 27726,
+          "complete_15m_bars": 9242
+        }
+      },
+      {
+        "symbol": "CASHCAT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CASHCAT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 200861,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 7962,
+          "complete_15m_bars": 2654
+        }
+      },
+      {
+        "symbol": "CBRS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CBRS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1017215,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 39900,
+          "complete_15m_bars": 13300
+        }
+      },
+      {
+        "symbol": "CC",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CC_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1284368,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "CELO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CELO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1355785,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "CFX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CFX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1308243,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "CHIP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CHIP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1160888,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 46716,
+          "complete_15m_bars": 15572
+        }
+      },
+      {
+        "symbol": "CHZ",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CHZ_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1269401,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "CNPY",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CNPY_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 174298,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 6696,
+          "complete_15m_bars": 2232
+        }
+      },
+      {
+        "symbol": "COAI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/COAI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1334327,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "COMP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/COMP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1073592,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "CORE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CORE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1361421,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "CP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 194698,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 8104,
+          "complete_15m_bars": 2701
+        }
+      },
+      {
+        "symbol": "CRO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CRO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1244732,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "CRV",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CRV_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1293014,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "CVX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CVX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1018682,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "CYPH",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/CYPH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 54856,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 2130,
+          "complete_15m_bars": 710
+        }
+      },
+      {
+        "symbol": "DASH",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/DASH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1320738,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "DATA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/DATA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 536095,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 25998,
+          "complete_15m_bars": 8666
+        }
+      },
+      {
+        "symbol": "DGAI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/DGAI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 184611,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 7968,
+          "complete_15m_bars": 2656
+        }
+      },
+      {
+        "symbol": "DOGE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/DOGE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1477840,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "DOOD",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/DOOD_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1087800,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "DOS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/DOS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 348951,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 14772,
+          "complete_15m_bars": 4924
+        }
+      },
+      {
+        "symbol": "DOT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/DOT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1301106,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "DRAM",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/DRAM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 987993,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 41880,
+          "complete_15m_bars": 13960
+        }
+      },
+      {
+        "symbol": "DYDX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/DYDX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1488828,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "EDEN",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/EDEN_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1415685,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "EDGE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/EDGE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1319562,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 52482,
+          "complete_15m_bars": 17494
+        }
+      },
+      {
+        "symbol": "EGLD",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/EGLD_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1241424,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "EIGEN",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/EIGEN_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1266435,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ENA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ENA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1469687,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ENJ",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ENJ_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1246061,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ENS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ENS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1275480,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ENSO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ENSO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1351734,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ESP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ESP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1257413,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ETC",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ETC_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1352022,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ETH",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ETH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1809555,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ETHFI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ETHFI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1344602,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ETHW",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ETHW_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1220785,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "F",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/F_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1152705,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "FARTCOIN",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/FARTCOIN_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1269750,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "FET",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/FET_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 165766,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 7386,
+          "complete_15m_bars": 2462
+        }
+      },
+      {
+        "symbol": "FIL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/FIL_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1505555,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "FLOCK",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/FLOCK_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 139581,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 5292,
+          "complete_15m_bars": 1764
+        }
+      },
+      {
+        "symbol": "FLOKI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/FLOKI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1141110,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "FLOW",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/FLOW_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1213503,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "FOGO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/FOGO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1298338,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "FWDI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/FWDI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 323074,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 18840,
+          "complete_15m_bars": 6280
+        }
+      },
+      {
+        "symbol": "GALA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GALA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1340362,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "GAS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GAS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1120100,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "GIGGLE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GIGGLE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1303150,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "GLM",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GLM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1087965,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "GMT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GMT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1440710,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "GMX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GMX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1205757,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "GPRO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GPRO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 110457,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 7553,
+          "complete_15m_bars": 2517
+        }
+      },
+      {
+        "symbol": "GPS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GPS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1416548,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "GRAM",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GRAM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 622479,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 30342,
+          "complete_15m_bars": 10114
+        }
+      },
+      {
+        "symbol": "GRASS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GRASS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1348227,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "GRT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GRT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1162324,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "GRVT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/GRVT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 506397,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 17904,
+          "complete_15m_bars": 5968
+        }
+      },
+      {
+        "symbol": "H",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/H_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1485691,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "HBAR",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/HBAR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1346402,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "HMSTR",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/HMSTR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1301471,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "HOME",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/HOME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1261119,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "HUMA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/HUMA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1174158,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "HYPE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/HYPE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1512877,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ICP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ICP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1339235,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "IMX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/IMX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1180569,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "INFQ",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/INFQ_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 609373,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 36693,
+          "complete_15m_bars": 12231
+        }
+      },
+      {
+        "symbol": "INIT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/INIT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1237538,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "INJ",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/INJ_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1352565,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "IOST",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/IOST_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1137548,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "IOTA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/IOTA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1270781,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "IRYS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/IRYS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 737606,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 36381,
+          "complete_15m_bars": 12127
+        }
+      },
+      {
+        "symbol": "JELLYJELLY",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/JELLYJELLY_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1178540,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "JTO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/JTO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1392748,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "JUP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/JUP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1179516,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "KAITO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/KAITO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1365152,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "KAT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/KAT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1323272,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "KGEN",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/KGEN_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1082397,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "KITE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/KITE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1244204,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 50304,
+          "complete_15m_bars": 16768
+        }
+      },
+      {
+        "symbol": "KMNO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/KMNO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1091564,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "KSM",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/KSM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1210682,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1249925,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LAB",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LAB_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1508441,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LAYER",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LAYER_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1359517,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LDO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LDO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1309034,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LIGHT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LIGHT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1222560,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LINEA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LINEA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1232375,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LINK",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LINK_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1409314,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LIT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LIT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1509527,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LPT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LPT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1133452,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LQTY",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LQTY_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1113043,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LTC",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LTC_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1235508,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "LUNA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/LUNA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1338591,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "MAGIC",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MAGIC_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1321427,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "MANA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MANA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1295372,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "MASK",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MASK_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1226861,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "ME",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1368501,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "MEGA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MEGA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1106879,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "confirmed_5m_rows": 44148,
+          "complete_15m_bars": 14716
+        }
+      },
+      {
+        "symbol": "MEME",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MEME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1367107,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "MERL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MERL_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1349110,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "MET",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MET_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
+        "bytes": 1221476,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52849,
+          "complete_15m_bars": 17616
+        }
+      },
+      {
+        "symbol": "METIS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/METIS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1148739,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52199,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "MEW",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MEW_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1227665,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "MINA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MINA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1321205,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52199,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "MMT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MMT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1138956,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "MON",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MON_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1282190,
+        "quality": {
+          "unconfirmed_rows": 1,
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52199,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "MOODENG",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MOODENG_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1297097,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "MORPHO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MORPHO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1311120,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "MOVE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MOVE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1233968,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "MUBARAK",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/MUBARAK_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1209647,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "NEAR",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/NEAR_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1259016,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "NEIRO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/NEIRO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1410492,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "NEO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/NEO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1023907,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "NES",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/NES_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 607667,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 27641,
+          "complete_15m_bars": 9213
+        }
+      },
+      {
+        "symbol": "NIGHT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/NIGHT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1349853,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "NMR",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/NMR_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1219225,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "NOT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/NOT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1348987,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "O",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/O_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 723801,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 29621,
+          "complete_15m_bars": 9873
+        }
+      },
+      {
+        "symbol": "OFC",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/OFC_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1226230,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 49559,
+          "complete_15m_bars": 16519
+        }
+      },
+      {
+        "symbol": "OKB",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/OKB_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1312560,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "OL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/OL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1225084,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ONDO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ONDO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1277862,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ONE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ONE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1180661,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ONT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ONT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1281517,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "OP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/OP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1369672,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "OPG",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/OPG_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1090534,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 45551,
+          "complete_15m_bars": 15183
+        }
+      },
+      {
+        "symbol": "OPN",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/OPN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1293318,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ORDER",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ORDER_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1155341,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ORDI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ORDI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1339209,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PARTI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PARTI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1277701,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PENDLE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PENDLE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1123878,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PENG",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PENG_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 363400,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 23081,
+          "complete_15m_bars": 7693
+        }
+      },
+      {
+        "symbol": "PENGU",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PENGU_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1407523,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PEOPLE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PEOPLE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1347943,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PEPE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PEPE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1314557,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1271738,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PIEVERSE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PIEVERSE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1298072,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PIPPIN",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PIPPIN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1280182,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PLUME",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PLUME_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1445988,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PNUT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PNUT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1308109,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "POL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/POL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1327420,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PONS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PONS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 188324,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 6743,
+          "complete_15m_bars": 2247
+        }
+      },
+      {
+        "symbol": "POPCAT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/POPCAT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1256378,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PROS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PROS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1081648,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 44051,
+          "complete_15m_bars": 14683
+        }
+      },
+      {
+        "symbol": "PROVE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PROVE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1113524,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PUMP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PUMP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1285492,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "PURR",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PURR_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 209482,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 10988,
+          "complete_15m_bars": 3662
+        }
+      },
+      {
+        "symbol": "PYTH",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/PYTH_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1302934,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "QNT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/QNT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 661907,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 33149,
+          "complete_15m_bars": 11049
+        }
+      },
+      {
+        "symbol": "QTUM",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/QTUM_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1210223,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "RAM",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/RAM_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 505042,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 25382,
+          "complete_15m_bars": 8460
+        }
+      },
+      {
+        "symbol": "RAVE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/RAVE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1452304,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "RAY",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/RAY_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1292121,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "RE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/RE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 882550,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 29693,
+          "complete_15m_bars": 9897
+        }
+      },
+      {
+        "symbol": "RECALL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/RECALL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1208067,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "RENDER",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/RENDER_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1116512,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "RESOLV",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/RESOLV_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1261798,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "RIVER",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/RIVER_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1338590,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "RLS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/RLS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1225845,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ROBO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ROBO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1181807,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "RSR",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/RSR_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1114634,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "RVN",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/RVN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1256675,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "S",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/S_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1228059,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SAHARA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SAHARA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1322015,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SAND",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SAND_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1290264,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SAPIEN",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SAPIEN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1223756,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SATS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SATS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1275552,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SEI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SEI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1290733,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SENT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SENT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1110412,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SHELL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SHELL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1147984,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SHIB",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SHIB_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1335579,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SIGN",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SIGN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1185323,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SKY",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SKY_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1191170,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SLX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SLX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 878212,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 34361,
+          "complete_15m_bars": 11453
+        }
+      },
+      {
+        "symbol": "SNX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SNX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1190897,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SNXX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SNXX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 511583,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 21899,
+          "complete_15m_bars": 7299
+        }
+      },
+      {
+        "symbol": "SOL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SOL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1463425,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SOON",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SOON_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1204635,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SOPH",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SOPH_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1248192,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SPACE",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SPACE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1341978,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SPK",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SPK_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1122569,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SPX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SPX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1266350,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SSV",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SSV_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1156661,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "STRC",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/STRC_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 358351,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 26249,
+          "complete_15m_bars": 8749
+        }
+      },
+      {
+        "symbol": "STRK",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/STRK_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1354885,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "STX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/STX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1185856,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SUI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SUI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1424030,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SUSHI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SUSHI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1171629,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "SYRUP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/SYRUP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1052553,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "TAO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/TAO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1219634,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "THETA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/THETA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1136281,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "TIA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/TIA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1304537,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "TRB",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/TRB_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1073682,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "TRIA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/TRIA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1305085,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "TRUMP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/TRUMP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1289136,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "TRUST",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/TRUST_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1171337,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "TRUTH",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/TRUTH_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1275740,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "TRX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/TRX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1268039,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "TURBO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/TURBO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1348636,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "UB",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/UB_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1216731,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 44057,
+          "complete_15m_bars": 14685
+        }
+      },
+      {
+        "symbol": "UMA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/UMA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1223919,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "UNI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/UNI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1278646,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "UP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/UP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1104849,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 49847,
+          "complete_15m_bars": 16615
+        }
+      },
+      {
+        "symbol": "USAR",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/USAR_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 757869,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 44339,
+          "complete_15m_bars": 14779
+        }
+      },
+      {
+        "symbol": "USELESS",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/USELESS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1420008,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "VANA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/VANA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1118772,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "VIRTUAL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/VIRTUAL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1351788,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "VVV",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/VVV_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 682295,
+        "quality": {
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 25139,
+          "complete_15m_bars": 8379
+        }
+      },
+      {
+        "symbol": "W",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/W_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1390633,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "WAL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/WAL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1167162,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "WCT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/WCT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1241634,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "WET",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/WET_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1281455,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "WIF",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/WIF_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1243175,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "WLD",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/WLD_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1408200,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "WLFI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/WLFI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1335511,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "WOO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/WOO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1064879,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "XLM",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/XLM_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1360991,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "XPL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/XPL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1429633,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "XRP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/XRP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1361247,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "XTZ",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/XTZ_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1158908,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "YB",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/YB_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1380790,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "YFI",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/YFI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1120214,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "YGG",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/YGG_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1294366,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ZAMA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ZAMA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1325616,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ZBT",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ZBT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1461828,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ZEC",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ZEC_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1630248,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ZEN",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ZEN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1267244,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ZETA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ZETA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1209166,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ZIL",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ZIL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1204446,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ZK",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ZK_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1256245,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ZKP",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ZKP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1238449,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ZORA",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ZORA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1281926,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ZRO",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ZRO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1283268,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      },
+      {
+        "symbol": "ZRX",
+        "file": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m/ZRX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
+        "bytes": 1251524,
+        "quality": {
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 52200,
+          "complete_15m_bars": 17399
+        }
+      }
+    ]
+  },
+  "stages": {
+    "cached_pumps": 21,
+    "qualified_before_decline": 17,
+    "decline_then_pump": 1,
+    "pump_gain_threshold": 1,
+    "touch_day_high": 1,
+    "low_volume_confirmation": 1,
+    "full_signals": 1
+  },
+  "execution_rejected": {
+    "stop_distance_rejected": 1
+  },
+  "unconstrained_candidates": {
+    "trades": 0,
+    "wins": 0,
+    "win_rate": 0,
+    "total_r": 0,
+    "avg_net_r": 0,
+    "profit_factor": null,
+    "max_drawdown_r": 0.0,
+    "symbols": 0,
+    "avg_margin_return_2x_pct": 0,
+    "exit_reasons": {}
+  },
+  "portfolio_trades": {
+    "trades": 0,
+    "wins": 0,
+    "win_rate": 0,
+    "total_r": 0,
+    "avg_net_r": 0,
+    "profit_factor": null,
+    "max_drawdown_r": 0.0,
+    "symbols": 0,
+    "avg_margin_return_2x_pct": 0,
+    "exit_reasons": {}
+  },
+  "portfolio": {
+    "initial_equity": 10000.0,
+    "final_equity": 10000.0,
+    "return_pct": 0.0,
+    "max_realized_drawdown_pct": 0.0,
+    "conservative_adverse_drawdown_pct": 0.0,
+    "leverage": 2.0,
+    "risk_per_trade_pct": 0.5,
+    "skipped": {}
+  },
+  "by_month_utc": {},
+  "sensitivity": {
+    "variants": 0,
+    "uses_same_in_memory_data": true,
+    "default_parameters_preserved": true,
+    "selection": "descriptive_only",
+    "threshold_comparison": []
+  },
+  "validation": {
+    "minimum_trades": 30,
+    "sample_size_met": false,
+    "independent_out_of_sample_completed": false,
+    "passed": false
+  },
+  "limitations": [
+    "current eligible universe has survivorship bias",
+    "funding assumed zero; liquidation not modeled",
+    "only completed candles; OHLC intrabar order unknown, stop first",
+    "2x margin return is per-position, not account return",
+    "no independent out-of-sample evidence; sensitivity is descriptive"
+  ]
+}

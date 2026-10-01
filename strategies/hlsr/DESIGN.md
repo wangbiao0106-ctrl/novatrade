@@ -18,7 +18,7 @@
 | 机器参数（信号参数、硬过滤阈值、杠杆/分批/冷却、成本） | [`config/strategy.json`](config/strategy.json)，由 `src/` 全部读取，禁止在代码里硬编码 |
 | 研究接受标准（`passed` 的判定） | 本文下方「回测」一节 |
 
-单笔账户风险建议固定为权益的 0.25% 至 0.5%。策略不会因杠杆改变止损距离，也不会向亏损仓位加仓。默认杠杆、分批比例、冷却根数、手续费与滑点都取自 `config/strategy.json` 的 `position_management` / `costs`，改配置即改行为。
+单笔账户风险固定为账户权益的 1%。策略不会因杠杆改变止损距离，也不会向亏损仓位加仓。默认杠杆、分批比例、冷却根数、手续费与滑点都取自 `config/strategy.json` 的 `position_management` / `costs`，改配置即改行为。
 
 ## 自动化执行流程
 

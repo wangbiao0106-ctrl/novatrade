@@ -1,0 +1,103 @@
+{
+  "strategy": "intraday_pump_retest_short",
+  "version": "0.1.0",
+  "name_zh": "日内大涨震荡回落后二次拉升缩量做空",
+  "source_of_truth": "strategies/intraday_pump_retest_short/STRATEGY.md",
+  "status": "research_candidate",
+  "runtime_integration": "not_integrated",
+  "market": "OKX_USDT_LINEAR_PERPETUAL",
+  "input_timeframe_minutes": 5,
+  "entry_timeframe_minutes": 15,
+  "observation_filter": {
+    "intraday_gain_gt": 0.6,
+    "gain_measure": "running_confirmed_day_high_over_utc_day_open",
+    "requires_prior_day_high_over_gain": true,
+    "same_utc_day_required": true
+  },
+  "signal_parameters": {
+    "down_bars": 6,
+    "down_net_min": 0.005,
+    "down_net_max": 0.15,
+    "down_negative_fraction_min": 0.5,
+    "down_bar_body_max": 0.05,
+    "down_range_max": 0.2,
+    "pump_close_gain_min": 0.15,
+    "day_high_touch_tolerance": 0.01,
+    "confirmation_volume_ratio_max": 0.7,
+    "confirmation_close_to_own_high_max": 0.05,
+    "volume_field": "contract_volume"
+  },
+  "risk": {
+    "atr_period": 14,
+    "stop_atr": 0.3,
+    "min_risk_atr": 0.5,
+    "max_risk_atr": 3.0,
+    "target_r": 2.0,
+    "max_hold_bars": 24,
+    "cooldown_bars": 16
+  },
+  "position_management": {
+    "leverage": 2.0,
+    "initial_equity": 10000.0,
+    "risk_per_trade_pct": 1.0,
+    "max_concurrent_positions": 1,
+    "one_position_per_symbol": true,
+    "sizing": "notional = min(pool_available_capital, account_equity * risk_per_trade_pct / 100 / stop_distance_pct)",
+    "daily_realized_loss_limit_pct": 5.0,
+    "risk_per_trade_basis": "account_equity_at_authorization",
+    "max_open_risk_percent": 1.0
+  },
+  "costs": {
+    "fee_rate_one_way": 0.0006,
+    "slippage_one_way": 0.0002,
+    "funding_rate_round_trip": 0.0
+  },
+  "research": {
+    "minimum_validation_trades": 30,
+    "grid": {
+      "pump_close_gain_min": [
+        0.2,
+        0.3
+      ],
+      "down_bars": [
+        4,
+        6,
+        8,
+        12
+      ],
+      "confirmation_volume_ratio_max": [
+        0.5,
+        0.7,
+        0.9
+      ],
+      "confirmation_close_to_own_high_max": [
+        0.02,
+        0.05,
+        0.1
+      ]
+    }
+  },
+  "universe": {
+    "asset_type": "altcoin_usdt_linear_perpetual",
+    "excluded_symbols": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "BNB",
+      "XRP",
+      "DOGE",
+      "ADA",
+      "TRX",
+      "USDT",
+      "USDC",
+      "DAI"
+    ],
+    "requirements": [
+      "continuous_confirmed_signal_candles",
+      "quote_volume_available",
+      "sufficient_orderbook_depth"
+    ],
+    "production_scope": "dynamic.highGain60",
+    "mainstream_and_non_crypto_excluded": true
+  }
+}
