@@ -2300,6 +2300,14 @@ extension Color {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The development launcher assembles the app bundle after SwiftPM
+        // builds the executable. Set the icon explicitly at runtime as well
+        // as in Info.plist so the Dock does not retain a generic executable
+        // icon while LaunchServices refreshes the bundle metadata.
+        if let iconURL = Bundle.main.url(forResource: "NovaTrade", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApplication.shared.applicationIconImage = icon
+        }
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.unhide(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
