@@ -872,24 +872,53 @@ public struct LocalATKCommandRunner: ATKCommandRunning {
     public let timeout: Duration
 
     public init(executableURL: URL? = nil, environment: [String: String]? = nil, timeout: Duration = .seconds(15)) {
-        self.executableURL = executableURL ?? Self.discoverExecutable()
+        let resolvedExecutable = executableURL ?? Self.discoverExecutable()
+        self.executableURL = resolvedExecutable
         self.timeout = timeout
         var inherited = ProcessInfo.processInfo.environment
         inherited.removeValue(forKey: "OKX_API_KEY")
         inherited.removeValue(forKey: "OKX_SECRET_KEY")
         inherited.removeValue(forKey: "OKX_PASSPHRASE")
         if let environment { inherited.merge(environment) { _, new in new } }
+        if resolvedExecutable.path != "/usr/bin/env" {
+            // Finder-launched apps do not inherit the shell PATH. The ATK CLI
+            // is commonly a Node script whose shebang invokes `env node`, so
+            // expose the CLI's bin directory to both the script and its child.
+            let executableDirectory = resolvedExecutable.deletingLastPathComponent().path
+            let currentPath = inherited["PATH"] ?? ""
+            let pathEntries = currentPath.split(separator: ":").map(String.init)
+            if !pathEntries.contains(executableDirectory) {
+                inherited["PATH"] = ([executableDirectory] + pathEntries).joined(separator: ":")
+            }
+        }
         self.environment = inherited
     }
 
     private static func discoverExecutable() -> URL {
         let environment = ProcessInfo.processInfo.environment
-        let candidates = [
-            environment["OKX_CLI_PATH"],
+        let fileManager = FileManager.default
+        let home = NSHomeDirectory()
+        var candidatePaths = [environment["OKX_CLI_PATH"]]
+        candidatePaths += (environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map { String($0) + "/okx" }
+        candidatePaths += [
             "/opt/homebrew/bin/okx",
             "/usr/local/bin/okx",
-            "\(NSHomeDirectory())/.npm-global/bin/okx"
-        ].compactMap { $0 }.map(URL.init(fileURLWithPath:))
+            "\(home)/.npm-global/bin/okx",
+            "\(home)/.local/bin/okx"
+        ]
+        // Node version managers often install npm global binaries below a
+        // versioned directory that is only present in an interactive shell's
+        // PATH (for example ~/.local/node-v24.*/bin/okx).
+        let localNodeRoot = URL(fileURLWithPath: home).appendingPathComponent(".local", isDirectory: true)
+        if let entries = try? fileManager.contentsOfDirectory(at: localNodeRoot, includingPropertiesForKeys: nil) {
+            candidatePaths += entries
+                .filter { $0.lastPathComponent.hasPrefix("node-") }
+                .sorted { $0.lastPathComponent > $1.lastPathComponent }
+                .map { $0.appendingPathComponent("bin/okx").path }
+        }
+        let candidates = candidatePaths.compactMap { $0 }.map(URL.init(fileURLWithPath:))
         if let executable = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) {
             return executable
         }

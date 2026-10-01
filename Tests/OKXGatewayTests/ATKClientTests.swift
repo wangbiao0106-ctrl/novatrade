@@ -11,6 +11,19 @@ private struct StubATKRunner: ATKCommandRunning {
     }
 }
 
+#if os(macOS)
+@Test
+func addsATKExecutableDirectoryToChildPath() {
+    let runner = LocalATKCommandRunner(
+        executableURL: URL(fileURLWithPath: "/tmp/nova-atk/bin/okx"),
+        environment: ["PATH": "/usr/bin:/bin"]
+    )
+    let path = runner.environment?["PATH"] ?? ""
+    #expect(path.split(separator: ":").first == "/tmp/nova-atk/bin")
+    #expect(path.contains("/usr/bin"))
+}
+#endif
+
 @Test
 func readsOAuthStatusAndTickerThroughATK() async throws {
     let runner = StubATKRunner(outputs: [
