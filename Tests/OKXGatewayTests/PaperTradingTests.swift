@@ -560,9 +560,9 @@ func riskEngineRejectsNegativeRiskInputsAndDoesNotIncreaseReservationsOnRelease(
 }
 
 @Test
-func riskEngineRollsDailyBaselineWhenCalendarDayChanges() async {
-    // Same calendar convention as RiskEngine: gregorian in the local time zone.
-    let calendar = Calendar(identifier: .gregorian)
+func riskEngineRollsDailyBaselineWhenUTCDayChanges() async {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     let dayOne = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 23, minute: 0))!
     let dayTwo = calendar.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 0, minute: 1))!
 
@@ -578,9 +578,25 @@ func riskEngineRollsDailyBaselineWhenCalendarDayChanges() async {
 }
 
 @Test
+func riskEngineUsesUTCMidnightInsteadOfLocalMidnight() async {
+    var shanghai = Calendar(identifier: .gregorian)
+    shanghai.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+    // These instants are on the same Shanghai calendar day but straddle
+    // midnight UTC (23:59Z -> 00:01Z).
+    let beforeUTCMidnight = shanghai.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 7, minute: 59))!
+    let afterUTCMidnight = shanghai.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 8, minute: 1))!
+
+    let risk = RiskEngine(initialEquity: 1000)
+    await risk.record(realizedPnL: -60, now: beforeUTCMidnight)
+    let afterRollover = await risk.snapshot(now: afterUTCMidnight)
+    #expect(afterRollover.dayStartEquity == Decimal(940))
+    #expect(afterRollover.dailyPnLPercent == 0)
+}
+
+@Test
 func riskEngineRestoresPriorDayKillAndAllowsResetOnTheNewDay() async {
     var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     let dayOne = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 23))!
     let dayTwo = calendar.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 0, minute: 1))!
 
@@ -631,7 +647,8 @@ func riskEngineTripwiresDailyLossOnMarkToMarketEquity() async {
 @Test
 func riskEngineTripwiresCumulativeDrawdownLimit() async {
     let risk = RiskEngine(initialEquity: 10_000)
-    let calendar = Calendar(identifier: .gregorian)
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     let dayOne = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 12))!
     let dayTwo = calendar.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 12))!
 

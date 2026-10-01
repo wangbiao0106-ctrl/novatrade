@@ -1551,7 +1551,7 @@ public actor TradingBackend {
             globalRiskRemoteCleanupComplete = false
         }
         await paper.setRisk(snapshot)
-        appendLog(snapshot.killSwitch ? "账户风控仍锁存：只能在新日历日手动复位" : "账户风控已手动复位", level: snapshot.killSwitch ? "warning" : "risk")
+        appendLog(snapshot.killSwitch ? "账户风控仍锁存：只能在 UTC 新日历日手动复位" : "账户风控已手动复位", level: snapshot.killSwitch ? "warning" : "risk")
         return snapshot
     }
 

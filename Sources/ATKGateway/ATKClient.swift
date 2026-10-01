@@ -137,6 +137,12 @@ public struct ClosedSwapPositionSnapshot: Equatable, Sendable {
 }
 
 public struct ATKClient: Sendable {
+    private static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }()
+
     private let runner: any ATKCommandRunning
     private let decoder: JSONDecoder
 
@@ -561,18 +567,17 @@ public struct ATKClient: Sendable {
         }
     }
 
-    private static func todayPnL(from root: Any, now: Date) -> Decimal {
+    static func todayPnL(from root: Any, now: Date) -> Decimal {
         let rows: [[String: Any] ]
         if let array = root as? [[String: Any]] { rows = array }
         else if let object = root as? [String: Any], let data = object["data"] as? [[String: Any]] { rows = data }
         else { return 0 }
-        let calendar = Calendar.current
         return rows.reduce(Decimal.zero) { total, row in
             let timestamp: TimeInterval?
             if let value = row["ts"] as? String { timestamp = Double(value).map { $0 / 1000 } }
             else if let value = row["ts"] as? NSNumber { timestamp = value.doubleValue / 1000 }
             else { timestamp = nil }
-            guard let timestamp, calendar.isDate(Date(timeIntervalSince1970: timestamp), inSameDayAs: now), let pnl = decimal(row["pnl"]) else { return total }
+            guard let timestamp, Self.utcCalendar.isDate(Date(timeIntervalSince1970: timestamp), inSameDayAs: now), let pnl = decimal(row["pnl"]) else { return total }
             return total + pnl
         }
     }

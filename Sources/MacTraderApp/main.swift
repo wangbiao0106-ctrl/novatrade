@@ -172,6 +172,7 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var candleDataSource: CandleDataSource = .unavailable
     @Published private(set) var candleLastUpdatedAt: Date?
     @Published private(set) var riskSnapshot = RiskSnapshot()
+    @Published private(set) var isResettingRisk = false
     @Published private(set) var positions: [PaperPosition] = []
     @Published private(set) var orders: [PaperOrder] = []
     @Published private(set) var livePositions: [PositionSnapshot] = []
@@ -201,10 +202,15 @@ final class DashboardModel: ObservableObject {
     private var autoStartBackend = true
     private let favoriteStorageKey = "nova.trade.favoriteContracts"
     private let intervalStorageKey = "nova.trade.chartInterval"
+    private let selectedContractStorageKey = "nova.trade.selectedContract"
+    private static let defaultContractID = "BTC-USDT-SWAP"
 
     init() {
         if let saved = UserDefaults.standard.string(forKey: favoriteStorageKey), !saved.isEmpty {
             favoriteIDs = Set(saved.split(separator: ",").map(String.init))
+        }
+        if let saved = UserDefaults.standard.string(forKey: selectedContractStorageKey), !saved.isEmpty {
+            selectedContract = saved
         }
         if let saved = UserDefaults.standard.string(forKey: intervalStorageKey), let interval = ChartInterval(rawValue: saved) {
             selectedInterval = interval
@@ -221,9 +227,10 @@ final class DashboardModel: ObservableObject {
 
     func contracts(for category: String) -> [PerpetualContract] {
         let source = contracts
-        guard category != "全部" else { return source }
         switch category {
+        case "主流": return source.filter(Self.isMainstream).sorted { compactVolume($0.volume) > compactVolume($1.volume) }
         case "热门": return source.sorted { compactVolume($0.volume) > compactVolume($1.volume) }.prefix(20).map { $0 }
+        case "合约", "全部": return source
         case "涨幅": return source.sorted { $0.change > $1.change }.prefix(20).map { $0 }
         case "跌幅": return source.sorted { $0.change < $1.change }.prefix(20).map { $0 }
         default: return source
@@ -252,13 +259,8 @@ final class DashboardModel: ObservableObject {
         }
     }
 
-    private static let mainstreamSymbols: Set<String> = [
-        "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "TON", "AVAX",
-        "LINK", "DOT", "LTC", "BCH", "ETC", "UNI", "ATOM", "NEAR", "APT", "SUI"
-    ]
-
     private static func isMainstream(_ contract: PerpetualContract) -> Bool {
-        mainstreamSymbols.contains(contract.shortName.uppercased())
+        StrategyUniverseRules.mainstreamSymbols.contains(contract.shortName.uppercased())
     }
 
     private static func isEligibleHotAltcoin(_ contract: PerpetualContract) -> Bool {
@@ -282,8 +284,19 @@ final class DashboardModel: ObservableObject {
     func select(_ contract: PerpetualContract) {
         guard selectedContract != contract.id else { return }
         selectedContract = contract.id
+        UserDefaults.standard.set(selectedContract, forKey: selectedContractStorageKey)
         snapshot = SystemSnapshot(mode: snapshot.mode, connection: snapshot.connection, ticker: nil, account: snapshot.account)
         requestMarket()
+    }
+
+    private func restoreSelectedContract(from availableContracts: [PerpetualContract]) {
+        guard !availableContracts.isEmpty else { return }
+        let availableIDs = Set(availableContracts.map(\.id))
+        let restoredID = availableIDs.contains(selectedContract)
+            ? selectedContract
+            : (availableIDs.contains(Self.defaultContractID) ? Self.defaultContractID : availableContracts[0].id)
+        selectedContract = restoredID
+        UserDefaults.standard.set(restoredID, forKey: selectedContractStorageKey)
     }
 
     func selectInterval(_ interval: ChartInterval) {
@@ -356,14 +369,15 @@ final class DashboardModel: ObservableObject {
             let connectedLog = RuntimeLog(level: "service", message: "前台已连接后台服务")
             runtimeLogs.append(connectedLog)
             _ = try? await client.appendLog(connectedLog)
-            requestMarket()
-            startContractsRefresh()
             let remoteContracts = try await client.contracts()
             guard generation == lifecycleGeneration, autoStartBackend else {
                 isRefreshing = false
                 return
             }
             if !remoteContracts.isEmpty { contracts = remoteContracts.map(PerpetualContract.init(remote:)) }
+            restoreSelectedContract(from: contracts)
+            requestMarket()
+            startContractsRefresh()
             let account = try await client.account()
             guard generation == lifecycleGeneration, autoStartBackend else {
                 isRefreshing = false
@@ -404,6 +418,20 @@ final class DashboardModel: ObservableObject {
             errorMessage = "未能读取实时行情。\(error.localizedDescription)"
         }
         isRefreshing = false
+    }
+
+    /// Requests a manual risk reset from the local service. The service keeps
+    /// the switch latched until the next UTC calendar day, so a successful request
+    /// may still return a snapshot with `killSwitch == true`.
+    func resetRisk() async throws -> RiskSnapshot {
+        guard !isResettingRisk else { return riskSnapshot }
+        isResettingRisk = true
+        defer { isResettingRisk = false }
+        let risk = try await client.resetRisk()
+        riskSnapshot = risk
+        strategyCapitals = risk.strategyCapitals
+        runtimeLogs = (try? await client.runtimeLogs()) ?? runtimeLogs
+        return risk
     }
 
     /// The selected contract has a dedicated candle/ticker stream. The
@@ -703,11 +731,10 @@ final class DashboardModel: ObservableObject {
 struct DashboardView: View {
     @StateObject private var model = DashboardModel()
     @State private var showingNewStrategy = false
-    @State private var searchText = ""
 
     var body: some View {
         NavigationSplitView {
-            MarketSidebar(model: model, searchText: $searchText)
+            MarketSidebar(model: model)
         } detail: {
             VStack(spacing: 0) {
                 DashboardWindowHeader(model: model)
@@ -751,6 +778,9 @@ struct RightRail: View {
                         .buttonStyle(.bordered).controlSize(.small).help("新建策略")
                 }
                 .padding(.vertical, 4)
+                if model.riskSnapshot.killSwitch {
+                    RiskAlertModule(model: model)
+                }
                 ForEach(model.strategies) { strategy in
                     StrategyStatusModule(strategy: strategy, status: model.strategyStatuses.first(where: { $0.id == strategy.serviceID }), model: model, toggle: { model.toggleStrategy(strategy.id) }, delete: { closePositions in
                         if let serviceID = strategy.serviceID { model.deleteStrategy(serviceID, closePositions: closePositions) }
@@ -803,6 +833,94 @@ struct RightRail: View {
         }
         .frame(width: 350)
         .background(Color.sidebarBackground.opacity(0.7))
+    }
+}
+
+/// The account level kill switch is separate from each strategy's paused or
+/// running state. Keep it visible above the strategy cards so a rejected start
+/// has an actionable explanation and a reset entry point.
+struct RiskAlertModule: View {
+    @ObservedObject var model: DashboardModel
+    @State private var resetFeedback: String?
+    @State private var resetFeedbackIsError = false
+
+    private var risk: RiskSnapshot { model.riskSnapshot }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Label("账户风控已熔断", systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Spacer(minLength: 0)
+                Text(risk.reason ?? "风险熔断")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+            }
+
+            HStack(spacing: 12) {
+                riskMetric("单日损益", value: String(format: "%+.2f%%", decimalDouble(risk.dailyPnLPercent)), color: decimalDouble(risk.dailyPnLPercent) < 0 ? .red : .green)
+                riskMetric("累计回撤", value: String(format: "%.2f%%", decimalDouble(risk.drawdownPercent)), color: .orange)
+                riskMetric("账户权益", value: formatUSD(risk.equity), color: .primary)
+            }
+
+            Text("策略启动已暂停。复位仅在 UTC 新自然日后生效。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            if let resetFeedback {
+                Text(resetFeedback)
+                    .font(.caption2)
+                    .foregroundStyle(resetFeedbackIsError ? .red : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button {
+                resetFeedback = nil
+                resetFeedbackIsError = false
+                Task {
+                    do {
+                        let result = try await model.resetRisk()
+                        if result.killSwitch {
+                            resetFeedback = "风控仍锁存：只能在 UTC 新自然日后复位。"
+                        } else {
+                            resetFeedback = "账户风控已复位。"
+                        }
+                    } catch {
+                        resetFeedbackIsError = true
+                        resetFeedback = "复位失败：\(error.localizedDescription)"
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if model.isResettingRisk {
+                        ProgressView().controlSize(.small)
+                        Text("复位中…")
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                        Text("复位风控")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(.orange)
+            .disabled(model.isResettingRisk)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.35)))
+    }
+
+    private func riskMetric(_ title: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.caption.monospacedDigit().weight(.semibold)).foregroundStyle(color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -928,9 +1046,16 @@ struct RailEmpty: View {
 
 struct MarketSidebar: View {
     @ObservedObject var model: DashboardModel
-    @Binding var searchText: String
-    @State private var category = "全部"
+    @State private var searchText = ""
+    @State private var debouncedSearchText = ""
+    @State private var category = "主流"
     @FocusState private var searchFocused: Bool
+
+    private var searchKey: String {
+        normalizeSearchText(debouncedSearchText)
+    }
+
+    private var isSearching: Bool { !searchKey.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -948,27 +1073,100 @@ struct MarketSidebar: View {
             .background(Color.white.opacity(searchFocused ? 0.1 : 0.06), in: RoundedRectangle(cornerRadius: 7))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(searchFocused ? Color.mint.opacity(0.55) : .clear))
             .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 12)
-            Picker("合约分组", selection: $category) { Text("全部").tag("全部"); Text("热门").tag("热门"); Text("涨幅").tag("涨幅"); Text("跌幅").tag("跌幅") }
-                .pickerStyle(.segmented).controlSize(.small).padding(.horizontal, 14).padding(.bottom, 12)
-            HStack { Text("自选").font(.caption.weight(.semibold)).foregroundStyle(.secondary); Spacer(); Text("\(model.favoriteContracts.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
-                .padding(.horizontal, 18).padding(.bottom, 8)
             ScrollView {
-                VStack(spacing: 3) {
-                    ForEach(filtered(model.favoriteContracts)) { contract in
-                        ContractRow(contract: contract, selected: model.selectedContract == contract.id, isFavorite: true) { model.select(contract) } toggleFavorite: { model.toggleFavorite(contract) }
+                LazyVStack(alignment: .leading, spacing: 3) {
+                    if isSearching {
+                        searchResults
+                    } else {
+                        favoritesSection
+                        categoryPicker
+                        ForEach(model.contracts(for: category).filter { !model.favoriteIDs.contains($0.id) }) { contract in
+                            contractRow(contract)
+                        }
                     }
-                    if !model.otherContracts.isEmpty { Text("全部合约").font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 18).padding(.horizontal, 18).padding(.bottom, 6) }
-                    ForEach(filtered(model.contracts(for: category).filter { !model.favoriteIDs.contains($0.id) })) { contract in
-                        ContractRow(contract: contract, selected: model.selectedContract == contract.id, isFavorite: false) { model.select(contract) } toggleFavorite: { model.toggleFavorite(contract) }
-                    }
-                }.padding(.horizontal, 8)
+                }
+                .padding(.horizontal, 8)
             }
             Spacer(minLength: 12)
         }.background(Color.sidebarBackground).navigationSplitViewColumnWidth(min: 245, ideal: 270, max: 310)
+            .task(id: searchText) {
+                let value = searchText
+                guard !normalizeSearchText(value).isEmpty else {
+                    debouncedSearchText = ""
+                    return
+                }
+                do { try await Task.sleep(for: .milliseconds(150)) }
+                catch { return }
+                guard !Task.isCancelled else { return }
+                debouncedSearchText = value
+            }
     }
-    private func filtered(_ input: [PerpetualContract]) -> [PerpetualContract] {
-        guard !searchText.isEmpty else { return input }
-        return input.filter { $0.id.localizedCaseInsensitiveContains(searchText) || $0.name.localizedCaseInsensitiveContains(searchText) || $0.shortName.localizedCaseInsensitiveContains(searchText) }
+
+    @ViewBuilder
+    private var favoritesSection: some View {
+        HStack {
+            Text("自选").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Spacer()
+            Text("\(model.favoriteContracts.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 5)
+        ForEach(model.favoriteContracts) { contract in
+            contractRow(contract)
+        }
+    }
+
+    private var categoryPicker: some View {
+        Picker("合约分组", selection: $category) {
+            Text("主流").tag("主流")
+            Text("热门").tag("热门")
+            Text("涨幅").tag("涨幅")
+            Text("跌幅").tag("跌幅")
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private var searchResults: some View {
+        let results = model.contracts.filter { matches($0, query: searchKey) }
+        HStack {
+            Text("搜索结果").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Spacer()
+            Text("\(results.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 5)
+        if results.isEmpty {
+            Text("未找到匹配合约")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 44)
+        } else {
+            ForEach(results) { contract in
+                contractRow(contract)
+            }
+        }
+    }
+
+    private func contractRow(_ contract: PerpetualContract) -> some View {
+        ContractRow(contract: contract, selected: model.selectedContract == contract.id, isFavorite: model.favoriteIDs.contains(contract.id)) {
+            model.select(contract)
+        } toggleFavorite: {
+            model.toggleFavorite(contract)
+        }
+    }
+
+    private func matches(_ contract: PerpetualContract, query: String) -> Bool {
+        [contract.id, contract.name, contract.shortName, contract.pairLabel, contract.category]
+            .contains { normalizeSearchText($0).contains(query) }
+    }
+
+    private func normalizeSearchText(_ value: String) -> String {
+        value.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 }
 

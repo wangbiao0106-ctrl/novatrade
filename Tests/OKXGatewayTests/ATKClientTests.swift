@@ -306,6 +306,21 @@ func rejectsMalformedAccountBalanceInsteadOfReturningAuthenticatedEmptyAccount()
 }
 
 @Test
+func todayPnLUsesUTCDayBoundary() {
+    var shanghai = Calendar(identifier: .gregorian)
+    shanghai.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+    let now = shanghai.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 8, minute: 1))!
+    let justBeforeUTCMidnight = shanghai.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 7, minute: 59))!
+    let justAfterUTCMidnight = shanghai.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 8, minute: 2))!
+    let root: [[String: Any]] = [
+        ["ts": String(Int(justBeforeUTCMidnight.timeIntervalSince1970 * 1000)), "pnl": "-1"],
+        ["ts": String(Int(justAfterUTCMidnight.timeIntervalSince1970 * 1000)), "pnl": "2"]
+    ]
+
+    #expect(ATKClient.todayPnL(from: root, now: now) == Decimal(2))
+}
+
+@Test
 func parsesStrictUSDTLinearSwapInstrumentSpecification() async throws {
     let runner = StubATKRunner(outputs: [
         "market instruments --instType SWAP --instId BTC-USDT-SWAP --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","ctVal":"0.01","ctMult":"1","lotSz":"1","minSz":"1","tickSz":"0.1","state":"live","ctType":"linear","settleCcy":"USDT"}]"#)

@@ -27,6 +27,12 @@ public actor CandleStore {
 }
 
 public actor RiskEngine {
+    private static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }()
+
     private struct PoolState {
         var allocationPercent: Decimal
         var initialCapital: Decimal
@@ -70,16 +76,16 @@ public actor RiskEngine {
     /// Keep it separate from the initial paper-broker fallback so callers can
     /// distinguish a real empty account from an account that has not synced.
     private var authenticatedZeroEquity = false
-    /// Calendar day that `dayStartEquity` was captured for. Advances only when
-    /// a later calendar day is observed, so live trading rolls the daily
-    /// baseline at midnight and historical candle ingestion rolls it in
+    /// UTC calendar day that `dayStartEquity` was captured for. Advances only
+    /// when a later UTC day is observed, so live trading rolls the daily
+    /// baseline at 00:00 UTC and historical candle ingestion rolls it in
     /// candle-time order.
     private var dayStartBoundary: Date?
-    /// A persisted kill switch may be restored after midnight. Keep this bit
+    /// A persisted kill switch may be restored after UTC midnight. Keep this bit
     /// so the next manual reset is allowed even though `refresh` has already
     /// advanced the in-memory boundary to the current day.
     private var resetEligibleAfterDayChange = false
-    /// When restoring after midnight, the first authenticated account read is
+    /// When restoring after UTC midnight, the first authenticated account read is
     /// the authoritative equity for today's baseline.
     private var needsDayStartEquitySync = false
     private var realizedPnL: Decimal = 0
@@ -239,8 +245,7 @@ public actor RiskEngine {
     /// account's current equity instead.
     public func synchronizeEquity(_ value: Decimal, now: Date = .now) {
         guard value.isFinite, value >= 0 else { return }
-        let calendar = Calendar(identifier: .gregorian)
-        let dayStart = calendar.startOfDay(for: now)
+        let dayStart = Self.utcCalendar.startOfDay(for: now)
         if value == 0 {
             equity = 0
             unrealizedPnL = 0
@@ -377,12 +382,11 @@ public actor RiskEngine {
         // negative/non-finite snapshots; silently ignoring zero would restore
         // the constructor's paper-equity fallback and permit new entries.
         guard snapshot.equity.isFinite, snapshot.equity >= 0 else { return }
-        let calendar = Calendar(identifier: .gregorian)
-        let currentDay = calendar.startOfDay(for: now)
+        let currentDay = Self.utcCalendar.startOfDay(for: now)
         equity = snapshot.equity
         equityPeak = max(snapshot.equityPeak, snapshot.equity)
         dayStartEquity = snapshot.dayStartEquity > 0 ? snapshot.dayStartEquity : snapshot.equity
-        let persistedDay = snapshot.dayStartAt.map(calendar.startOfDay(for:))
+        let persistedDay = snapshot.dayStartAt.map(Self.utcCalendar.startOfDay(for:))
         let restoredFromPriorDay = persistedDay.map { currentDay > $0 } ?? false
         dayStartBoundary = persistedDay ?? currentDay
         if restoredFromPriorDay {
@@ -445,7 +449,7 @@ public actor RiskEngine {
     }
 
     public func resetKillSwitch(now: Date = .now) -> RiskSnapshot {
-        let dayStart = Calendar(identifier: .gregorian).startOfDay(for: now)
+        let dayStart = Self.utcCalendar.startOfDay(for: now)
         guard resetEligibleAfterDayChange || dayStartBoundary.map({ dayStart > $0 }) == true else { return snapshot(now: now) }
         dayStartEquity = equity
         dayStartBoundary = dayStart
@@ -457,8 +461,7 @@ public actor RiskEngine {
     }
 
     private func refresh(now: Date) {
-        let calendar = Calendar(identifier: .gregorian)
-        let dayStart = calendar.startOfDay(for: now)
+        let dayStart = Self.utcCalendar.startOfDay(for: now)
         if let boundary = dayStartBoundary {
             if dayStart > boundary {
                 let wasKillSwitch = killSwitch

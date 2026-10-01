@@ -1074,8 +1074,8 @@ public struct RiskSnapshot: Codable, Equatable, Sendable {
     public let strategyCapitalBase: Decimal?
     public let equityPeak: Decimal
     public let dayStartEquity: Decimal
-    /// Calendar-day boundary used for `dayStartEquity`. Optional for decoding
-    /// snapshots written before the boundary was persisted.
+    /// UTC calendar-day boundary used for `dayStartEquity`. Optional for
+    /// decoding snapshots written before the boundary was persisted.
     public let dayStartAt: Date?
     public let dailyPnLPercent: Decimal
     public let drawdownPercent: Decimal
