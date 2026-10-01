@@ -1657,6 +1657,8 @@ struct NewStrategySheet: View {
             selectedRule = .sweepReversalShort
             leverage = selectedRule.defaultLeverage
             capitalPoolPercent = min(100, max(1, maxCapitalPoolPercent))
+            isCreating = false
+            creationErrorMessage = nil
         }
         .onChange(of: capitalPoolPercent) { _, value in
             let clamped = value.isFinite ? min(max(value, 1), max(1, maxCapitalPoolPercent)) : min(100, max(1, maxCapitalPoolPercent))
