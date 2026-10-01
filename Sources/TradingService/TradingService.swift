@@ -1422,7 +1422,13 @@ public actor TradingBackend {
 
     public func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig {
         await restoreRiskIfNeeded()
-        try await requireStrategyMutationsAllowed()
+        // Saving a paused strategy does not create an order or change the
+        // account's exposure.  Keep configuration work available while the
+        // daily-loss circuit is latched, but never let an enabled request
+        // bypass that circuit.
+        if config.enabled {
+            try await requireStrategyMutationsAllowed()
+        }
         let normalized = try await normalizedCapitalPoolConfig(config)
         let created = try await paper.create(normalized)
         _ = await riskEngine.registerStrategy(created.id, allocationPercent: Decimal(created.capitalPoolPercent))
@@ -1433,7 +1439,12 @@ public actor TradingBackend {
 
     public func updateStrategy(_ config: StrategyConfig) async throws -> StrategyConfig {
         await restoreRiskIfNeeded()
-        try await requireStrategyMutationsAllowed()
+        // Pausing or editing a paused strategy is a non-trading operation and
+        // remains available during a kill switch. Enabling a strategy still
+        // requires an unfaulted risk state.
+        if config.enabled {
+            try await requireStrategyMutationsAllowed()
+        }
         let normalized = try await normalizedCapitalPoolConfig(config, excluding: config.id)
         let updated = try await paper.update(normalized)
         _ = await riskEngine.updateStrategyAllocation(updated.id, allocationPercent: Decimal(updated.capitalPoolPercent))

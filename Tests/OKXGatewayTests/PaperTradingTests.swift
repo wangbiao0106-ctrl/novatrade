@@ -207,6 +207,42 @@ func tradingBackendCannotRestartStrategyWhileAccountKillSwitchIsLatched() async 
 }
 
 @Test
+func tradingBackendAllowsSavingPausedStrategyWhileAccountKillSwitchIsLatched() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-kill-switch-save-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let risk = RiskEngine(initialEquity: 1_000)
+    await risk.synchronizeStrategyCapital(1_000)
+    let backend = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: risk)
+    let lossTime = Date(timeIntervalSince1970: 1_700_000_000)
+    await risk.record(realizedPnL: -60, now: lossTime)
+    #expect((await risk.snapshot()).killSwitch)
+
+    let paused = try await backend.createStrategy(StrategyConfig(
+        name: "熔断期间保存",
+        scope: .dynamic(.hotAltcoins),
+        interval: .oneHour,
+        type: .sweepReversalShort,
+        enabled: false
+    ))
+    #expect(!paused.enabled)
+    #expect((await backend.strategies()).contains(where: { $0.id == paused.id }))
+
+    do {
+        _ = try await backend.createStrategy(StrategyConfig(
+            name: "熔断期间启动",
+            scope: .dynamic(.hotAltcoins),
+            interval: .oneHour,
+            type: .emaAltcoinLong,
+            enabled: true,
+            riskPercent: 0.5
+        ))
+        Issue.record("expected enabled strategy creation to be blocked by the account kill switch")
+    } catch {
+        #expect(error.localizedDescription.contains("熔断"))
+    }
+}
+
+@Test
 func deletingStrategyPersistsRemovalOfItsCapitalPool() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-pool-delete-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }

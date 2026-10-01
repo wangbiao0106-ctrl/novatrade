@@ -1561,6 +1561,8 @@ struct NewStrategySheet: View {
     @State private var leverage = StrategyType.sweepReversalShort.defaultLeverage
     @State private var selectedRule: StrategyType = .sweepReversalShort
     @State private var step: NewStrategyStep = .choose
+    @State private var isCreating = false
+    @State private var creationErrorMessage: String?
 
     private enum NewStrategyStep {
         case choose
@@ -1614,17 +1616,34 @@ struct NewStrategySheet: View {
             Divider()
                 .overlay(Color.white.opacity(0.08))
             HStack {
-                Label("仅提交至当前 OKX 模拟账户", systemImage: "shield.checkered")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("仅提交至当前 OKX 模拟账户", systemImage: "shield.checkered")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if step == .configure, model.riskSnapshot.killSwitch {
+                        Label("账户风控已熔断，保存后仍不能启动；请在新日复位后启动", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                }
                 Spacer()
                 if step == .configure {
-                    Button("创建并保存") { create() }
+                    Button {
+                        create()
+                    } label: {
+                        if isCreating {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("保存中…")
+                        } else {
+                            Text("创建并保存")
+                        }
+                    }
                         .buttonStyle(.borderedProminent)
                         .tint(.mint)
                         .keyboardShortcut(.defaultAction)
                         .frame(minWidth: 104)
-                        .disabled(!canCreate)
+                        .disabled(!canCreate || isCreating)
                 }
             }
         }
@@ -1647,6 +1666,22 @@ struct NewStrategySheet: View {
         }
         .onChange(of: model.strategyCapitals) { _, _ in clampCapitalPoolPercent() }
         .onChange(of: model.accountOverview) { _, _ in clampCapitalPoolPercent() }
+        .alert("创建策略失败", isPresented: Binding(
+            get: { creationErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    creationErrorMessage = nil
+                    model.errorMessage = nil
+                }
+            }
+        )) {
+            Button("确定", role: .cancel) {
+                creationErrorMessage = nil
+                model.errorMessage = nil
+            }
+        } message: {
+            Text(creationErrorMessage ?? "未知错误")
+        }
     }
 
     private var strategySelection: some View {
@@ -1983,13 +2018,23 @@ struct NewStrategySheet: View {
     }
 
     private func create() {
+        guard !isCreating else { return }
         // 参数默认值来自领域层（与实验室 config 对齐），不再在界面里重复一份。
         var parameters = selectedRule.defaultParameters
         parameters["leverage"] = leverage
         let config = StrategyConfig(name: selectedRule.displayName, scope: .dynamic(.hotAltcoins), interval: selectedRule.entryInterval, type: selectedRule, parameters: parameters, enabled: false, riskPercent: effectiveRisk, capitalPoolPercent: effectiveCapitalPoolPercent, cooldownBars: selectedRule.defaultCooldownBars)
-        Task {
-            do { _ = try await model.createStrategy(config); dismiss() }
-            catch { model.errorMessage = error.localizedDescription }
+        isCreating = true
+        model.errorMessage = nil
+        Task { @MainActor in
+            defer { isCreating = false }
+            do {
+                _ = try await model.createStrategy(config)
+                dismiss()
+            } catch {
+                let message = error.localizedDescription
+                model.errorMessage = message
+                creationErrorMessage = message
+            }
         }
     }
 }
