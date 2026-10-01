@@ -423,8 +423,16 @@ public actor StrategyPackageRegistry {
         let source = string(object["source_of_truth"])
         let entry = integer(object["entry_timeframe_minutes"])
             ?? integer(runtime["entry_timeframe_minutes"])
-        let defaults = signal.reduce(into: [String: Double]()) { result, pair in
+        var defaults = signal.reduce(into: [String: Double]()) { result, pair in
             if let number = number(pair.value) { result[camelCase(pair.key)] = number }
+        }
+        // Leverage is an execution/position setting rather than a signal
+        // parameter in laboratory configs. Keep it in the same numeric
+        // parameter bag used by StrategyConfig so package-created instances
+        // receive the package's declared default instead of silently falling
+        // back to the compiled strategy default.
+        if let leverage = number(position["leverage"]) {
+            defaults["leverage"] = leverage
         }
         let defaultRisk = number(position["risk_per_trade_pct"])
             ?? number(position["default_risk_percent"])
@@ -470,6 +478,11 @@ public actor StrategyPackageRegistry {
               StrategyPackageManifest.canonicalIdentifier(config.runtimeHandler) else {
             throw StrategyPackageError.invalidManifest("manifest.json 与 config/strategy.json 的运行时标识不一致")
         }
+        var defaults = config.defaultParameters
+        // Keep position/execution defaults from the laboratory config even
+        // when the root manifest also provides signal parameters. Package
+        // manifest values remain authoritative for keys they explicitly set.
+        for (key, value) in package.defaultParameters { defaults[key] = value }
         return try StrategyPackageManifest(identifier: package.identifier,
                                     version: package.version,
                                     displayName: package.displayName,
@@ -479,7 +492,7 @@ public actor StrategyPackageRegistry {
                                     schemaVersion: package.schemaVersion,
                                     sourceOfTruth: package.sourceOfTruth ?? config.sourceOfTruth,
                                     entryTimeframeMinutes: package.entryTimeframeMinutes ?? config.entryTimeframeMinutes,
-                                    defaultParameters: package.defaultParameters.isEmpty ? config.defaultParameters : package.defaultParameters,
+                                    defaultParameters: defaults,
                                     defaultRiskPercent: package.defaultRiskPercent ?? config.defaultRiskPercent,
                                     maxRiskPercent: package.maxRiskPercent ?? config.maxRiskPercent,
                                     defaultCooldownBars: package.defaultCooldownBars ?? config.defaultCooldownBars,

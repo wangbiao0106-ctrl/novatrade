@@ -1,12 +1,13 @@
 {
   "strategy": "HLSR",
-  "source": "/Users/bill/Desktop/Codex/\u4ea4\u6613\u8f6f\u4ef6/data/kline/okx/swap/5m",
+  "source": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m",
   "timeframe": "5m source -> 15m entry",
+  "leverage": 2.0,
   "window": {
-    "start": "2026-03-31T06:55:00+00:00",
-    "end": "2026-09-28T13:00:00+00:00"
+    "start": "2026-03-31T07:00:00+00:00",
+    "end": "2026-09-30T19:00:00+00:00"
   },
-  "source_files": 477,
+  "source_files": 722,
   "eligible_symbols": 52,
   "selected_symbols": [
     "AI-USDT-SWAP",
@@ -72,51 +73,51 @@
       "composite_hits": 64
     },
     "ALLO-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 134,
       "volume_hits": 148,
       "composite_hits": 132
     },
     "APE-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 88,
       "volume_hits": 687,
       "composite_hits": 88
     },
     "API3-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 32,
       "volume_hits": 350,
       "composite_hits": 31
     },
     "APR-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 66,
       "volume_hits": 525,
       "composite_hits": 58
     },
     "AXS-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 18,
       "volume_hits": 453,
       "composite_hits": 18
     },
     "BABY-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 25,
       "volume_hits": 217,
       "composite_hits": 25
     },
     "BASED-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 100,
-      "volume_hits": 4067,
+      "volume_hits": 4066,
       "composite_hits": 100
     },
     "BEAT-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 89,
-      "volume_hits": 2928,
+      "volume_hits": 2927,
       "composite_hits": 89
     },
     "BILL-USDT-SWAP": {
@@ -126,13 +127,13 @@
       "composite_hits": 26
     },
     "BIO-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 111,
       "volume_hits": 1704,
       "composite_hits": 111
     },
     "BLUR-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 18,
       "volume_hits": 717,
       "composite_hits": 18
@@ -150,19 +151,19 @@
       "composite_hits": 65
     },
     "COAI-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 30,
       "volume_hits": 147,
       "composite_hits": 26
     },
     "CORE-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 30,
       "volume_hits": 638,
       "composite_hits": 28
     },
     "EDEN-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 163,
       "volume_hits": 866,
       "composite_hits": 160
@@ -174,85 +175,85 @@
       "composite_hits": 42
     },
     "ENJ-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 169,
       "volume_hits": 1084,
       "composite_hits": 164
     },
     "ENSO-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 6,
       "volume_hits": 433,
       "composite_hits": 6
     },
     "GIGGLE-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 10,
       "volume_hits": 726,
       "composite_hits": 10
     },
     "JTO-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 43,
       "volume_hits": 531,
       "composite_hits": 43
     },
     "KAT-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 145,
       "volume_hits": 592,
       "composite_hits": 145
     },
     "LAB-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 374,
       "volume_hits": 4146,
       "composite_hits": 374
     },
     "LAYER-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 38,
       "volume_hits": 233,
       "composite_hits": 38
     },
     "METIS-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 22,
       "volume_hits": 112,
       "composite_hits": 16
     },
     "NEIRO-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 54,
       "volume_hits": 158,
       "composite_hits": 38
     },
     "ONT-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 56,
-      "volume_hits": 1168,
+      "volume_hits": 1167,
       "composite_hits": 56
     },
     "ORDI-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 140,
       "volume_hits": 1926,
       "composite_hits": 140
     },
     "PIEVERSE-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 91,
       "volume_hits": 611,
       "composite_hits": 90
     },
     "PIPPIN-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 82,
-      "volume_hits": 1438,
+      "volume_hits": 1437,
       "composite_hits": 82
     },
     "PNUT-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 33,
       "volume_hits": 202,
       "composite_hits": 33
@@ -264,55 +265,55 @@
       "composite_hits": 38
     },
     "PROVE-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 54,
       "volume_hits": 187,
       "composite_hits": 52
     },
     "RAVE-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 575,
       "volume_hits": 3448,
       "composite_hits": 575
     },
     "RLS-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 217,
       "volume_hits": 650,
       "composite_hits": 190
     },
     "SAHARA-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 7,
       "volume_hits": 931,
       "composite_hits": 7
     },
     "SATS-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 84,
       "volume_hits": 154,
       "composite_hits": 61
     },
     "SOON-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 73,
       "volume_hits": 429,
       "composite_hits": 66
     },
     "SPK-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 73,
       "volume_hits": 422,
       "composite_hits": 72
     },
     "STABLE-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 12,
-      "volume_hits": 374,
+      "volume_hits": 373,
       "composite_hits": 11
     },
     "TRUTH-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 15,
       "volume_hits": 410,
       "composite_hits": 13
@@ -324,45 +325,45 @@
       "composite_hits": 104
     },
     "USELESS-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 22,
       "volume_hits": 285,
       "composite_hits": 22
     },
     "WET-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 75,
       "volume_hits": 220,
       "composite_hits": 73
     },
     "XLM-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 8,
       "volume_hits": 251,
       "composite_hits": 8
     },
     "YB-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 16,
       "volume_hits": 267,
       "composite_hits": 14
     },
     "ZAMA-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 13,
       "volume_hits": 122,
       "composite_hits": 13
     },
     "ZBT-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 27,
-      "volume_hits": 664,
+      "volume_hits": 663,
       "composite_hits": 27
     },
     "ZEC-USDT-SWAP": {
-      "bars": 5761,
+      "bars": 5760,
       "gain_hits": 6,
-      "volume_hits": 5665,
+      "volume_hits": 5664,
       "composite_hits": 6
     }
   },
@@ -583,25 +584,25 @@
             0.4
           ]
         },
-        "trades": 13,
+        "trades": 14,
         "wins": 6,
-        "losses": 7,
-        "win_rate": 0.46153846153846156,
+        "losses": 8,
+        "win_rate": 0.42857142857142855,
         "beta": {
-          "posterior_mean": 0.4666666666666667,
-          "lower_95": 0.2254703277697646,
-          "upper_95": 0.7045310348145452
+          "posterior_mean": 0.4375,
+          "lower_95": 0.21232085648996502,
+          "upper_95": 0.6763219607668128
         },
-        "total_r": 7.873621614076309,
-        "avg_net_r": 0.605663201082793,
-        "average_win_loss_ratio": 2.6531128299262154,
-        "profit_factor": 2.2740967113653276,
+        "total_r": 6.856078894064345,
+        "avg_net_r": 0.4897199210045961,
+        "average_win_loss_ratio": 2.603452041735504,
+        "profit_factor": 1.9525890313016276,
         "max_drawdown_r": 2.65468292060012,
         "max_consecutive_losses": 3,
         "positive_probability": {
-          "positive_mean_probability": 0.921,
-          "mean_lower_95": -0.21950365204267297,
-          "mean_upper_95": 1.5191511262245005
+          "positive_mean_probability": 0.8785,
+          "mean_lower_95": -0.33852664596275417,
+          "mean_upper_95": 1.2812473850122792
         },
         "leverage": 2.0
       },

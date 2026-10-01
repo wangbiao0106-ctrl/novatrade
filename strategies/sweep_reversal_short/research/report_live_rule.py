@@ -292,6 +292,7 @@ def main() -> None:
         "rule": "1h structure + first 15m bearish close confirmation + market short",
         "universe": args.pool,
         "window": {"start": int(df.entry_ts.min()), "end": int(df.entry_ts.max())},
+        "leverage": COSTS["leverage"],
         "costs": {"fee_per_side": args.fee, "slippage": 0.0},
         "guards": {"min_atr_pct": MIN_ATR_PCT, "max_risk_atr": MAX_RISK_ATR, "btc_gate": True,
                    "confirmation_window_minutes": 60, "max_hold_bars_15m": MAX_HOLD_15M},

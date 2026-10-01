@@ -12,6 +12,7 @@ private actor HLSRBackendRunner: ATKCommandRunning {
     let otherInstrumentID = "OTHER-USDT-SWAP"
     private var positions: [PositionSnapshot]
     private var remoteOrders: [OrderSnapshot] = []
+    private var clientOrders: [String: OrderSnapshot] = [:]
     private var rejectNextPlace: Bool
     private var nextOrderNumber = 1
     private var placeCommands: [[String]] = []
@@ -23,6 +24,7 @@ private actor HLSRBackendRunner: ATKCommandRunning {
 
     func setPositions(_ value: [PositionSnapshot]) { positions = value }
     func setRemoteOrders(_ value: [OrderSnapshot]) { remoteOrders = value }
+    func setClientOrder(_ clientOrderID: String, order: OrderSnapshot) { clientOrders[clientOrderID] = order }
     func setRejectNextPlace(_ value: Bool) { rejectNextPlace = value }
     func commandsContainingPlace() -> [[String]] { placeCommands }
 
@@ -42,7 +44,7 @@ private actor HLSRBackendRunner: ATKCommandRunning {
             return ATKCommandResult(stdout: #"{"default_profile":"demo","profiles":{"demo":{"site":"global","api_key":"key","demo":true}}}"#)
         }
         if command.hasPrefix("account balance-all") {
-            return ATKCommandResult(stdout: #"{"trading":{"totalEq":"100000","adjEq":"100000","details":[]},"valuation":{"totalBal":"100000"}}"#)
+            return ATKCommandResult(stdout: #"{"trading":{"totalEq":"100000","adjEq":"100000","details":[{"ccy":"USDT","eq":"100000","availEq":"100000","eqUsd":"100000"}]},"valuation":{"totalBal":"100000"}}"#)
         }
         if command == "account config --json" { return ATKCommandResult(stdout: #"[{"label":"demo"}]"#) }
         if command.hasPrefix("account positions") || command == "swap positions --json" {
@@ -51,6 +53,13 @@ private actor HLSRBackendRunner: ATKCommandRunning {
         if command.hasPrefix("account bills") { return ATKCommandResult(stdout: "[]") }
         if command == "swap orders --json" {
             return ATKCommandResult(stdout: encodeOrders())
+        }
+        if command.contains("swap get ") {
+            if let index = arguments.firstIndex(of: "--clOrdId"), index + 1 < arguments.count,
+               let order = clientOrders[arguments[index + 1]] {
+                return ATKCommandResult(stdout: "[{\"instId\":\"\(order.instrumentID)\",\"ordId\":\"\(order.id)\",\"clOrdId\":\"\(arguments[index + 1])\",\"side\":\"buy\",\"state\":\"\(order.status)\",\"sz\":\"\(order.quantity)\",\"cTime\":\"1700000000000\"}]")
+            }
+            return ATKCommandResult(stdout: #"{"code":"51603","msg":"Order does not exist"}"#)
         }
         if command.hasPrefix("market ticker ") {
             let id = command.split(separator: " ").dropFirst(2).first.map(String.init) ?? instrumentID
@@ -131,6 +140,7 @@ private func makeBackend(runner: HLSRBackendRunner, directory: URL) -> TradingBa
 private struct HLSRBackendRuntimeFixture: Codable {
     let manager: HLSRPositionManager
     let remoteOrderID: String?
+    let clientOrderID: String?
     let submittedAt: Date?
     let lastExitPrice: Decimal?
     let realizedExitPnL: Decimal?
@@ -141,9 +151,15 @@ private struct HLSRBackendStateFixture: Codable {
     let states: [String: HLSRBackendRuntimeFixture]
 }
 
-private func persistHLSRRuntime(manager: HLSRPositionManager, positionID: String, instrumentID: String, directory: URL, remoteOrderID: String? = nil, submittedAt: Date? = nil, lastExitPrice: Decimal? = nil) throws {
+private struct HLSRBackendPendingExitFixture: Decodable {
+    let positionID: String?
+    let instrumentID: String
+    let realizedPnL: Decimal?
+}
+
+private func persistHLSRRuntime(manager: HLSRPositionManager, positionID: String, instrumentID: String, directory: URL, remoteOrderID: String? = nil, clientOrderID: String? = nil, submittedAt: Date? = nil, lastExitPrice: Decimal? = nil) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let state = HLSRBackendRuntimeFixture(manager: manager, remoteOrderID: remoteOrderID, submittedAt: submittedAt, lastExitPrice: lastExitPrice, realizedExitPnL: nil)
+    let state = HLSRBackendRuntimeFixture(manager: manager, remoteOrderID: remoteOrderID, clientOrderID: clientOrderID, submittedAt: submittedAt, lastExitPrice: lastExitPrice, realizedExitPnL: nil)
     let file = HLSRBackendStateFixture(schemaVersion: 1, states: ["\(positionID):\(instrumentID)": state])
     try JSONEncoder().encode(file).write(to: directory.appendingPathComponent("hlsr-exit-state.json"))
 }
@@ -237,7 +253,16 @@ func hlsrBackendRejectRetriesSameLeg() async throws {
     #expect((await runner.commandsContainingPlace()).count == 1)
 
     _ = await backend.ingestRealtimeCandle(backendCandle(1_700_001_800, open: 96, high: 97, low: 94, close: 95), instrumentID: "ALT-USDT-SWAP", interval: .fifteenMinutes)
-    #expect((await runner.commandsContainingPlace()).count == 2)
+    let places = await runner.commandsContainingPlace()
+    #expect(places.count == 2)
+    func clientID(_ command: [String]) -> String? {
+        guard let index = command.firstIndex(of: "--clOrdId"), index + 1 < command.count else { return nil }
+        return command[index + 1]
+    }
+    let firstClientID = clientID(places[0])
+    let secondClientID = clientID(places[1])
+    #expect(firstClientID != nil)
+    #expect(firstClientID == secondClientID)
 }
 
 @Test("HLSR restart restores TP1 breakeven protection")
@@ -268,6 +293,101 @@ func hlsrBackendRestartRestoresBreakevenManager() async throws {
     if let first = places.first {
         #expect(first.contains("--reduceOnly"))
     }
+}
+
+@Test("HLSR final exit settles its original position after restart when the instrument reopens")
+func hlsrBackendFinalExitUsesOriginalPositionIdentityAfterRestart() async throws {
+    let originalPosition = PositionSnapshot(id: "original-position", instrumentID: "ALT-USDT-SWAP", side: "short", quantity: 10, entryPrice: 100, markPrice: 110)
+    let runner = HLSRBackendRunner(positions: [originalPosition])
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let first = makeBackend(runner: runner, directory: directory)
+    let config = try await first.createStrategy(hlsrBackendConfig())
+    let signal = backendSignal(strategyID: config.id)
+    await recordHLSREntry(first.paper, strategyID: config.id, signal: signal)
+    let decision = await first.riskEngine.authorize(instrumentID: "ALT-USDT-SWAP", notional: 1_000, margin: 1_000, strategyID: config.id, riskAmount: 100)
+    #expect(decision.allowed)
+
+    _ = await first.ingestRealtimeCandle(backendCandle(1_700_000_900, open: 110, high: 111, low: 109, close: 110), instrumentID: "ALT-USDT-SWAP", interval: .fifteenMinutes)
+    #expect((await runner.commandsContainingPlace()).count == 1)
+    let pendingData = try Data(contentsOf: directory.appendingPathComponent("pending-remote-exits.json"))
+    let pending = try JSONDecoder().decode([String: HLSRBackendPendingExitFixture].self, from: pendingData)
+    #expect(pending["original-position:ALT-USDT-SWAP"]?.positionID == "original-position")
+    #expect((await first.riskEngine.snapshot()).strategyCapitals.first?.reservedCapital == 1_000)
+
+    // OKX assigns a new posId when the instrument reopens. The old exit must
+    // release its reservation even though this new position is nonzero.
+    await runner.setPositions([PositionSnapshot(id: "new-position", instrumentID: "ALT-USDT-SWAP", side: "short", quantity: 10, entryPrice: 100, markPrice: 100)])
+    let restarted = makeBackend(runner: runner, directory: directory)
+    _ = await restarted.ingestRealtimeCandle(backendCandle(1_700_001_800, open: 100, high: 101, low: 99, close: 100), instrumentID: "ALT-USDT-SWAP", interval: .fifteenMinutes)
+
+    let snapshot = await restarted.riskEngine.snapshot()
+    let capital = try #require(snapshot.strategyCapitals.first)
+    #expect(capital.reservedCapital == 0)
+    #expect(capital.openRisk == 0)
+    #expect(capital.openPositions == 0)
+    #expect(capital.rolloverCount == 1)
+    let settledData = try Data(contentsOf: directory.appendingPathComponent("pending-remote-exits.json"))
+    #expect(try JSONDecoder().decode([String: HLSRBackendPendingExitFixture].self, from: settledData).isEmpty)
+}
+
+@Test("HLSR restart resolves persisted leg by client order ID without resubmitting")
+func hlsrBackendPendingLegRecoversAcceptedOrderByClientID() async throws {
+    let position = PositionSnapshot(id: "position-1", instrumentID: "ALT-USDT-SWAP", side: "short", quantity: 10, entryPrice: 100, markPrice: 100)
+    let runner = HLSRBackendRunner(positions: [position])
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let first = makeBackend(runner: runner, directory: directory)
+    let config = try await first.createStrategy(hlsrBackendConfig())
+    let signal = backendSignal(strategyID: config.id)
+    await recordHLSREntry(first.paper, strategyID: config.id, signal: signal)
+    var manager = try HLSRPositionManager(strategyID: config.id, instrumentID: "ALT-USDT-SWAP", signal: signal, spec: hlsrBackendSpec, requestedQuantity: 10)
+    guard let intent = manager.evaluate(
+        candle: backendCandle(1_700_000_900, open: 100, high: 101, low: 94, close: 96),
+        position: position
+    ) else {
+        Issue.record("expected HLSR exit intent")
+        return
+    }
+    guard let leg = manager.claim(intent) else {
+        Issue.record("expected HLSR exit leg")
+        return
+    }
+    let clientOrderID = leg.id.uuidString.replacingOccurrences(of: "-", with: "")
+    try persistHLSRRuntime(manager: manager, positionID: position.id, instrumentID: position.instrumentID, directory: directory, clientOrderID: clientOrderID, submittedAt: .now, lastExitPrice: leg.price)
+    await runner.setClientOrder(clientOrderID, order: OrderSnapshot(id: "accepted-after-crash", instrumentID: position.instrumentID, side: "buy", status: "live", quantity: leg.quantity))
+
+    let restarted = makeBackend(runner: runner, directory: directory)
+    _ = await restarted.ingestRealtimeCandle(backendCandle(1_700_001_800, open: 100, high: 101, low: 99, close: 100), instrumentID: position.instrumentID, interval: .fifteenMinutes)
+    #expect((await runner.commandsContainingPlace()).isEmpty)
+    let stateData = try Data(contentsOf: directory.appendingPathComponent("hlsr-exit-state.json"))
+    let state = try JSONDecoder().decode(HLSRBackendStateFixture.self, from: stateData)
+    #expect(state.states["position-1:ALT-USDT-SWAP"]?.remoteOrderID == "accepted-after-crash")
+}
+
+@Test("Ordinary strategy exit restores its pending submission latch after restart")
+func ordinaryStrategyPendingExitDoesNotResubmitAfterRestart() async throws {
+    let position = PositionSnapshot(id: "ordinary-position", instrumentID: "ALT-USDT-SWAP", side: "short", quantity: 10, entryPrice: 100, markPrice: 110)
+    let runner = HLSRBackendRunner(positions: [position])
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let first = makeBackend(runner: runner, directory: directory)
+    let config = try await first.createStrategy(StrategyConfig(name: "二次扫顶", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, enabled: false, riskPercent: 0.5))
+    await recordHLSREntry(first.paper, strategyID: config.id, signal: backendSignal(strategyID: config.id))
+    let decision = await first.riskEngine.authorize(instrumentID: "ALT-USDT-SWAP", notional: 1_000, margin: 1_000, strategyID: config.id, riskAmount: 100)
+    #expect(decision.allowed)
+
+    _ = await first.ingestRealtimeCandle(backendCandle(1_700_000_900, open: 110, high: 111, low: 109, close: 110), instrumentID: "ALT-USDT-SWAP", interval: .fifteenMinutes)
+    #expect((await runner.commandsContainingPlace()).count == 1)
+    await runner.setRemoteOrders([OrderSnapshot(id: "hlsr-order-1", instrumentID: "ALT-USDT-SWAP", side: "buy", status: "live", quantity: 10, createdAt: .now)])
+
+    let restarted = makeBackend(runner: runner, directory: directory)
+    _ = await restarted.ingestRealtimeCandle(backendCandle(1_700_001_800, open: 110, high: 111, low: 109, close: 110), instrumentID: "ALT-USDT-SWAP", interval: .fifteenMinutes)
+    #expect((await runner.commandsContainingPlace()).count == 1)
+    #expect((await restarted.riskEngine.snapshot()).strategyCapitals.first?.reservedCapital == 1_000)
+    let data = try Data(contentsOf: directory.appendingPathComponent("pending-remote-exits.json"))
+    let pending = try JSONDecoder().decode([String: HLSRBackendPendingExitFixture].self, from: data)
+    #expect(pending["ordinary-position:ALT-USDT-SWAP"]?.positionID == "ordinary-position")
 }
 
 private func hlsrBackendFixtures() -> (lower: [Candle], fourHour: [Candle]) {

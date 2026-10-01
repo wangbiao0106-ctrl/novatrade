@@ -13,13 +13,18 @@ private actor TradingAuditRunner: ATKCommandRunning {
     private let positionOutput: String
     private let contractValue: Int
     private let lotSize: Int
+    private let totalEquity: Decimal
+    private let usdtEquity: Decimal?
 
     init(delayedPlace: Bool = false, rejectPlace: Bool = false, hasPosition: Bool = false,
-         contractValue: Int = 1, lotSize: Int = 1) {
+         contractValue: Int = 1, lotSize: Int = 1,
+         totalEquity: Decimal = 1_000, usdtEquity: Decimal? = 1_000) {
         self.delayedPlace = delayedPlace
         self.rejectPlace = rejectPlace
         self.contractValue = contractValue
         self.lotSize = lotSize
+        self.totalEquity = totalEquity
+        self.usdtEquity = usdtEquity
         self.positionOutput = hasPosition
             ? #"[{"instId":"BTC-USDT-SWAP","pos":"1","posId":"position-1","avgPx":"100","posSide":"long"}]"#
             : "[]"
@@ -36,7 +41,8 @@ private actor TradingAuditRunner: ATKCommandRunning {
             return ATKCommandResult(stdout: #"{"default_profile":"demo","profiles":{"demo":{"site":"global","api_key":"key","demo":true}}}"#)
         }
         if command.hasPrefix("account balance-all") {
-            return ATKCommandResult(stdout: #"{"trading":{"totalEq":"1000","adjEq":"1000","details":[]},"valuation":{"totalBal":"1000"}}"#)
+            let details = usdtEquity.map { "[{\"ccy\":\"USDT\",\"eq\":\"\($0)\",\"availEq\":\"\($0)\",\"eqUsd\":\"\($0)\"}]" } ?? "[]"
+            return ATKCommandResult(stdout: "{\"trading\":{\"totalEq\":\"\(totalEquity)\",\"adjEq\":\"\(totalEquity)\",\"details\":\(details)},\"valuation\":{\"totalBal\":\"\(totalEquity)\"}}")
         }
         if command == "account config --json" { return ATKCommandResult(stdout: #"[{"label":"demo"}]"#) }
         if command.hasPrefix("account positions") { return ATKCommandResult(stdout: positionOutput) }
@@ -50,6 +56,91 @@ private actor TradingAuditRunner: ATKCommandRunning {
             return ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","ctVal":"\#(contractValue)","ctMult":"1","lotSz":"\#(lotSize)","minSz":"\#(lotSize)","tickSz":"0.1","state":"live","ctType":"linear","settleCcy":"USDT"}]"#)
         }
         return ATKCommandResult(stdout: "[]")
+    }
+}
+
+@Test
+func accountSyncUsesUSDTOnlyForStrategyPoolWhileKeepingTotalEquityForRisk() async throws {
+    let runner = TradingAuditRunner(totalEquity: 10_000, usdtEquity: 1_000)
+    let market = MarketDataService(client: ATKClient(runner: runner), ttl: MarketCacheTTL(ticker: 0, contracts: 60, account: 0, positions: 0, orders: 0))
+    let risk = RiskEngine(initialEquity: 100_000)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("trading-usdt-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory), riskEngine: risk)
+
+    let account = try await backend.account()
+    #expect(account.equityUSD == Decimal(10_000))
+    #expect(account.usdtEquity == Decimal(1_000))
+
+    let strategyID = UUID()
+    let pool = await risk.registerStrategy(strategyID, allocationPercent: 50)
+    #expect(pool.equity == Decimal(500))
+    #expect((await risk.snapshot()).equity == Decimal(10_000))
+}
+
+@Test
+func authenticatedAccountWithoutUSDTLeavesStrategyPoolAtZero() async throws {
+    let runner = TradingAuditRunner(totalEquity: 10_000, usdtEquity: nil)
+    let market = MarketDataService(client: ATKClient(runner: runner), ttl: MarketCacheTTL(ticker: 0, contracts: 60, account: 0, positions: 0, orders: 0))
+    let risk = RiskEngine(initialEquity: 100_000)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("trading-no-usdt-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory), riskEngine: risk)
+
+    _ = try await backend.account()
+    let pool = await risk.registerStrategy(UUID(), allocationPercent: 50)
+    #expect(pool.equity == 0)
+    #expect((await risk.snapshot()).equity == Decimal(10_000))
+}
+
+@Test
+func strategyCreationPersistsOnlyRemainingUSDTAllocation() async throws {
+    let runner = TradingAuditRunner(totalEquity: 10_000, usdtEquity: 1_000)
+    let market = MarketDataService(client: ATKClient(runner: runner), ttl: MarketCacheTTL(ticker: 0, contracts: 60, account: 0, positions: 0, orders: 0))
+    let risk = RiskEngine(initialEquity: 100_000)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("trading-usdt-create-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory), riskEngine: risk)
+    _ = try await backend.account()
+
+    let first = try await backend.createStrategy(StrategyConfig(name: "第一策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 75))
+    let second = try await backend.createStrategy(StrategyConfig(name: "第二策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .emaAltcoinLong, riskPercent: 0.5, capitalPoolPercent: 75))
+    #expect(first.capitalPoolPercent == 75)
+    #expect(second.capitalPoolPercent == 25)
+    let pools = await risk.strategyCapitals()
+    #expect(pools.first(where: { $0.strategyID == first.id })?.equity == 750)
+    #expect(pools.first(where: { $0.strategyID == second.id })?.equity == 250)
+}
+
+@Test
+func strategyCreationRejectsSubMinimumRemainingUSDTAllocation() async throws {
+    let runner = TradingAuditRunner(totalEquity: 10_000, usdtEquity: 1_000)
+    let market = MarketDataService(client: ATKClient(runner: runner), ttl: MarketCacheTTL(ticker: 0, contracts: 60, account: 0, positions: 0, orders: 0))
+    let risk = RiskEngine(initialEquity: 100_000)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("trading-usdt-minimum-(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory), riskEngine: risk)
+    _ = try await backend.account()
+
+    _ = try await backend.createStrategy(StrategyConfig(name: "主策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 99.95))
+    await #expect(throws: ATKError.unavailable("USDT 资产已被其他策略占用，无法分配策略资金池")) {
+        _ = try await backend.createStrategy(StrategyConfig(name: "余量策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .emaAltcoinLong, capitalPoolPercent: 1))
+    }
+}
+
+@Test
+func strategyCreationRejectsKnownZeroUSDTBalance() async throws {
+    let runner = TradingAuditRunner(totalEquity: 10_000, usdtEquity: nil)
+    let market = MarketDataService(client: ATKClient(runner: runner), ttl: MarketCacheTTL(ticker: 0, contracts: 60, account: 0, positions: 0, orders: 0))
+    let risk = RiskEngine(initialEquity: 100_000)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("trading-no-usdt-create-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory), riskEngine: risk)
+    _ = try await backend.account()
+
+    let config = StrategyConfig(name: "无 USDT", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
+    await #expect(throws: ATKError.unavailable("USDT 资产为 0，无法分配策略资金池")) {
+        _ = try await backend.createStrategy(config)
     }
 }
 

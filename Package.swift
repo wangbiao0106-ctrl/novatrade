@@ -29,7 +29,11 @@ let package = Package(
             .product(name: "HummingbirdWebSocket", package: "hummingbird-websocket")
         ]),
         .target(name: "TradingServiceClient", dependencies: ["TradingDomain"]),
-        .executableTarget(name: "MacTraderApp", dependencies: ["TradingDomain", "TradingServiceClient"]),
+        .executableTarget(
+            name: "MacTraderApp",
+            dependencies: ["TradingDomain", "TradingServiceClient"],
+            resources: [.copy("Resources")]
+        ),
         .executableTarget(name: "OKXSelfTraderCLI", dependencies: ["ATKGateway"]),
         .executableTarget(name: "OKXLocalD", dependencies: ["TradingService"]),
         .testTarget(name: "OKXGatewayTests", dependencies: ["OKXGateway", "ATKGateway", "TradingDomain", "TradingService", "TradingServiceClient"])

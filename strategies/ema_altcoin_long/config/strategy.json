@@ -70,6 +70,7 @@
     "risk_per_trade_pct": 0.5,
     "max_concurrent_positions": 1,
     "max_open_risk_pct": 0.5,
+    "leverage": 2.0,
     "sizing_formula": "pool_equity * risk_per_trade_pct / 100 / (entry_price - stop_price)",
     "risk_budget_includes_fees": false
   },

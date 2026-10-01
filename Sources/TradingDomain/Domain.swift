@@ -66,6 +66,20 @@ public struct AccountOverview: Codable, Equatable, Sendable {
     public let positions: [PositionSnapshot]
     public let updatedAt: Date
 
+    /// The amount of USDT available as the strategy sizing base. A missing
+    /// USDT row is a known zero balance once an authenticated account has
+    /// loaded; before authentication/account loading, keep it unknown.
+    public var usdtEquity: Decimal? {
+        guard authenticated else { return nil }
+        let usdtBalances = assets
+            .filter { $0.currency.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "USDT" }
+            .map(\.equity)
+        guard !usdtBalances.isEmpty else { return 0 }
+        let total = usdtBalances.reduce(0, +)
+        guard total.isFinite else { return nil }
+        return max(0, total)
+    }
+
     public init(mode: TradingMode = .readOnly, profile: String? = nil, site: String? = nil, label: String? = nil, authenticated: Bool = false, equityUSD: Decimal? = nil, availableEquityUSD: Decimal? = nil, totalAssetValueUSD: Decimal? = nil, todayPnLUSD: Decimal? = nil, assets: [AccountAsset] = [], positions: [PositionSnapshot] = [], updatedAt: Date = .now) {
         self.mode = mode; self.profile = profile; self.site = site; self.label = label; self.authenticated = authenticated
         self.equityUSD = equityUSD; self.availableEquityUSD = availableEquityUSD; self.totalAssetValueUSD = totalAssetValueUSD ?? equityUSD; self.todayPnLUSD = todayPnLUSD; self.assets = assets; self.positions = positions; self.updatedAt = updatedAt
@@ -390,8 +404,14 @@ public struct LiveOrderRequest: Codable, Equatable, Sendable {
     public let price: Decimal?
     public let takeProfitTriggerPrice: Decimal?
     public let stopLossTriggerPrice: Decimal?
+    /// Optional contract leverage. `nil` preserves the exchange/account
+    /// default for callers such as manual reduce-only orders.
+    public let leverage: Decimal?
+    /// Stable exchange client identifier used to recover an interrupted
+    /// submission. Optional preserves requests persisted by older versions.
+    public let clientOrderID: String?
 
-    public init(instrumentID: String, side: String, orderType: String = "market", quantity: Decimal, positionSide: String? = nil, marginMode: String = "cross", reduceOnly: Bool = false, price: Decimal? = nil, takeProfitTriggerPrice: Decimal? = nil, stopLossTriggerPrice: Decimal? = nil) {
+    public init(instrumentID: String, side: String, orderType: String = "market", quantity: Decimal, positionSide: String? = nil, marginMode: String = "cross", reduceOnly: Bool = false, price: Decimal? = nil, takeProfitTriggerPrice: Decimal? = nil, stopLossTriggerPrice: Decimal? = nil, leverage: Decimal? = nil, clientOrderID: String? = nil) {
         self.instrumentID = instrumentID
         self.side = side
         self.orderType = orderType
@@ -402,11 +422,13 @@ public struct LiveOrderRequest: Codable, Equatable, Sendable {
         self.price = price
         self.takeProfitTriggerPrice = takeProfitTriggerPrice
         self.stopLossTriggerPrice = stopLossTriggerPrice
+        self.leverage = leverage
+        self.clientOrderID = clientOrderID
     }
 
     private enum CodingKeys: String, CodingKey {
         case instrumentID, side, orderType, quantity, positionSide, marginMode, reduceOnly, price
-        case takeProfitTriggerPrice, stopLossTriggerPrice
+        case takeProfitTriggerPrice, stopLossTriggerPrice, leverage, clientOrderID
     }
 
     public init(from decoder: Decoder) throws {
@@ -421,6 +443,8 @@ public struct LiveOrderRequest: Codable, Equatable, Sendable {
         price = try container.decodeIfPresent(Decimal.self, forKey: .price)
         takeProfitTriggerPrice = try container.decodeIfPresent(Decimal.self, forKey: .takeProfitTriggerPrice)
         stopLossTriggerPrice = try container.decodeIfPresent(Decimal.self, forKey: .stopLossTriggerPrice)
+        leverage = try container.decodeIfPresent(Decimal.self, forKey: .leverage)
+        clientOrderID = try container.decodeIfPresent(String.self, forKey: .clientOrderID)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -435,6 +459,8 @@ public struct LiveOrderRequest: Codable, Equatable, Sendable {
         try container.encodeIfPresent(price, forKey: .price)
         try container.encodeIfPresent(takeProfitTriggerPrice, forKey: .takeProfitTriggerPrice)
         try container.encodeIfPresent(stopLossTriggerPrice, forKey: .stopLossTriggerPrice)
+        try container.encodeIfPresent(leverage, forKey: .leverage)
+        try container.encodeIfPresent(clientOrderID, forKey: .clientOrderID)
     }
 }
 
@@ -518,6 +544,15 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// Stable machine-readable identifier. Keep this independent from UI copy.
     public var identifier: String { rawValue }
 
+    /// User-editable leverage bounds shared by the strategy editor and the
+    /// persistence layer.  Individual OKX contracts can impose a lower
+    /// exchange-side ceiling; the order gateway remains responsible for
+    /// rejecting a value the selected instrument cannot support.
+    public var leverageRange: ClosedRange<Double> { 1.0...100.0 }
+
+    /// Default leverage shown when creating a new instance.
+    public var defaultLeverage: Double { defaultParameters["leverage"] ?? 2.0 }
+
     public var displayName: String {
         switch self {
         case .sweepReversalShort: return "山寨币二次扫顶做空"
@@ -551,6 +586,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "maxRiskATR": 5.0, "btcGateEnabled": 1,
                 "entryTimeframeMinutes": 60, "confirmationTimeframeMinutes": 15,
                 "confirmationWindowMinutes": 60,
+                "leverage": 2,
                 "maxConcurrentPositions": 1,
                 "maxOpenRiskPercent": 5.0,
             ]
@@ -561,6 +597,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "minATRPct": 0.4, "minBreakoutATR": 0.3, "minSpreadATR": 0.5,
                 "stopATR": 1.25, "targetR": 2.5, "maxHoldBars": 96,
                 "minimumHistoryBars": 120, "gateSlopeBars": 6,
+                "leverage": 2,
                 "maxConcurrentPositions": 1,
                 "maxOpenRiskPercent": 0.5,
             ]
@@ -763,6 +800,25 @@ public struct StrategyConfig: Codable, Equatable, Sendable, Identifiable {
     public var trailingStopPercent: Double
     public var scope: StrategyScope
 
+    /// Configured contract leverage for this strategy instance.
+    ///
+    /// Leverage is kept in ``parameters`` so strategy packages can continue
+    /// to add numeric knobs without changing the persisted ``StrategyConfig``
+    /// schema.  The typed accessor gives the UI and runtime a stable field,
+    /// while still preserving user overrides through Codable persistence.
+    /// Older strategy files that predate this parameter read the strategy's
+    /// built-in default (currently 2x).
+    public var leverage: Double {
+        get {
+            let fallback = type.defaultParameters["leverage"] ?? 2.0
+            guard let value = parameters["leverage"], value.isFinite, value > 0 else {
+                return fallback
+            }
+            return value
+        }
+        set { parameters["leverage"] = newValue }
+    }
+
     /// Stable strategy type identifier for routing and persistence.
     public var strategyIdentifier: String { type.identifier }
 
@@ -852,6 +908,52 @@ public struct StrategyCapitalSnapshot: Codable, Equatable, Sendable, Identifiabl
         self.updatedAt = updatedAt
         self.openRisk = openRisk
         self.openPositions = openPositions
+    }
+}
+
+/// Shared sizing calculations for the USDT strategy capital base. The
+/// snapshots include paused strategies and pools without live orders because
+/// their allocated pool equity remains reserved for that strategy.
+public struct StrategyCapitalAllocation: Equatable, Sendable {
+    public let totalCapital: Decimal
+    public let strategyCapitals: [StrategyCapitalSnapshot]
+
+    public init(totalCapital: Decimal = 0, strategyCapitals: [StrategyCapitalSnapshot] = []) {
+        self.totalCapital = totalCapital.isFinite ? max(0, totalCapital) : 0
+        self.strategyCapitals = strategyCapitals
+    }
+
+    public var occupiedCapital: Decimal {
+        strategyCapitals.reduce(0) { total, pool in
+            total + (pool.equity.isFinite ? max(0, pool.equity) : 0)
+        }
+    }
+
+    public var availableCapital: Decimal {
+        max(0, totalCapital - occupiedCapital)
+    }
+
+    public var occupiedAllocationPercent: Decimal {
+        guard totalCapital > 0 else { return 0 }
+        return occupiedCapital / totalCapital * 100
+    }
+
+    public var availableAllocationPercent: Decimal {
+        let configuredRemaining = 100 - strategyCapitals.reduce(0) { total, pool in
+            total + (pool.allocationPercent.isFinite ? max(0, pool.allocationPercent) : 0)
+        }
+        guard totalCapital > 0 else { return 0 }
+        return min(max(0, configuredRemaining), max(0, 100 - occupiedAllocationPercent))
+    }
+
+    public func capital(for allocationPercent: Decimal) -> Decimal {
+        guard totalCapital > 0, allocationPercent.isFinite else { return 0 }
+        return totalCapital * min(max(0, allocationPercent), 100) / 100
+    }
+
+    public func effectiveAllocationPercent(for requested: Decimal) -> Decimal {
+        guard requested.isFinite else { return 0 }
+        return min(max(0, requested), availableAllocationPercent)
     }
 }
 
@@ -967,6 +1069,9 @@ public struct StrategyStatus: Codable, Equatable, Sendable, Identifiable {
 
 public struct RiskSnapshot: Codable, Equatable, Sendable {
     public let equity: Decimal
+    /// USDT balance used to size strategy pools; account equity remains the
+    /// separate all-asset baseline for global risk limits.
+    public let strategyCapitalBase: Decimal?
     public let equityPeak: Decimal
     public let dayStartEquity: Decimal
     /// Calendar-day boundary used for `dayStartEquity`. Optional for decoding
@@ -984,17 +1089,18 @@ public struct RiskSnapshot: Codable, Equatable, Sendable {
     public let globalNotionals: [String: Decimal]
 
     private enum CodingKeys: String, CodingKey {
-        case equity, equityPeak, dayStartEquity, dayStartAt, dailyPnLPercent
+        case equity, strategyCapitalBase, equityPeak, dayStartEquity, dayStartAt, dailyPnLPercent
         case drawdownPercent, killSwitch, reason, strategyCapitals, globalNotionals
     }
 
-    public init(equity: Decimal = 0, equityPeak: Decimal = 0, dayStartEquity: Decimal = 0, dayStartAt: Date? = nil, dailyPnLPercent: Decimal = 0, drawdownPercent: Decimal = 0, killSwitch: Bool = false, reason: String? = nil, strategyCapitals: [StrategyCapitalSnapshot] = [], globalNotionals: [String: Decimal] = [:]) {
-        self.equity = equity; self.equityPeak = equityPeak; self.dayStartEquity = dayStartEquity; self.dayStartAt = dayStartAt; self.dailyPnLPercent = dailyPnLPercent; self.drawdownPercent = drawdownPercent; self.killSwitch = killSwitch; self.reason = reason; self.strategyCapitals = strategyCapitals; self.globalNotionals = globalNotionals
+    public init(equity: Decimal = 0, equityPeak: Decimal = 0, dayStartEquity: Decimal = 0, dayStartAt: Date? = nil, dailyPnLPercent: Decimal = 0, drawdownPercent: Decimal = 0, killSwitch: Bool = false, reason: String? = nil, strategyCapitals: [StrategyCapitalSnapshot] = [], globalNotionals: [String: Decimal] = [:], strategyCapitalBase: Decimal? = nil) {
+        self.equity = equity; self.strategyCapitalBase = strategyCapitalBase; self.equityPeak = equityPeak; self.dayStartEquity = dayStartEquity; self.dayStartAt = dayStartAt; self.dailyPnLPercent = dailyPnLPercent; self.drawdownPercent = drawdownPercent; self.killSwitch = killSwitch; self.reason = reason; self.strategyCapitals = strategyCapitals; self.globalNotionals = globalNotionals
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         equity = try container.decodeIfPresent(Decimal.self, forKey: .equity) ?? 0
+        strategyCapitalBase = try container.decodeIfPresent(Decimal.self, forKey: .strategyCapitalBase)
         equityPeak = try container.decodeIfPresent(Decimal.self, forKey: .equityPeak) ?? 0
         dayStartEquity = try container.decodeIfPresent(Decimal.self, forKey: .dayStartEquity) ?? 0
         dayStartAt = try container.decodeIfPresent(Date.self, forKey: .dayStartAt)
@@ -1009,6 +1115,7 @@ public struct RiskSnapshot: Codable, Equatable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(equity, forKey: .equity)
+        try container.encodeIfPresent(strategyCapitalBase, forKey: .strategyCapitalBase)
         try container.encode(equityPeak, forKey: .equityPeak)
         try container.encode(dayStartEquity, forKey: .dayStartEquity)
         try container.encodeIfPresent(dayStartAt, forKey: .dayStartAt)

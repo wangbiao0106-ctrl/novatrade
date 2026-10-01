@@ -37,6 +37,17 @@ func surfacesATKCommandFailures() async throws {
 }
 
 @Test
+func parsesClosedSwapPositionHistoryForNativeExitSettlement() async throws {
+    let runner = StubATKRunner(outputs: [
+        "account positions-history --instType SWAP --instId BTC-USDT-SWAP --limit 100 --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","posId":"position-7","realizedPnl":"-12.5","uTime":"1700000000000"}]"#)
+    ])
+    let history = try await ATKClient(runner: runner).closedSwapPositions(instrumentID: "BTC-USDT-SWAP")
+    #expect(history.count == 1)
+    #expect(history[0].positionID == "position-7")
+    #expect(history[0].realizedPnL == Decimal(string: "-12.5"))
+}
+
+@Test
 func redactsConfigToAPIKeyPresenceAndNormalizesUnauthenticatedSite() async throws {
     let runner = StubATKRunner(outputs: [
         "auth status --json": ATKCommandResult(stdout: #"{"profile":"oauth","site":"global","status":"not_logged_in"}"#, exitCode: 2),
@@ -105,6 +116,19 @@ func liveOrderPassesExplicitLiveFlagAndParsesResult() async throws {
 }
 
 @Test
+func resolvesSwapOrderByClientIDAndTreatsOnlyExplicitNotFoundAsAbsent() async throws {
+    let runner = StubATKRunner(outputs: [
+        "--demo swap get --instId BTC-USDT-SWAP --clOrdId hlsrleg1 --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","ordId":"remote-1","clOrdId":"hlsrleg1","side":"buy","state":"live","sz":"1","cTime":"1700000000000"}]"#),
+        "--demo swap get --instId BTC-USDT-SWAP --clOrdId missing --json": ATKCommandResult(stdout: #"{"code":"51603","msg":"Order does not exist"}"#)
+    ])
+    let client = ATKClient(runner: runner)
+    let found = try await client.swapOrder(instrumentID: "BTC-USDT-SWAP", clientOrderID: "hlsrleg1", demo: true)
+    #expect(found?.id == "remote-1")
+    let absent = try await client.swapOrder(instrumentID: "BTC-USDT-SWAP", clientOrderID: "missing", demo: true)
+    #expect(absent == nil)
+}
+
+@Test
 func demoOrderPassesExplicitDemoFlagAndParsesResult() async throws {
     let runner = StubATKRunner(outputs: [
         "config show --json": ATKCommandResult(stdout: #"{"default_profile":"demo","profiles":{"demo":{"site":"global","api_key":"key","demo":true}}}"#),
@@ -114,6 +138,55 @@ func demoOrderPassesExplicitDemoFlagAndParsesResult() async throws {
     let order = LiveOrderRequest(instrumentID: "BTC-USDT-SWAP", side: "sell", quantity: 1)
     let result = try await ATKClient(runner: runner).placeDemoSwapOrder(order)
     #expect(result.orderID == "demo-123")
+}
+
+@Test
+func demoOrderPassesConfiguredLeverageToATK() async throws {
+    let runner = StubATKRunner(outputs: [
+        "config show --json": ATKCommandResult(stdout: #"{"default_profile":"demo","profiles":{"demo":{"site":"global","api_key":"key","demo":true}}}"#),
+        "market instruments --instType SWAP --instId BTC-USDT-SWAP --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","ctVal":"1","ctMult":"1","lotSz":"1","minSz":"1","tickSz":"0.1","state":"live","ctType":"linear","settleCcy":"USDT"}]"#),
+        "--demo swap leverage --instId BTC-USDT-SWAP --lever 3 --mgnMode cross --json": ATKCommandResult(stdout: #"[{"lever":"3","mgnMode":"cross","instId":"BTC-USDT-SWAP"}]"#),
+        "--demo swap place --instId BTC-USDT-SWAP --side sell --ordType market --sz 1 --tdMode cross --json": ATKCommandResult(stdout: #"[{"ordId":"demo-lever-3","sCode":"0"}]"#)
+    ])
+    let order = LiveOrderRequest(instrumentID: "BTC-USDT-SWAP", side: "sell", quantity: 1, leverage: 3)
+    let result = try await ATKClient(runner: runner).placeDemoSwapOrder(order)
+    #expect(result.orderID == "demo-lever-3")
+}
+
+@Test
+func rejectsEntryWhenConfiguredLeverageCannotBeApplied() async throws {
+    let runner = StubATKRunner(outputs: [
+        "config show --json": ATKCommandResult(stdout: #"{"default_profile":"demo","profiles":{"demo":{"site":"global","api_key":"key","demo":true}}}"#),
+        "market instruments --instType SWAP --instId BTC-USDT-SWAP --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","ctVal":"1","ctMult":"1","lotSz":"1","minSz":"1","tickSz":"0.1","state":"live","ctType":"linear","settleCcy":"USDT"}]"#),
+        "--demo swap leverage --instId BTC-USDT-SWAP --lever 3 --mgnMode cross --json": ATKCommandResult(stdout: #"{"code":"51000","msg":"leverage rejected"}"#),
+        "--demo swap place --instId BTC-USDT-SWAP --side sell --ordType market --sz 1 --tdMode cross --json": ATKCommandResult(stdout: #"[{"ordId":"must-not-place","sCode":"0"}]"#)
+    ])
+    let order = LiveOrderRequest(instrumentID: "BTC-USDT-SWAP", side: "sell", quantity: 1, leverage: 3)
+    await #expect(throws: ATKError.commandFailed(code: 51000, message: "leverage rejected")) {
+        try await ATKClient(runner: runner).placeDemoSwapOrder(order)
+    }
+}
+
+@Test
+func liveOrderRequestKeepsLeverageCodableCompatibility() throws {
+    let decoder = JSONDecoder()
+    let legacy = try decoder.decode(LiveOrderRequest.self, from: Data(#"{"instrumentID":"BTC-USDT-SWAP","side":"buy","quantity":1}"#.utf8))
+    #expect(legacy.leverage == nil)
+
+    let request = LiveOrderRequest(instrumentID: "BTC-USDT-SWAP", side: "buy", quantity: 1, leverage: 2.5)
+    let encoded = try JSONEncoder().encode(request)
+    let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+    #expect((object?["leverage"] as? NSNumber)?.doubleValue == 2.5)
+}
+
+@Test
+func rejectsLeverageOutsideGatewayRange() async throws {
+    for leverage in [Decimal.zero, Decimal(string: "100.5")!] {
+        let order = LiveOrderRequest(instrumentID: "BTC-USDT-SWAP", side: "buy", quantity: 1, leverage: leverage)
+        await #expect(throws: ATKError.invalidOrder("杠杆必须是 1 到 100 倍之间的有限值")) {
+            try await ATKClient(runner: StubATKRunner(outputs: [:])).placeDemoSwapOrder(order)
+        }
+    }
 }
 
 @Test

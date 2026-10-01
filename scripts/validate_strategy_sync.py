@@ -81,6 +81,8 @@ def main() -> int:
     if integration.get("account_daily_loss_circuit_breaker") != "implemented":
         fail(errors, "策略实验室未声明账户级日损熔断已接入")
     position_management = config.get("position_management", {})
+    if position_management.get("leverage") != 2.0:
+        fail(errors, "扫顶策略实验室杠杆必须为 2 倍")
     if position_management.get("risk_per_trade_pct") != 1.0:
         fail(errors, "策略实验室单笔风险默认值必须为 1%")
     if position_management.get("risk_per_trade_max_pct") != 5.0:
@@ -238,6 +240,8 @@ def main() -> int:
             fail(errors, "EMA 策略实验室运行范围必须是 dynamic.hotAltcoins")
         if ema_runtime.get("max_concurrent_positions") != 1 or ema_runtime.get("max_open_risk_pct") != 0.5:
             fail(errors, "EMA 策略实验室必须限制为单币种和 0.5% 开放风险")
+        if ema_config.get("portfolio", {}).get("leverage") != 2.0:
+            fail(errors, "EMA 策略实验室杠杆必须为 2 倍")
         if ema_config.get("universe", {}).get("one_active_symbol_per_strategy") is not True:
             fail(errors, "EMA 策略实验室未声明策略实例只允许一个活动币种")
     except Exception as exc:

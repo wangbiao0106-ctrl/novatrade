@@ -24,7 +24,9 @@ func backendStrategyPackageLifecycle() async throws {
 
     let paper = PaperTradingStore(directory: state)
     let registry = StrategyPackageRegistry(directory: packages)
-    let backend = TradingBackend(paper: paper, strategyPackages: registry)
+    let risk = RiskEngine(initialEquity: 100_000)
+    await risk.synchronizeStrategyCapital(100_000)
+    let backend = TradingBackend(paper: paper, riskEngine: risk, strategyPackages: registry)
     let installed = try await backend.installStrategyPackage(StrategyPackageInstallRequest(path: "demo"))
     #expect(installed.identifier == "hlsr")
     #expect((await backend.strategyPackageManifests()).count == 1)

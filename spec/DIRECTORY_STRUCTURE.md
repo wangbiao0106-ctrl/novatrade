@@ -62,6 +62,7 @@ spec/                               稳定的工程规范和接口约定
 | `strategies/sweep_reversal_short/` | 山寨币二次扫顶做空 | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.3）|
 | `strategies/ema_altcoin_long/` | 双均线交易山寨币做多 | 已集成 `Sources/TradingService/StrategyEngine.swift`；目录同时保存规则真源、回测和参数验证 |
 | `strategies/ema_3line_pullback/` | EMA 20/60/120 回踩策略族历史研究（四方向） | 研究归档，不是规则真源，未接入运行时 |
+| `strategies/extreme_wick_short/` | 山寨日内涨幅超过 60% 且相对 30 日低点至少 3 倍的 15m 双挂单做空 | 研究候选，未接入运行时 |
 
 ## 迁移检查
 

@@ -23,6 +23,14 @@ func hlsrDefaults() {
     #expect(type.defaultParameters["partialTarget1"] == 0.3)
     #expect(type.defaultParameters["partialTarget2"] == 0.3)
     #expect(type.defaultParameters["partialTarget3"] == 0.4)
+    #expect(type.defaultParameters["leverage"] == 2)
+}
+
+@Test("All built-in strategies expose a two-times default leverage")
+func builtInStrategyDefaultLeverage() {
+    for type in StrategyType.availableCases {
+        #expect(type.defaultParameters["leverage"] == 2)
+    }
 }
 
 @Test("HLSR strategy config persists its 15m entry interval")

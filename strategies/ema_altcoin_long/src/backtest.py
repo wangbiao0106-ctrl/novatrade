@@ -278,7 +278,11 @@ def main() -> None:
     parser.add_argument("--max-symbols", type=int, default=0, help="training-period quote-volume cap (default: config value)")
     args = parser.parse_args()
     config = json.loads((LAB / "config/strategy.json").read_text())
-    p = config["signal_parameters"] | {"fee_rate": config["costs"]["fee_rate"], "slippage": config["costs"]["slippage"]}
+    p = config["signal_parameters"] | {
+        "fee_rate": config["costs"]["fee_rate"],
+        "slippage": config["costs"]["slippage"],
+        "leverage": config.get("portfolio", {}).get("leverage", 2.0),
+    }
     files = [path for path in DATA.glob("*_USDT_SWAP_5m_*.jsonl.gz") if is_altcoin(base(path)) or base(path) == "BTC"]
     series = {base(path): load(path) for path in files}
     min_bars = p["ema_trend"] + 40

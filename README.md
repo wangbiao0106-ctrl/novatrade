@@ -118,7 +118,7 @@ python3 strategies/hlsr/src/hlsr_signal_generator.py \
 - 稳定策略标识：`sweepReversalShort`；UI 显示名称：`山寨币二次扫顶做空`
 - 运行范围：后台每 30 秒刷新行情，排除主流币、稳定币及非加密资产后，按 24h 报价成交额动态扫描前 20 个 USDT 线性永续山寨币；177 个推荐标的只属于历史回测基线，不是固定运行名单
 - 门控数据流：`PaperTradingStore` 缓存 BTC 1H K 线，取不晚于信号时刻的最近已确认 bar；历史不足 200 根或无法对齐时门控不通过
-- UI：新建策略对话框可选"山寨币二次扫顶做空"规则
+- UI：点击“添加”先从三张策略卡片选择规则，再配置 USDT 资金池和杠杆；内置策略默认 2 倍杠杆，可在 1–100 倍范围调整
 - 单元测试：`Tests/OKXGatewayTests/SweepReversalStrategyTests.swift`（含门控、假突破、15m 确认窗口边界、冷却幂等、跨标的信号隔离）
 - 研究与回测：已上线规则口径为 177 个历史快照 54 个结构 → 41 笔、胜率 56.1%、盈亏比 1.53R、期望 +0.37R/笔（复现入口 `strategies/sweep_reversal_short/research/report_live_rule.py`）；不代表动态榜单未来绩效
 

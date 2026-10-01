@@ -119,6 +119,23 @@ public struct LiveOrderCommandResult: Codable, Equatable, Sendable {
     }
 }
 
+/// The exchange's net result for one closed position, including its trading
+/// fees and funding. Matching the stable position ID avoids attributing an
+/// unrelated trade on the same instrument to a strategy.
+public struct ClosedSwapPositionSnapshot: Equatable, Sendable {
+    public let positionID: String
+    public let instrumentID: String
+    public let realizedPnL: Decimal
+    public let closedAt: Date
+
+    public init(positionID: String, instrumentID: String, realizedPnL: Decimal, closedAt: Date) {
+        self.positionID = positionID
+        self.instrumentID = instrumentID
+        self.realizedPnL = realizedPnL
+        self.closedAt = closedAt
+    }
+}
+
 public struct ATKClient: Sendable {
     private let runner: any ATKCommandRunning
     private let decoder: JSONDecoder
@@ -400,9 +417,14 @@ public struct ATKClient: Sendable {
 
     private func placeSwapOrder(_ request: LiveOrderRequest, mode: SwapOrderMode) async throws -> LiveOrderCommandResult {
         try Self.validateInstrumentID(request.instrumentID)
+        if let clientOrderID = request.clientOrderID { try Self.validateClientOrderID(clientOrderID) }
         guard ["buy", "sell"].contains(request.side.lowercased()) else { throw ATKError.invalidOrder("方向必须是 buy 或 sell") }
         guard ["market", "limit"].contains(request.orderType.lowercased()) else { throw ATKError.invalidOrder("只支持 market 或 limit") }
         guard request.quantity > 0, request.quantity.isFinite else { throw ATKError.invalidOrder("数量必须是有限的正数") }
+        if let leverage = request.leverage,
+           !(leverage.isFinite && leverage >= 1 && leverage <= 100) {
+            throw ATKError.invalidOrder("杠杆必须是 1 到 100 倍之间的有限值")
+        }
         guard ["cross", "isolated"].contains(request.marginMode.lowercased()) else { throw ATKError.invalidOrder("保证金模式必须是 cross 或 isolated") }
         if let positionSide = request.positionSide, !positionSide.isEmpty, !["net", "long", "short"].contains(positionSide.lowercased()) {
             throw ATKError.invalidOrder("持仓方向必须是 net、long 或 short")
@@ -438,9 +460,20 @@ public struct ATKClient: Sendable {
             }
         }
 
-        var arguments = [mode == .live ? "--live" : "--demo", "swap", "place", "--instId", request.instrumentID, "--side", request.side.lowercased(), "--ordType", request.orderType.lowercased(), "--sz", Self.decimalText(request.quantity), "--tdMode", request.marginMode.lowercased()]
+        let modeArgument = mode == .live ? "--live" : "--demo"
+        // The CLI ignores --lever on swap place. Apply leverage through its
+        // dedicated account command and abort the entry if OKX rejects it.
+        if let leverage = request.leverage, !request.reduceOnly {
+            var leverageArguments = [modeArgument, "swap", "leverage", "--instId", request.instrumentID, "--lever", Self.decimalText(leverage), "--mgnMode", request.marginMode.lowercased()]
+            if let positionSide = request.positionSide, ["long", "short"].contains(positionSide.lowercased()) {
+                leverageArguments += ["--posSide", positionSide.lowercased()]
+            }
+            _ = try await mutateSwap(leverageArguments)
+        }
+        var arguments = [modeArgument, "swap", "place", "--instId", request.instrumentID, "--side", request.side.lowercased(), "--ordType", request.orderType.lowercased(), "--sz", Self.decimalText(request.quantity), "--tdMode", request.marginMode.lowercased()]
         if let positionSide = request.positionSide, !positionSide.isEmpty { arguments += ["--posSide", positionSide.lowercased()] }
         if request.reduceOnly { arguments.append("--reduceOnly") }
+        if let clientOrderID = request.clientOrderID { arguments += ["--clOrdId", clientOrderID] }
         if let price = request.price { arguments += ["--px", Self.decimalText(price)] }
         if let takeProfit = request.takeProfitTriggerPrice {
             arguments += ["--tpTriggerPx", Self.decimalText(takeProfit), "--tpOrdPx", "-1", "--tpOrdKind", "condition", "--tpTriggerPxType", "mark"]
@@ -469,6 +502,63 @@ public struct ATKClient: Sendable {
         let root = try await runJSON(["swap", "orders"])
         guard let rows = Self.objectRows(root) else { throw ATKError.invalidJSON("订单响应格式无效") }
         return try rows.compactMap(Self.decodeOrder)
+    }
+
+    /// Looks up one exact client order id. Only OKX's explicit 51603
+    /// (order does not exist) is an absent order; network/auth failures and
+    /// malformed/empty success responses remain errors so recovery cannot
+    /// interpret them as permission to submit another order.
+    public func swapOrder(instrumentID: String, clientOrderID: String, demo: Bool) async throws -> OrderSnapshot? {
+        try Self.validateInstrumentID(instrumentID)
+        try Self.validateClientOrderID(clientOrderID)
+        let arguments = [demo ? "--demo" : "--live", "swap", "get", "--instId", instrumentID, "--clOrdId", clientOrderID, "--json"]
+        let result = try await runner.run(arguments: arguments)
+        let root = try? JSONSerialization.jsonObject(with: Data(result.stdout.utf8))
+        if let root, let failure = Self.responseFailure(root, defaultMessage: "OKX 订单查询失败") {
+            if failure.code == 51603 { return nil }
+            throw ATKError.commandFailed(code: failure.code, message: failure.message)
+        }
+        guard result.exitCode == 0 else {
+            // The installed CLI prints API failures to stderr as separate
+            // `Code: ...` lines even with --json. Match that exact line rather
+            // than finding a code in an unrelated error/hint sentence.
+            let codeLines = result.stderr.split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            if codeLines.contains("Code: 51603") { return nil }
+            let message = result.stderr.isEmpty ? result.stdout : result.stderr
+            throw ATKError.commandFailed(code: result.exitCode, message: message.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        guard let root, let rows = Self.objectRows(root), rows.count == 1,
+              let order = try Self.decodeOrder(rows[0]), order.instrumentID == instrumentID,
+              (rows[0]["clOrdId"] as? String ?? rows[0]["clientOrderId"] as? String) == clientOrderID else {
+            throw ATKError.invalidJSON("订单查询未返回匹配的客户端订单号")
+        }
+        return order
+    }
+
+    private static func validateClientOrderID(_ value: String) throws {
+        guard (1...32).contains(value.utf8.count),
+              value.utf8.allSatisfy({ byte in
+                  (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
+              }) else {
+            throw ATKError.invalidOrder("客户端订单号必须是 1 到 32 位字母或数字")
+        }
+    }
+
+    public func closedSwapPositions(instrumentID: String) async throws -> [ClosedSwapPositionSnapshot] {
+        try Self.validateInstrumentID(instrumentID)
+        let root = try await runJSON(["account", "positions-history", "--instType", "SWAP", "--instId", instrumentID, "--limit", "100"])
+        guard let rows = Self.objectRows(root) else { throw ATKError.invalidJSON("历史持仓响应格式无效") }
+        return try rows.map { row in
+            guard let returnedID = Self.requiredText(row["instId"]), returnedID == instrumentID,
+                  let positionID = Self.requiredText(row["posId"]), Self.isSafeIdentifier(positionID),
+                  let realized = Self.decimal(row["realizedPnl"]), realized.isFinite,
+                  let closedAt = Self.date(row["uTime"]) else {
+                throw ATKError.invalidJSON("历史持仓缺少有效合约、持仓标识、净盈亏或结算时间")
+            }
+            return ClosedSwapPositionSnapshot(positionID: positionID, instrumentID: returnedID,
+                                              realizedPnL: realized, closedAt: closedAt)
+        }
     }
 
     private static func todayPnL(from root: Any, now: Date) -> Decimal {

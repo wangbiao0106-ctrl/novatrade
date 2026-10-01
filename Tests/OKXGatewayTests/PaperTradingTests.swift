@@ -77,6 +77,46 @@ func emaAltcoinLongIsAvailableAndCanonicalized() async throws {
     #expect(created.instrumentID.isEmpty)
     #expect(created.riskPercent == 0.5)
     #expect(created.parameters["maxConcurrentPositions"] == 1)
+    #expect(created.parameters["leverage"] == 2)
+}
+
+@Test("Strategy store keeps a user-selected leverage override")
+func strategyStorePreservesCustomLeverage() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("novatrade-strategy-leverage-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PaperTradingStore(directory: directory)
+    var parameters = StrategyType.sweepReversalShort.defaultParameters
+    parameters["leverage"] = 3
+    let input = StrategyConfig(name: StrategyType.sweepReversalShort.displayName,
+                               scope: .dynamic(.hotAltcoins), interval: .oneHour,
+                               type: .sweepReversalShort, parameters: parameters)
+
+    let created = try await store.create(input)
+    #expect(created.parameters["leverage"] == 3)
+
+    var updated = created
+    updated.parameters["leverage"] = 1
+    let saved = try await store.update(updated)
+    #expect(saved.parameters["leverage"] == 1)
+}
+
+@Test("Strategy store rejects leverage outside the supported range")
+func strategyStoreRejectsInvalidLeverage() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("novatrade-strategy-invalid-leverage-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PaperTradingStore(directory: directory)
+    var parameters = StrategyType.sweepReversalShort.defaultParameters
+    parameters["leverage"] = 100.5
+    do {
+        _ = try await store.create(StrategyConfig(name: StrategyType.sweepReversalShort.displayName,
+                                                   scope: .dynamic(.hotAltcoins), interval: .oneHour,
+                                                   type: .sweepReversalShort, parameters: parameters))
+        Issue.record("expected leverage above 100x to be rejected")
+    } catch PaperTradingStore.StoreError.unsupported {
+        // Expected.
+    }
 }
 
 @Test
@@ -152,10 +192,11 @@ func tradingBackendCannotRestartStrategyWhileAccountKillSwitchIsLatched() async 
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-kill-switch-start-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let risk = RiskEngine(initialEquity: 1_000)
-    let lossTime = Date(timeIntervalSince1970: 1_700_000_000)
-    await risk.record(realizedPnL: -60, now: lossTime)
+    await risk.synchronizeStrategyCapital(1_000)
     let backend = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: risk)
     let config = try await backend.createStrategy(StrategyConfig(name: "山寨币二次扫顶做空", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort))
+    let lossTime = Date(timeIntervalSince1970: 1_700_000_000)
+    await risk.record(realizedPnL: -60, now: lossTime)
 
     do {
         _ = try await backend.startStrategy(config.id)
@@ -170,13 +211,17 @@ func deletingStrategyPersistsRemovalOfItsCapitalPool() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-pool-delete-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
 
-    let first = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: RiskEngine(initialEquity: 10_000))
+    let firstRisk = RiskEngine(initialEquity: 10_000)
+    await firstRisk.synchronizeStrategyCapital(10_000)
+    let first = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: firstRisk)
     let config = StrategyConfig(name: "山寨币二次扫顶做空", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
     let created = try await first.createStrategy(config)
     #expect((await first.strategyCapital()).contains { $0.strategyID == created.id })
     _ = try await first.deleteStrategy(created.id)
 
-    let second = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: RiskEngine(initialEquity: 10_000))
+    let secondRisk = RiskEngine(initialEquity: 10_000)
+    await secondRisk.synchronizeStrategyCapital(10_000)
+    let second = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: secondRisk)
     #expect((await second.strategyCapital()).isEmpty)
 }
 
@@ -290,6 +335,110 @@ func paperBrokerReduceOnlyFullCloseReleasesPositionSlot() async throws {
     #expect(capital.openPositions == 0)
     #expect(capital.reservedCapital == 0)
     #expect((await broker.allPositions()).isEmpty)
+}
+
+@Test
+func paperBrokerTracksAndReleasesStopRiskReservations() async throws {
+    let risk = RiskEngine(limits: RiskLimits(maxMarginPercent: 100, minOrderIntervalSeconds: 0), initialEquity: 10_000)
+    let broker = PaperBroker(risk: risk, feeRate: 0, slippageBps: 0)
+    let strategyID = UUID()
+    _ = await risk.registerStrategy(strategyID, allocationPercent: 100)
+    let base = Date(timeIntervalSince1970: 1_700_000_200)
+
+    guard case .success = await broker.submit(
+        strategyID: strategyID, instrumentID: "ALT-USDT-SWAP", side: "long",
+        quantity: 1, referencePrice: 100, requestedAt: base,
+        riskAmount: 400, maxOpenRiskPercent: 5, maxConcurrentPositions: 2
+    ) else {
+        Issue.record("entry with a valid stop-risk budget should be accepted")
+        return
+    }
+    await broker.processNextOpen(instrumentID: "ALT-USDT-SWAP", candle: Candle(timestamp: base.addingTimeInterval(60), open: 100, high: 100, low: 100, close: 100))
+    #expect((await risk.strategyCapital(strategyID)).openRisk == Decimal(400))
+
+    let overRisk = await broker.submit(
+        strategyID: strategyID, instrumentID: "OTHER-USDT-SWAP", side: "long",
+        quantity: 1, referencePrice: 100, requestedAt: base.addingTimeInterval(120),
+        riskAmount: 101, maxOpenRiskPercent: 5, maxConcurrentPositions: 2
+    )
+    guard case .failure(let error) = overRisk else {
+        Issue.record("the aggregate stop-risk cap should reject the second entry")
+        return
+    }
+    #expect(error.localizedDescription == "策略开放止损风险超过上限")
+
+    guard case .success = await broker.submit(
+        strategyID: strategyID, instrumentID: "ALT-USDT-SWAP", side: "short",
+        quantity: 1, referencePrice: 100, requestedAt: base.addingTimeInterval(180),
+        reduceOnly: true
+    ) else {
+        Issue.record("reduce-only close should remain available")
+        return
+    }
+    await broker.processNextOpen(instrumentID: "ALT-USDT-SWAP", candle: Candle(timestamp: base.addingTimeInterval(240), open: 100, high: 100, low: 100, close: 100))
+    let pool = await risk.strategyCapital(strategyID)
+    #expect(pool.openRisk == 0)
+    #expect(pool.openPositions == 0)
+}
+
+@Test
+func paperBrokerReversalRetainsOnlyResidualStopRisk() async throws {
+    let risk = RiskEngine(limits: RiskLimits(maxMarginPercent: 100, minOrderIntervalSeconds: 0), initialEquity: 10_000)
+    let broker = PaperBroker(risk: risk, feeRate: 0, slippageBps: 0)
+    let strategyID = UUID()
+    let base = Date(timeIntervalSince1970: 1_700_000_300)
+
+    guard case .success = await broker.submit(
+        strategyID: strategyID, instrumentID: "ALT-USDT-SWAP", side: "long",
+        quantity: 10, referencePrice: 100, requestedAt: base,
+        riskAmount: 100, maxOpenRiskPercent: 5, maxConcurrentPositions: 2
+    ) else {
+        Issue.record("first controlled order should register its strategy pool")
+        return
+    }
+    await broker.processNextOpen(instrumentID: "ALT-USDT-SWAP", candle: Candle(timestamp: base.addingTimeInterval(60), open: 100, high: 100, low: 100, close: 100))
+
+    guard case .success = await broker.submit(
+        strategyID: strategyID, instrumentID: "ALT-USDT-SWAP", side: "short",
+        quantity: 4, referencePrice: 100, requestedAt: base.addingTimeInterval(120),
+        reduceOnly: true
+    ) else { Issue.record("partial close should be accepted"); return }
+    await broker.processNextOpen(instrumentID: "ALT-USDT-SWAP", candle: Candle(timestamp: base.addingTimeInterval(180), open: 100, high: 100, low: 100, close: 100))
+    #expect((await risk.strategyCapital(strategyID)).openRisk == Decimal(60))
+
+    guard case .success = await broker.submit(
+        strategyID: strategyID, instrumentID: "ALT-USDT-SWAP", side: "short",
+        quantity: 8, referencePrice: 100, requestedAt: base.addingTimeInterval(240),
+        riskAmount: 80, maxOpenRiskPercent: 5, maxConcurrentPositions: 2
+    ) else { Issue.record("reversal should be accepted"); return }
+    await broker.processNextOpen(instrumentID: "ALT-USDT-SWAP", candle: Candle(timestamp: base.addingTimeInterval(300), open: 100, high: 100, low: 100, close: 100))
+    let reversed = await risk.strategyCapital(strategyID)
+    #expect(reversed.openRisk == Decimal(20))
+    #expect(reversed.openPositions == 1)
+
+    _ = await broker.flattenAll(at: base.addingTimeInterval(360))
+    let flat = await risk.strategyCapital(strategyID)
+    #expect(flat.openRisk == 0)
+    #expect(flat.openPositions == 0)
+}
+
+@Test
+func paperBrokerCancellationReleasesStopRiskAndPositionSlot() async throws {
+    let risk = RiskEngine(limits: RiskLimits(maxMarginPercent: 100, minOrderIntervalSeconds: 0), initialEquity: 10_000)
+    let broker = PaperBroker(risk: risk, feeRate: 0, slippageBps: 0)
+    let strategyID = UUID()
+    guard case .success = await broker.submit(
+        strategyID: strategyID, instrumentID: "ALT-USDT-SWAP", side: "long",
+        quantity: 1, referencePrice: 100, riskAmount: 400,
+        maxOpenRiskPercent: 5, maxConcurrentPositions: 1
+    ) else { Issue.record("controlled paper entry should be accepted"); return }
+
+    await broker.cancelPendingOrders(strategyID: strategyID)
+    let pool = await risk.strategyCapital(strategyID)
+    #expect(pool.openRisk == 0)
+    #expect(pool.openPositions == 0)
+    #expect(pool.reservedCapital == 0)
+    #expect((await broker.allOrders()).first?.status == "cancelled")
 }
 
 @Test
@@ -444,7 +593,7 @@ func riskEngineTripwiresDailyLossOnMarkToMarketEquity() async {
 }
 
 @Test
-func riskEngineDoesNotUseCumulativeDrawdownAsAccountKillSwitch() async {
+func riskEngineTripwiresCumulativeDrawdownLimit() async {
     let risk = RiskEngine(initialEquity: 10_000)
     let calendar = Calendar(identifier: .gregorian)
     let dayOne = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 12))!
@@ -457,7 +606,8 @@ func riskEngineDoesNotUseCumulativeDrawdownAsAccountKillSwitch() async {
     let snapshot = await risk.snapshot(now: dayTwo)
     #expect(snapshot.drawdownPercent > 10)
     #expect(snapshot.dailyPnLPercent > -5)
-    #expect(!snapshot.killSwitch)
+    #expect(snapshot.killSwitch)
+    #expect(snapshot.reason == "累计回撤熔断")
 }
 
 @Test
@@ -515,7 +665,9 @@ func riskEngineRestoreDoesNotCarryStalePoolMarkAfterRestart() async {
                 initialCapital: 5_000,
                 equity: 5_000,
                 reservedCapital: 125,
-                unrealizedPnL: 275
+                unrealizedPnL: 275,
+                openRisk: 12,
+                openPositions: 1
             )
         ]
     )
@@ -525,8 +677,10 @@ func riskEngineRestoreDoesNotCarryStalePoolMarkAfterRestart() async {
     let pool = await risk.strategyCapital(strategyID)
     #expect(pool.equity == Decimal(5_000))
     #expect(pool.unrealizedPnL == 0)
-    #expect(pool.reservedCapital == 0)
-    #expect(pool.availableCapital == Decimal(5_000))
+    #expect(pool.reservedCapital == Decimal(125))
+    #expect(pool.openRisk == Decimal(12))
+    #expect(pool.openPositions == 1)
+    #expect(pool.availableCapital == Decimal(4_875))
 }
 
 @Test
@@ -542,6 +696,181 @@ func riskEngineFirstAccountSyncUsesRealEquityAsBaseline() async {
     let decision = await risk.authorize(instrumentID: "BTC-USDT-SWAP", notional: 260, margin: 260, now: now)
     #expect(!decision.allowed)
     #expect(decision.reason == "单笔保证金超过权益比例")
+}
+
+@Test
+func riskEngineRejectsNewOrdersAfterAuthenticatedEquityReachesZero() async {
+    let risk = RiskEngine(initialEquity: 100_000)
+    await risk.synchronizeEquity(0)
+
+    let snapshot = await risk.snapshot()
+    #expect(snapshot.equity == 0)
+    #expect(snapshot.killSwitch)
+    #expect(snapshot.reason == "账户权益为零")
+
+    let entry = await risk.authorize(instrumentID: "BTC-USDT-SWAP", notional: 100, margin: 10)
+    #expect(!entry.allowed)
+    #expect(entry.reason == "账户权益为零")
+
+    // Reduce-only exits remain available so an empty account can still close
+    // a stale remote position during cleanup.
+    let exit = await risk.authorize(instrumentID: "BTC-USDT-SWAP", notional: 100, margin: 10, reduceOnly: true)
+    #expect(exit.allowed)
+}
+
+@Test
+func riskEngineRestorePreservesAuthenticatedZeroEquityCircuitBreaker() async {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let persisted = RiskSnapshot(
+        equity: 0,
+        equityPeak: 0,
+        dayStartEquity: 0,
+        dayStartAt: now,
+        killSwitch: false,
+        reason: nil,
+        strategyCapitalBase: 0
+    )
+    let risk = RiskEngine(initialEquity: 100_000)
+    await risk.restore(persisted, now: now)
+
+    let snapshot = await risk.snapshot(now: now)
+    #expect(snapshot.equity == 0)
+    #expect(snapshot.killSwitch)
+    #expect(snapshot.reason == "账户权益为零")
+
+    let entry = await risk.authorize(instrumentID: "BTC-USDT-SWAP", notional: 100, margin: 10, now: now)
+    #expect(!entry.allowed)
+    #expect(entry.reason == "账户权益为零")
+
+    let exit = await risk.authorize(instrumentID: "BTC-USDT-SWAP", notional: 100, margin: 10, reduceOnly: true, now: now)
+    #expect(exit.allowed)
+}
+
+@Test
+func strategyPoolsUseUSDTBaseWhileGlobalEquityStaysAllAsset() async {
+    let risk = RiskEngine(initialEquity: 100_000)
+    let strategyID = UUID()
+    _ = await risk.registerStrategy(strategyID, allocationPercent: 50)
+
+    await risk.synchronizeEquity(100_000)
+    await risk.synchronizeStrategyCapital(20_000)
+
+    let pool = await risk.strategyCapital(strategyID)
+    let snapshot = await risk.snapshot()
+    #expect(pool.initialCapital == Decimal(10_000))
+    #expect(pool.equity == Decimal(10_000))
+    #expect(snapshot.equity == Decimal(100_000))
+    #expect(snapshot.strategyCapitalBase == Decimal(20_000))
+}
+
+@Test
+func zeroUSDTBaseDoesNotFallBackToAccountEquity() async {
+    let risk = RiskEngine(initialEquity: 100_000)
+    let first = UUID()
+    let second = UUID()
+    _ = await risk.registerStrategy(first, allocationPercent: 50)
+
+    await risk.synchronizeStrategyCapital(0)
+    _ = await risk.registerStrategy(second, allocationPercent: 100)
+
+    let pools = await risk.strategyCapitals()
+    #expect(pools.allSatisfy { $0.equity == 0 && $0.initialCapital == 0 })
+    #expect((await risk.snapshot()).equity == Decimal(100_000))
+    #expect((await risk.snapshot()).strategyCapitalBase == 0)
+}
+
+@Test
+func strategyPoolShrinksToNewUSDTAllocationWithOpenReservation() async {
+    let risk = RiskEngine(limits: RiskLimits(maxMarginPercent: 100, minOrderIntervalSeconds: 0), initialEquity: 10_000)
+    let strategyID = UUID()
+    await risk.synchronizeStrategyCapital(10_000)
+    _ = await risk.registerStrategy(strategyID, allocationPercent: 100)
+
+    let entry = await risk.authorize(
+        instrumentID: "ALT-USDT-SWAP", notional: 4_000, margin: 4_000,
+        strategyID: strategyID, poolAllocationPercent: 100
+    )
+    #expect(entry.allowed)
+
+    await risk.synchronizeStrategyCapital(5_000)
+    let pool = await risk.strategyCapital(strategyID)
+    #expect(pool.equity == Decimal(5_000))
+    #expect(pool.reservedCapital == Decimal(4_000))
+    #expect(pool.availableCapital == Decimal(1_000))
+
+    let oversized = await risk.authorize(
+        instrumentID: "OTHER-USDT-SWAP", notional: 1_001, margin: 1_001,
+        strategyID: strategyID, poolAllocationPercent: 100
+    )
+    #expect(!oversized.allowed)
+    #expect(oversized.reason == "策略资金池可用余额不足")
+}
+
+@Test
+func existingStrategyAllocationUpdateResizesRuntimePool() async {
+    let risk = RiskEngine(initialEquity: 10_000)
+    await risk.synchronizeStrategyCapital(10_000)
+    let strategyID = UUID()
+    let initial = await risk.registerStrategy(strategyID, allocationPercent: 50)
+    #expect(initial.equity == Decimal(5_000))
+
+    let updated = await risk.updateStrategyAllocation(strategyID, allocationPercent: 80)
+    #expect(updated.allocationPercent == Decimal(80))
+    #expect(updated.initialCapital == Decimal(8_000))
+    #expect(updated.equity == Decimal(8_000))
+}
+
+@Test
+func newStrategyAllocationUsesRemainingUSDTPoolEquity() async {
+    let risk = RiskEngine(initialEquity: 100_000)
+    await risk.synchronizeStrategyCapital(10_000)
+    let first = await risk.registerStrategy(UUID(), allocationPercent: 60)
+    let second = await risk.registerStrategy(UUID(), allocationPercent: 60)
+
+    #expect(first.allocationPercent == Decimal(60))
+    #expect(first.equity == Decimal(6_000))
+    #expect(second.allocationPercent == Decimal(40))
+    #expect(second.equity == Decimal(4_000))
+}
+
+@Test
+func legacyPoolMigrationUsesUSDTAndCapsPoolsToCurrentBalance() async {
+    let firstID = UUID()
+    let secondID = UUID()
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let persisted = RiskSnapshot(
+        equity: 100_000,
+        equityPeak: 100_000,
+        dayStartEquity: 100_000,
+        dayStartAt: now,
+        strategyCapitals: [
+            StrategyCapitalSnapshot(strategyID: firstID, allocationPercent: 50,
+                                     initialCapital: 50_000, equity: 51_000,
+                                     reservedCapital: 2_000, realizedPnL: 1_000,
+                                     openRisk: 100, openPositions: 1),
+            StrategyCapitalSnapshot(strategyID: secondID, allocationPercent: 50,
+                                     initialCapital: 50_000, equity: 50_000)
+        ]
+    )
+    let risk = RiskEngine(initialEquity: 1)
+    await risk.restore(persisted, now: now)
+    await risk.synchronizeStrategyCapital(20_000, now: now)
+
+    let first = await risk.strategyCapital(firstID)
+    let second = await risk.strategyCapital(secondID)
+    #expect(first.initialCapital == Decimal(10_000))
+    #expect(first.equity == Decimal(10_000))
+    #expect(first.reservedCapital == Decimal(2_000))
+    #expect(first.openRisk == Decimal(100))
+    #expect(first.openPositions == 1)
+    #expect(second.initialCapital == Decimal(10_000))
+    #expect(second.equity == Decimal(10_000))
+
+    await risk.synchronizeStrategyCapital(10_000, now: now.addingTimeInterval(1))
+    let resizedFirst = await risk.strategyCapital(firstID)
+    let resizedSecond = await risk.strategyCapital(secondID)
+    #expect(resizedFirst.equity == Decimal(5_000))
+    #expect(resizedSecond.equity == Decimal(5_000))
 }
 
 @Test

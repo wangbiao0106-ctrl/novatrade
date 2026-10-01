@@ -110,6 +110,7 @@ def lab_parameters(config_path=LAB_CONFIG_PATH):
         "atr_period": int(signal["atr_period"]), "buf_atr": float(signal["buffer_atr"]),
         "tp_mult": float(signal["take_profit_r"]), "min_atr_pct": float(signal["min_atr_pct"]),
         "max_risk_atr": float(signal["max_risk_atr"]), "max_hold_bars": int(payload.get("position_management", {}).get("time_exit_bars", 96)),
+        "leverage": float(payload.get("position_management", {}).get("leverage", 2.0)),
         "fee": float(costs.get("fee_rate_one_way", 0.0005)),
     }
     return detect, filters, costs_out

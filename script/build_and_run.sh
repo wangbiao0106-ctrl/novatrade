@@ -12,9 +12,13 @@ DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
+APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_EXECUTABLE"
 SERVICE_BINARY="$APP_MACOS/okx-locald"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
+ICONSET_DIR="$ROOT_DIR/Sources/MacTraderApp/Resources/NovaTrade.iconset"
+ICON_FILE="$APP_RESOURCES/NovaTrade.icns"
+DMG_FILE="$DIST_DIR/NovaTrade.dmg"
 
 pkill -x "$APP_EXECUTABLE" >/dev/null 2>&1 || true
 pkill -x "okx-locald" >/dev/null 2>&1 || true
@@ -29,11 +33,12 @@ swift build --product okx-locald
 
 BUILD_BIN_DIR="$(swift build --show-bin-path)"
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS"
+mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BIN_DIR/$APP_EXECUTABLE" "$APP_BINARY"
 cp "$BUILD_BIN_DIR/okx-locald" "$SERVICE_BINARY"
 chmod +x "$APP_BINARY"
 chmod +x "$SERVICE_BINARY"
+iconutil -c icns "$ICONSET_DIR" -o "$ICON_FILE"
 
 cat > "$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -48,6 +53,10 @@ cat > "$INFO_PLIST" <<PLIST
   <string>$APP_NAME</string>
   <key>CFBundleDisplayName</key>
   <string>$APP_NAME</string>
+  <key>CFBundleIconFile</key>
+  <string>NovaTrade</string>
+  <key>CFBundleIconName</key>
+  <string>NovaTrade</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>
@@ -66,6 +75,14 @@ case "$MODE" in
   run)
     open_app
     ;;
+  package|--package)
+    staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/NovaTrade-installer.XXXXXX")"
+    trap 'rm -rf "$staging_dir"' EXIT
+    ditto "$APP_BUNDLE" "$staging_dir/$APP_NAME.app"
+    ln -s /Applications "$staging_dir/Applications"
+    hdiutil create -volname "$APP_NAME" -srcfolder "$staging_dir" -ov -format UDZO "$DMG_FILE" >/dev/null
+    printf 'Created %s\n' "$DMG_FILE"
+    ;;
   --debug|debug)
     lldb -- "$APP_BINARY"
     ;;
@@ -83,7 +100,7 @@ case "$MODE" in
     pgrep -x "$APP_EXECUTABLE" >/dev/null
     ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|package|--debug|--logs|--telemetry|--verify]" >&2
     exit 2
     ;;
 esac

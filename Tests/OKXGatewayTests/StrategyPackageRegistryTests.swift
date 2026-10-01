@@ -19,7 +19,7 @@ func experimentManifestIsParsed() throws {
       },
       "entry_timeframe_minutes": 15,
       "signal_parameters": { "swing_lookback": 6, "allow_range": true },
-      "position_management": { "risk_per_trade_pct": 0.5, "risk_per_trade_max_pct": 5.0, "cooldown_bars": 16 }
+      "position_management": { "leverage": 2.0, "risk_per_trade_pct": 0.5, "risk_per_trade_max_pct": 5.0, "cooldown_bars": 16 }
     }
     """.data(using: .utf8)!
     let manifest = try StrategyPackageRegistry.decodeManifest(json)
@@ -29,11 +29,13 @@ func experimentManifestIsParsed() throws {
     #expect(manifest.entryTimeframeMinutes == 15)
     #expect(manifest.defaultParameters["swingLookback"] == 6)
     #expect(manifest.defaultParameters["allowRange"] == 1)
+    #expect(manifest.defaultParameters["leverage"] == 2)
     #expect(manifest.executableStrategyType == .hlsr)
     let config = try manifest.makeDefaultConfiguration()
     #expect(config.type == .hlsr)
     #expect(config.interval == .fifteenMinutes)
     #expect(config.parameters["swingLookback"] == 6)
+    #expect(config.parameters["leverage"] == 2)
     #expect(config.enabled == false)
 }
 
@@ -91,7 +93,7 @@ func packageManifestFields() async throws {
     { "schema_version": 1, "strategy_id": "hlsr", "package_id": "hlsr", "version": "2.0.0", "display_name": "HLSR 2", "runtime_handler": "hlsr", "lifecycle": "finalized" }
     """.data(using: .utf8)!
     let config = """
-    { "strategy": "HLSR", "version": "1.0.0", "display_name": "HLSR", "runtime": { "strategy_type": "hlsr" }, "signal_parameters": { "swing_lookback": 9 } }
+    { "strategy": "HLSR", "version": "1.0.0", "display_name": "HLSR", "runtime": { "strategy_type": "hlsr" }, "signal_parameters": { "swing_lookback": 9 }, "position_management": { "leverage": 2.0 } }
     """.data(using: .utf8)!
     try fm.createDirectory(at: package, withIntermediateDirectories: true)
     try manifest.write(to: package.appendingPathComponent("manifest.json"))
@@ -102,6 +104,7 @@ func packageManifestFields() async throws {
     #expect(installed.manifest.lifecycle == "finalized")
     #expect(installed.manifest.version == "2.0.0")
     #expect(installed.manifest.defaultParameters["swingLookback"] == 9)
+    #expect(installed.manifest.defaultParameters["leverage"] == 2)
 }
 
 @Test("Swift registry rejects a tampered artifact before replacement")
