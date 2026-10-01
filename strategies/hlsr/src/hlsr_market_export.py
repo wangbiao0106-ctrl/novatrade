@@ -25,6 +25,18 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "strategies/hlsr/results"
 SELECTION_DAYS = 60
 
 
+def report_path(path: Path) -> str:
+    """Path as written into committed reports: relative to the repository
+    root, never an absolute path that leaks the local home directory. Data
+    outside the repository (e.g. a symlinked checkout) keeps only its name."""
+    for candidate in (path.absolute(), path.resolve()):
+        try:
+            return candidate.relative_to(PROJECT_ROOT).as_posix()
+        except ValueError:
+            continue
+    return path.name
+
+
 def load_15m(path: Path) -> list[Bar]:
     # Preserve source timestamps until completeness is checked. Aggregating
     # directly into one value per bucket lets a duplicate 5m row hide a gap.
@@ -190,7 +202,7 @@ def main() -> None:
     passed = all(criteria.values())
     output = args.output_dir
     output.mkdir(parents=True, exist_ok=True)
-    report = {"strategy": "HLSR", "source": str(root), "timeframe": "5m source -> 15m entry", "leverage": float(lab["position"].get("leverage", 2.0)), "window": {"start": start.isoformat(), "end": end.isoformat()}, "source_files": len(paths), "eligible_symbols": len(eligible), "selected_symbols": selected, "hard_filters": dict(lab["hard"]), "screening_stats": {symbol: stats[symbol] for symbol in selected}, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": {**oos, "beta": oos_beta, "positive_probability": oos_positive_probability}, "actual_reward_risk": actual_rr, "risk_reward_requirement": "reward/risk >= 2.0 (interpreted from risk:reward <= 1:2)", "acceptance": criteria, "passed": passed}
+    report = {"strategy": "HLSR", "source": report_path(root), "timeframe": "5m source -> 15m entry", "leverage": float(lab["position"].get("leverage", 2.0)), "window": {"start": start.isoformat(), "end": end.isoformat()}, "source_files": len(paths), "eligible_symbols": len(eligible), "selected_symbols": selected, "hard_filters": dict(lab["hard"]), "screening_stats": {symbol: stats[symbol] for symbol in selected}, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": {**oos, "beta": oos_beta, "positive_probability": oos_positive_probability}, "actual_reward_risk": actual_rr, "risk_reward_requirement": "reward/risk >= 2.0 (interpreted from risk:reward <= 1:2)", "acceptance": criteria, "passed": passed}
     (output / "hlsr_market_export_report.json").write_text(json.dumps(report, indent=2))
     with (output / "hlsr_market_export_trades.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(all_trades[0]) if all_trades else ["symbol", "entry_ts", "net_r"], lineterminator="\n")

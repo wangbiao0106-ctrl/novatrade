@@ -46,6 +46,18 @@ def iso(ts):
     return datetime.fromtimestamp(ts / 1000, timezone.utc).isoformat()
 
 
+def report_path(path: Path) -> str:
+    """Path as written into committed reports: relative to the repository
+    root, never an absolute path that leaks the local home directory. Data
+    outside the repository (e.g. a symlinked checkout) keeps only its name."""
+    for candidate in (path.absolute(), path.resolve()):
+        try:
+            return candidate.relative_to(ROOT).as_posix()
+        except ValueError:
+            continue
+    return path.name
+
+
 def load_once(data_dir: Path, config: dict):
     universe_path = ROOT / 'strategies/sweep_reversal_short/config/universe.json'
     universe = json.loads(universe_path.read_text())
@@ -56,7 +68,7 @@ def load_once(data_dir: Path, config: dict):
         bars = aggregate_15m(load_bars(path))
         if len(bars) > 96:
             series[symbol] = bars
-        sources.append({'symbol': symbol, 'path': str(path.resolve()), 'bytes': path.stat().st_size,
+        sources.append({'symbol': symbol, 'path': report_path(path), 'bytes': path.stat().st_size,
                         'modified_ns': path.stat().st_mtime_ns, 'complete_15m_bars': len(bars)})
     return series, sources
 

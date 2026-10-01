@@ -85,6 +85,18 @@ def read_bars(path: Path) -> tuple[list[Bar], dict]:
     return bars, dict(quality)
 
 
+def report_path(path: Path) -> str:
+    """Path as written into committed reports: relative to the repository
+    root, never an absolute path that leaks the local home directory. Data
+    outside the repository (e.g. a symlinked checkout) keeps only its name."""
+    for candidate in (path.absolute(), path.resolve()):
+        try:
+            return candidate.relative_to(ROOT).as_posix()
+        except ValueError:
+            continue
+    return path.name
+
+
 def load_all_series(data_dir: Path) -> tuple[dict[str, list[Bar]], list[dict]]:
     universe = json.loads((ROOT / 'strategies/sweep_reversal_short/config/universe.json').read_text())
     allowed, excluded = set(universe['altcoins']), set(universe['exclude'])
@@ -99,7 +111,7 @@ def load_all_series(data_dir: Path) -> tuple[dict[str, list[Bar]], list[dict]]:
         bars, quality = read_bars(path)
         if bars:
             series[symbol] = bars
-        sources.append({'symbol': symbol, 'file': str(path.resolve()), 'bytes': path.stat().st_size,
+        sources.append({'symbol': symbol, 'file': report_path(path), 'bytes': path.stat().st_size,
                         'quality': quality})
     return series, sources
 

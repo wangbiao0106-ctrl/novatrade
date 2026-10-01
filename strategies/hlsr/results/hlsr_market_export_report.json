@@ -1,6 +1,6 @@
 {
   "strategy": "HLSR",
-  "source": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m",
+  "source": "data/kline/okx/swap/5m",
   "timeframe": "5m source -> 15m entry",
   "leverage": 2.0,
   "window": {
