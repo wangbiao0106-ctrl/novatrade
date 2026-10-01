@@ -116,6 +116,35 @@ private final class StreamState: @unchecked Sendable {
     var interval: KlineInterval?
 }
 
+/// Bounds how many REST history prewarms run at once. Each prewarm spawns
+/// `okx` CLI processes, and a 100-symbol strategy universe starts about 200
+/// candle streams together; unbounded, that is hundreds of concurrent
+/// processes and a burst against the OKX REST rate limit. Order calls do not
+/// pass through this gate, so they never queue behind market data.
+private actor PrewarmGate {
+    private let limit: Int
+    private var active = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) { self.limit = limit }
+
+    func run(_ body: @Sendable () async throws -> Void) async throws {
+        if active < limit {
+            active += 1
+        } else {
+            // `release` hands its slot straight to the next waiter.
+            await withCheckedContinuation { waiters.append($0) }
+        }
+        defer { release() }
+        try Task.checkCancellation()
+        try await body()
+    }
+
+    private func release() {
+        if waiters.isEmpty { active -= 1 } else { waiters.removeFirst().resume() }
+    }
+}
+
 /// Shares one upstream OKX candle subscription and one auxiliary poll across
 /// every WebSocket client watching the same instrument and interval. Fan-out
 /// happens here; the backend ingests each realtime candle exactly once.
@@ -134,6 +163,7 @@ private final class StreamHub: @unchecked Sendable {
 
     private let lock = NSLock()
     private let backend: TradingBackend
+    private let prewarmGate = PrewarmGate(limit: 4)
     private var subscribersByKey: [String: [Subscriber]] = [:]
     private var tasksByKey: [String: Task<Void, Never>] = [:]
     private var strategyTargets: Set<StrategyTarget> = []
@@ -282,6 +312,13 @@ private final class StreamHub: @unchecked Sendable {
 
     // MARK: - Upstream candle stream
 
+    private func prewarm(instrumentID: String, interval: KlineInterval, forceRefresh: Bool = false) async throws {
+        let backend = backend
+        try await prewarmGate.run {
+            try await backend.prewarmStrategyMarket(instrumentID: instrumentID, interval: interval, forceRefresh: forceRefresh)
+        }
+    }
+
     private func candleUpstream(hubKey: String, instrumentID: String, interval: KlineInterval) -> Task<Void, Never> {
         Task { [weak self] in
             guard let self else { return }
@@ -293,7 +330,7 @@ private final class StreamHub: @unchecked Sendable {
             var needsHistoryReload = true
             for attempt in 0..<3 where !Task.isCancelled {
                 do {
-                    try await backend.prewarmStrategyMarket(instrumentID: instrumentID, interval: interval)
+                    try await self.prewarm(instrumentID: instrumentID, interval: interval)
                     needsHistoryReload = false
                     break
                 } catch {
@@ -318,7 +355,7 @@ private final class StreamHub: @unchecked Sendable {
                     // HLSR evaluation.
                     if needsHistoryReload {
                         do {
-                            try await backend.prewarmStrategyMarket(instrumentID: instrumentID, interval: interval, forceRefresh: true)
+                            try await self.prewarm(instrumentID: instrumentID, interval: interval, forceRefresh: true)
                         } catch {
                             await backend.appendLog("\(instrumentID) \(interval.rawValue) 重连后补齐 K 线失败：\(error.localizedDescription)", level: "warning")
                         }

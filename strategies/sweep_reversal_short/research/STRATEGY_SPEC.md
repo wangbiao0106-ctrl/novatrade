@@ -1,4 +1,4 @@
-# 高位流动性扫顶反转（做空）策略 · 规则说明书 v1.3
+# 高位流动性扫顶反转（做空）策略 · 规则说明书 v1.4
 
 > 名称：**BTC门控 · 山寨币二次扫顶做空（Sweep & Resweep Top Reversal Short）**
 > 状态：已定稿（用户确认）。人类规则真源是上级目录的 `STRATEGY.md`，机器参数真源是 `config/strategy.json`；本文档是由规则真源派生的研究/回测口径。研究结果和运行时代码都不能反向修改规则。
@@ -9,7 +9,7 @@
 
 | 项 | 定义 |
 |---|---|
-| 生产标的 | **动态热门榜前 20 个山寨币**：每 30 秒刷新 OKX USDT 线性永续，排除主流币、稳定币、股票/指数/商品类标的后，按 24h 报价成交额降序取 20 个（`dynamic.hotAltcoins`）。榜单变化时策略目标随之变化；BTC 只作门控参考，不交易 BTC 本身。 |
+| 生产标的 | **24h 报价成交额前 100 且不低于 300 万 USDT 的合规山寨币**（v1.4）：每 30 秒刷新 OKX USDT 线性永续，排除主流币、稳定币、股票/指数/商品类标的，剔除成交额低于 300 万 USDT 的合约后按 24h 报价成交额降序取 100 个（`dynamic.sweepCandidates`）。报价成交额 = ticker `volCcy24h × last`。榜单变化时策略目标随之变化；BTC 只作门控参考，不交易 BTC 本身。v1.3 的“热门榜前 20”已废止。 |
 | 历史回测标的 | **177 个中低流动性山寨币快照**（名单 `../config/universe_recommended.json`），仅用于复现历史基线，不能作为生产绑定池；全池 295 个（`../config/universe.json`）仅作研究对照。 |
 | K 线周期 | **1h 结构 + 15m 确认**（1h 由 5m 聚合；入场确认在 15m 收盘）|
 
@@ -226,8 +226,8 @@ BTC 门控必须 fail-closed：信号时刻之前不足 200 根 1h K 线或 SMA2
 | 过滤 F1-F3 | `apply_filters()`：`rs_lower_ext` / `rs_deep` / `btc_down`（flag 由 run_grid.py 注入）|
 | RSI/量能 | `rsi()` / `precompute()` 的 `volmean` |
 | 出场 | `simulate()`（sl_mode="ext"）|
-| 实盘信号 | `live_signal.py`（默认 `hot20` 动态榜；`lowmid`/`all` 仅历史基线） |
-| **已上线规则绩效（唯一证据来源）** | `report_live_rule.py`：1h 结构 + 15m 确认窗口 + 生产过滤，输出 `results/live_rule_report.json` |
+| 实盘信号 | `live_signal.py`（默认 `live` 生产选币范围；`lowmid`/`all` 仅历史基线） |
+| **已上线规则绩效（唯一证据来源）** | `report_live_rule.py`：1h 结构 + 15m 确认窗口 + 生产过滤，输出 `results/live_rule_report.json`；`--pool live` 按结构时刻的因果成交额排名复现生产选币范围 |
 | 执行方式对照（市价/限价/纯15m） | `tune_execution.py`（研究对照，不定义规则）|
 | 1h 收盘市价基线（**已作废口径**） | `final_report.py`：入场取 1h 二次扫顶收盘价，不是已上线规则 |
 

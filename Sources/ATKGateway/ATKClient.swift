@@ -263,7 +263,7 @@ public struct ATKClient: Sendable {
             let rollingOpen = Self.decimal(row["open24h"]).flatMap { $0 > 0 ? $0 : nil }
             let open = utcDayOpen ?? rollingOpen ?? last
             let change = open == 0 ? 0 : (last - open) / open * 100
-            let volume = Self.decimal(row["volCcy24h"]) ?? Self.decimal(row["vol24h"]) ?? 0
+            let volume = Self.quoteVolume24h(row, last: last)
             let base = id.split(separator: "-").first.map(String.init) ?? id
             let quote = id.split(separator: "-").dropFirst().first.map(String.init) ?? "USDT"
             return ContractMarket(id: id, name: base, baseCurrency: base, quoteCurrency: quote, last: last, changePercent: change, volume24h: volume, category: "全部", updatedAt: .now)
@@ -281,6 +281,19 @@ public struct ATKClient: Sendable {
             else { category = "全部" }
             return ContractMarket(id: market.id, name: market.name, baseCurrency: market.baseCurrency, quoteCurrency: market.quoteCurrency, last: market.last, changePercent: market.changePercent, volume24h: market.volume24h, category: category, updatedAt: market.updatedAt)
         }
+    }
+
+    /// 24h quote turnover in the quote currency (USDT for linear swaps).
+    ///
+    /// For SWAP tickers OKX reports `vol24h` in contracts and `volCcy24h` in
+    /// base-coin units; neither is quote turnover and there is no quote-volume
+    /// field, so turnover is approximated as `volCcy24h × last`.  Ranking by the
+    /// raw fields would favour cheap coins with huge unit counts.  A missing or
+    /// invalid `volCcy24h` yields 0 so the contract fails every volume floor
+    /// instead of falling back to a contract count.
+    static func quoteVolume24h(_ row: [String: Any], last: Decimal) -> Decimal {
+        guard let baseVolume = decimal(row["volCcy24h"]), baseVolume > 0, last > 0 else { return 0 }
+        return baseVolume * last
     }
 
     /// Loads the exchange's contract specification used to translate swap

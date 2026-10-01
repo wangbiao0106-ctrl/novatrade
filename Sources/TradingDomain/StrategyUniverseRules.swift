@@ -10,6 +10,10 @@ public enum StrategyUniverseRules {
     /// Strategy-specific production guardrails. They are applied after the
     /// common altcoin asset-class filter; none of these pools are a generic
     /// top-20 fallback.
+    /// sweep_reversal_short v1.4 `runtime_universe`: drop alts below the
+    /// quote-volume floor, then keep the top `limit` by 24h quote volume.
+    public static let sweepCandidateLimit = 100
+    public static let sweepMinimumQuoteVolume24h: Decimal = 3_000_000
     public static let hlsrMinimumGainPercent: Decimal = 40
     public static let hlsrMinimumQuoteVolume24h: Decimal = 30_000_000
     public static let doublePumpMinimumGainPercent: Decimal = 100
@@ -53,6 +57,11 @@ public enum StrategyUniverseRules {
             && !base.hasSuffix("USD")
             && !mainstreamSymbols.contains(base)
             && !excludedNonCryptoSymbols.contains(base)
+    }
+
+    public static func isEligibleSweep(_ contract: ContractMarket) -> Bool {
+        isEligibleHotAltcoin(contract)
+            && contract.volume24h >= sweepMinimumQuoteVolume24h
     }
 
     public static func isEligibleDoublePump(_ contract: ContractMarket) -> Bool {

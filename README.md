@@ -114,10 +114,10 @@ python3 strategies/hlsr/src/hlsr_signal_generator.py \
 
 - 规则与集成说明：`strategies/sweep_reversal_short/STRATEGY.md`
 - 参数配置：`strategies/sweep_reversal_short/config/strategy.json`
-- 引擎实现：`Sources/TradingService/StrategyEngine.swift`（`evaluateWithConfirmation`，按实验室 v1.3 规则实现；信号携带 ATR 标定的止损/止盈价位）
+- 引擎实现：`Sources/TradingService/StrategyEngine.swift`（`evaluateWithConfirmation`，按实验室 v1.4 规则实现；信号携带 ATR 标定的止损/止盈价位）
 - 执行边界：当前版本包含策略资金池 sizing、条件保护单、96 根时间离场和账户级 5% mark-to-market 熔断；熔断处置失败会写入 warning 并保持锁存。评估按已确认 K 线幂等，REST 刷新图表不会消耗冷却；状态按「策略 + 标的」隔离，1h 结构事件不会带出其它标的的信号
 - 稳定策略标识：`sweepReversalShort`；UI 显示名称：`山寨币二次扫顶做空`
-- 运行范围：后台每 30 秒刷新行情，排除主流币、稳定币及非加密资产后，按 24h 报价成交额动态扫描前 20 个 USDT 线性永续山寨币；177 个推荐标的只属于历史回测基线，不是固定运行名单
+- 运行范围：后台每 30 秒刷新行情，排除主流币、稳定币及非加密资产，剔除 24h 报价成交额低于 300 万 USDT 的合约后，按成交额动态扫描前 100 个 USDT 线性永续山寨币（`dynamic.sweepCandidates`）；177 个推荐标的只属于历史回测基线，不是固定运行名单
 - 门控数据流：`PaperTradingStore` 缓存 BTC 1H K 线，取不晚于信号时刻的最近已确认 bar；历史不足 200 根或无法对齐时门控不通过
 - UI：点击“添加”先从三张策略卡片选择规则，再配置 USDT 资金池和杠杆；内置策略默认 2 倍杠杆，可在 1–100 倍范围调整
 - 单元测试：`Tests/OKXGatewayTests/SweepReversalStrategyTests.swift`（含门控、假突破、15m 确认窗口边界、冷却幂等、跨标的信号隔离）

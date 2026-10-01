@@ -82,3 +82,16 @@ func candleHeartbeatPongAndCandleDataKeepIdleSubscriptionsAlive() {
     #expect(heartbeat.action(at: 152) == .none)
     #expect(heartbeat.action(at: 163) == .ping)
 }
+
+@Test
+func connectionPacerSpacesConcurrentConnectionAttempts() async throws {
+    let pacer = OKXConnectionPacer(spacing: .milliseconds(60))
+    let clock = ContinuousClock()
+    let start = clock.now
+    try await withThrowingTaskGroup(of: Void.self) { group in
+        for _ in 0..<4 { group.addTask { try await pacer.waitForSlot() } }
+        try await group.waitForAll()
+    }
+    // Four attempts need three gaps; none may share a slot.
+    #expect(clock.now - start >= .milliseconds(180))
+}

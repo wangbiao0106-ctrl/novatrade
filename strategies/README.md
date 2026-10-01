@@ -22,7 +22,7 @@ git diff --check
 当前策略：
 
 - [`hlsr/`](hlsr/)：高位扫顶反转做空，运行时只扫描 24h 涨幅 >40% 且报价成交额 >3,000 万 USDT 的候选山寨币，已接入本地策略引擎的 OKX 模拟盘；默认禁用，不自动提交真实订单。
-- [`sweep_reversal_short/`](sweep_reversal_short/)：山寨币二次扫顶做空，已接入策略引擎。生产范围是每 30 秒刷新、按 24h 报价成交额排序的动态热门榜前 20 个合规山寨币；`config/universe_recommended.json` 的 177 个标的只用于历史回测基线，不是运行时绑定名单。
+- [`sweep_reversal_short/`](sweep_reversal_short/)：山寨币二次扫顶做空，已接入策略引擎。生产范围（v1.4）是每 30 秒刷新、24h 报价成交额不低于 300 万 USDT 且排名前 100 的合规山寨币（`dynamic.sweepCandidates`）；`config/universe_recommended.json` 的 177 个标的只用于历史回测基线，不是运行时绑定名单。
 - [`ema_altcoin_long/`](ema_altcoin_long/)：双均线交易山寨币做多，运行时扫描合规山寨币成交额前 50，已接入运行时策略引擎；研究目录同时保留回测和参数验证。
 - [`ema_3line_pullback/`](ema_3line_pullback/)：EMA 回踩策略族的四方向历史研究归档，不是规则真源，未接入运行时。
 - [`extreme_wick_short/`](extreme_wick_short/)：山寨日内涨幅超过 100% 的 15m 动能衰竭做空研究候选；未接入运行时。

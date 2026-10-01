@@ -348,15 +348,16 @@ func sweepReversalOneHourEventNeverLeaksAnotherInstrumentsSignal() async throws 
     // 策略实例扫描动态范围；另一个标的的事件必须返回自己的中性状态，
     // 不能带出 A 标的的信号。
     let config = StrategyConfig(
-        name: "山寨币二次扫顶做空", scope: .dynamic(.hotAltcoins), interval: .oneHour,
+        name: "山寨币二次扫顶做空", scope: .dynamic(.sweepCandidates), interval: .oneHour,
         type: .sweepReversalShort, parameters: makeSweepConfig().parameters,
         enabled: true, cooldownBars: 96
     )
     _ = try await store.create(config)
 
+    // 两个标的都高于 sweepCandidates 的 300 万 USDT 成交额下限。
     let contracts = [
-        ContractMarket(id: "SATS-USDT-SWAP", name: "SATS", baseCurrency: "SATS", quoteCurrency: "USDT", last: 1, volume24h: 1_000_000),
-        ContractMarket(id: "ALT-USDT-SWAP", name: "ALT", baseCurrency: "ALT", quoteCurrency: "USDT", last: 1, volume24h: 900_000),
+        ContractMarket(id: "SATS-USDT-SWAP", name: "SATS", baseCurrency: "SATS", quoteCurrency: "USDT", last: 1, volume24h: 10_000_000),
+        ContractMarket(id: "ALT-USDT-SWAP", name: "ALT", baseCurrency: "ALT", quoteCurrency: "USDT", last: 1, volume24h: 9_000_000),
     ]
     let structure = makeSweepCandles()
     let structureTimestamp = structure[318].timestamp

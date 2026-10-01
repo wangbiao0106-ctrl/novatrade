@@ -109,6 +109,8 @@ public struct OKXPublicClient: Sendable {
                 while !Task.isCancelled {
                     attempt += 1
                     continuation.yield(.connecting(attempt: attempt))
+                    do { try await OKXConnectionPacer.shared.waitForSlot() }
+                    catch { break }
                     var request = URLRequest(url: url)
                     request.timeoutInterval = timeoutInterval
                     let socket = URLSession.shared.webSocketTask(with: request)

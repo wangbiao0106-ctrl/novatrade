@@ -243,6 +243,8 @@ public struct ContractMarket: Codable, Equatable, Sendable, Identifiable {
     public let quoteCurrency: String
     public let last: Decimal
     public let changePercent: Decimal
+    /// Rolling 24h quote turnover (USDT for linear swaps), not contracts or
+    /// base-coin units; every universe ranking and volume floor uses it.
     public let volume24h: Decimal
     public let category: String
     public let updatedAt: Date
@@ -562,7 +564,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// hot-altcoin ranking used by a different strategy.
     public var defaultUniverseCategory: StrategyUniverseCategory {
         switch self {
-        case .sweepReversalShort: return .hotAltcoins
+        case .sweepReversalShort: return .sweepCandidates
         case .emaAltcoinLong: return .emaAltcoinCandidates
         case .hlsr: return .hlsrCandidates
         case .doublePumpExhaustionShort: return .doublePumpCandidates
@@ -737,6 +739,7 @@ public enum StrategyScopeMode: String, Codable, CaseIterable, Sendable {
 public enum StrategyUniverseCategory: String, Codable, CaseIterable, Sendable {
     case mainstream
     case hotAltcoins
+    case sweepCandidates
     case emaAltcoinCandidates
     case hlsrCandidates
     case doublePumpCandidates
@@ -747,6 +750,7 @@ public enum StrategyUniverseCategory: String, Codable, CaseIterable, Sendable {
         switch self {
         case .mainstream: return "主流币"
         case .hotAltcoins: return "热门榜前 20 个山寨币"
+        case .sweepCandidates: return "扫顶候选（24h 成交额前 100、≥300 万 USDT）"
         case .emaAltcoinCandidates: return "双均线候选榜前 50 个山寨币"
         case .hlsrCandidates: return "高位扫顶候选（24h 涨幅 >40%、成交额 >3000 万）"
         case .doublePumpCandidates: return "翻倍衰竭候选（24h 涨幅 >100%、成交额 ≥1000 万）"
@@ -792,6 +796,8 @@ public struct StrategyScope: Codable, Equatable, Sendable {
             switch category {
             case .hotAltcoins:
                 return ranked.prefix(20).map(\.id)
+            case .sweepCandidates:
+                return ranked.prefix(StrategyUniverseRules.sweepCandidateLimit).map(\.id)
             case .emaAltcoinCandidates:
                 return ranked.prefix(50).map(\.id)
             case .mainstream, .hlsrCandidates, .doublePumpCandidates, .highGain60, .highGain100:
@@ -811,6 +817,10 @@ public struct StrategyScope: Codable, Equatable, Sendable {
         case .hotAltcoins:
             let altcoins = contracts.filter(StrategyUniverseRules.isEligibleHotAltcoin)
             return altcoins.sorted { $0.volume24h > $1.volume24h }
+        case .sweepCandidates:
+            return contracts
+                .filter(StrategyUniverseRules.isEligibleSweep)
+                .sorted { $0.volume24h > $1.volume24h }
         case .emaAltcoinCandidates:
             let altcoins = contracts.filter(StrategyUniverseRules.isEligibleHotAltcoin)
             return altcoins.sorted { $0.volume24h > $1.volume24h }

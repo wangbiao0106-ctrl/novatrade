@@ -332,6 +332,22 @@ func marketContractsUseUTCDayOpenForChangePercent() async throws {
 }
 
 @Test
+func marketContractsRankByQuoteTurnoverNotBaseCoinCount() async throws {
+    // A cheap coin trades far more coins than an expensive one, but the
+    // strategy universes rank by USDT turnover (volCcy24h × last). The
+    // contract count in `vol24h` must never be used as a fallback.
+    let runner = StubATKRunner(outputs: [
+        "market tickers SWAP --json": ATKCommandResult(stdout: #"[{"instId":"CHEAP-USDT-SWAP","last":"0.001","volCcy24h":"1000000000","vol24h":"1"},{"instId":"PRICY-USDT-SWAP","last":"50","volCcy24h":"100000","vol24h":"1"},{"instId":"BARE-USDT-SWAP","last":"2","vol24h":"999999999"}]"#)
+    ])
+
+    let markets = try await ATKClient(runner: runner).marketContracts()
+    let volumes = Dictionary(uniqueKeysWithValues: markets.map { ($0.id, $0.volume24h) })
+    #expect(volumes["CHEAP-USDT-SWAP"] == Decimal(1_000_000))
+    #expect(volumes["PRICY-USDT-SWAP"] == Decimal(5_000_000))
+    #expect(volumes["BARE-USDT-SWAP"] == 0)
+}
+
+@Test
 func marketContractsFallbackWhenUTCDayOpenIsZero() async throws {
     let runner = StubATKRunner(outputs: [
         "market tickers SWAP --json": ATKCommandResult(stdout: #"[{"instId":"NEW-USDT-SWAP","last":"110","open24h":"100","sodUtc0":"0","volCcy24h":"2500"}]"#)

@@ -103,7 +103,9 @@ public enum IndicatorCalculator {
 public struct StrategyEngine: Sendable {
     public init() {}
 
-    // Strategy lab source: sweep_reversal_short v1.3.
+    // Strategy lab source: sweep_reversal_short v1.4.
+    // v1.4 只把生产范围改为 `dynamic.sweepCandidates`（StrategyUniverseRules
+    // 成交额前 100 且 ≥300 万 USDT），信号与出场规则和 v1.3 相同。
     // 同步记录 2026-09：v1.3 规则原文是"二次扫顶 1h bar 收盘后的后续 4 根
     // 15m"。此前实现把 K 线时间戳当作收盘时间，确认窗口错位到结构 bar 自身
     // 那一小时并漏掉 +75/+90/+105。本次只修实现的时间基，规则与参数未变

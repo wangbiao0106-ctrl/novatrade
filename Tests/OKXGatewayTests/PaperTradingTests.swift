@@ -28,7 +28,7 @@ func strategySpecificScopesDoNotReuseTheHot20Pool() {
         ContractMarket(id: "DME-LOW-VOLUME-USDT-SWAP", name: "DME low volume", baseCurrency: "DME-LOW-VOLUME", quoteCurrency: "USDT", last: 1, changePercent: 120, volume24h: 9_000_000),
     ]
 
-    #expect(StrategyType.sweepReversalShort.defaultUniverseCategory == .hotAltcoins)
+    #expect(StrategyType.sweepReversalShort.defaultUniverseCategory == .sweepCandidates)
     #expect(StrategyType.emaAltcoinLong.defaultUniverseCategory == .emaAltcoinCandidates)
     #expect(StrategyType.hlsr.defaultUniverseCategory == .hlsrCandidates)
     #expect(StrategyType.doublePumpExhaustionShort.defaultUniverseCategory == .doublePumpCandidates)
@@ -218,6 +218,31 @@ func hotAltcoinScopeExcludesNonTargetsAndCapsAtTwenty() {
     #expect(!ids.contains("AAPL-USDT-SWAP"))
     #expect(!ids.contains("USDC-USDT-SWAP"))
     #expect(!ids.contains("ALT-BTC-SWAP"))
+}
+
+@Test
+func sweepCandidateScopeAppliesTurnoverFloorAndCapsAtOneHundred() {
+    // 110 eligible altcoins at or above the 3M USDT floor, ranked by turnover.
+    let ranked = (0..<110).map { index in
+        ContractMarket(id: "ALT\(index)-USDT-SWAP", name: "ALT\(index)", baseCurrency: "ALT\(index)", quoteCurrency: "USDT", last: 1, volume24h: Decimal(3_000_000 + (110 - index) * 10_000))
+    }
+    let atFloor = ContractMarket(id: "FLOOR-USDT-SWAP", name: "FLOOR", baseCurrency: "FLOOR", quoteCurrency: "USDT", last: 1, volume24h: 3_000_000)
+    let belowFloor = ContractMarket(id: "THIN-USDT-SWAP", name: "THIN", baseCurrency: "THIN", quoteCurrency: "USDT", last: 1, volume24h: 2_999_999)
+    let excluded = [
+        ContractMarket(id: "BTC-USDT-SWAP", name: "BTC", baseCurrency: "BTC", quoteCurrency: "USDT", last: 1, volume24h: 9_000_000_000),
+        ContractMarket(id: "AAPL-USDT-SWAP", name: "AAPL", baseCurrency: "AAPL", quoteCurrency: "USDT", last: 1, volume24h: 900_000_000),
+        ContractMarket(id: "ALT-BTC-SWAP", name: "ALT/BTC", baseCurrency: "ALT", quoteCurrency: "BTC", last: 1, volume24h: 800_000_000)
+    ]
+    let full = StrategyScope.dynamic(.sweepCandidates).resolvedInstrumentIDs(from: excluded + [belowFloor] + ranked.reversed())
+    #expect(full.count == StrategyUniverseRules.sweepCandidateLimit)
+    #expect(full == ranked.prefix(100).map(\.id))
+    #expect(!full.contains("BTC-USDT-SWAP"))
+    #expect(!full.contains("AAPL-USDT-SWAP"))
+    #expect(!full.contains("ALT-BTC-SWAP"))
+
+    // In a thin market the floor, not the cap, decides the pool size.
+    let thin = StrategyScope.dynamic(.sweepCandidates).resolvedInstrumentIDs(from: Array(ranked.prefix(5)) + [atFloor, belowFloor])
+    #expect(thin == ranked.prefix(5).map(\.id) + ["FLOOR-USDT-SWAP"])
 }
 
 @Test

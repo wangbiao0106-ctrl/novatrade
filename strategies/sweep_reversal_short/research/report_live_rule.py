@@ -19,6 +19,13 @@
 用法：
   python3 strategies/sweep_reversal_short/research/report_live_rule.py
   python3 strategies/sweep_reversal_short/research/report_live_rule.py --pool all
+  python3 strategies/sweep_reversal_short/research/report_live_rule.py --pool live
+
+`--pool live` 复现生产扫描范围（config/strategy.json 的 `runtime_universe`）：
+只用通过运行时资产类别过滤的山寨币（`live_signal.eligible_runtime_alt`，排除
+主流币、稳定币和非加密合约），在结构 bar 收盘时刻按滚动 24h 报价成交额排名，
+只保留成交额 ≥ `min_quote_volume_24h_usdt` 且排名 ≤ `limit` 的标的，并额外报告
+"同一实例只持有一个币种"的单仓口径。
 """
 from __future__ import annotations
 
@@ -30,6 +37,7 @@ import numpy as np
 import pandas as pd
 
 import engine as E
+import live_signal as LS
 import tune_execution as T
 
 HOUR_MS = 3_600_000
@@ -40,6 +48,8 @@ SPLIT_TS = int(pd.Timestamp("2026-07-29", tz="UTC").value // 1e6)
 
 # 参数全部来自实验室机器真源 config/strategy.json（唯一真源）。
 DETECT, FILTER, COSTS = E.lab_parameters()
+RUNTIME_UNIVERSE = json.load(open(os.path.join(CONFIG, "strategy.json")))["runtime_universe"]
+M15_MS = 900_000
 BUF_ATR = COSTS["buf_atr"]
 TP_R = COSTS["tp_mult"]
 MAX_HOLD_15M = COSTS["max_hold_bars"] * 4   # 96 根 1h = 384 根 15m
@@ -123,6 +133,56 @@ def collect(pool: str, data1: dict, data15: dict, btc, fee: float = FEE,
                 "hold_bars_15m": trade.hold_bars, "atr": atr_j,
             })
     return rows, counters
+
+
+def rolling_quote_volume_24h(data1: dict, symbols) -> pd.DataFrame:
+    """按小时网格的滚动 24h 报价成交额（USDT），列为标的、索引为 1h K 线开盘时间。
+
+    某一行包含该 1h K 线本身及之前 24 小时内的 K 线，在这根 K 线收盘时刻即可
+    得到，不使用未来数据；对应运行时在结构 bar 收盘时读取的 24h 成交额。
+    """
+    columns = {}
+    for sym in symbols:
+        d = data1.get(sym)
+        if d is None:
+            continue
+        index = pd.to_datetime(d["t"], unit="ms", utc=True)
+        rolled = pd.Series(d["qv"], index=index).rolling("24h").sum().to_numpy()
+        columns[sym] = pd.Series(rolled, index=np.asarray(d["t"], dtype=np.int64))
+    return pd.DataFrame(columns).sort_index()
+
+
+def live_universe_rank(rows: list[dict], volumes: pd.DataFrame) -> tuple[list[float], list[float]]:
+    """每个结构在 bar 收盘时刻的成交额排名和 24h 报价成交额（因果）。"""
+    ranks: list[float] = []
+    quote: list[float] = []
+    for row in rows:
+        ts = row["signal_ts"]
+        if ts not in volumes.index:
+            ranks.append(np.nan)
+            quote.append(np.nan)
+            continue
+        snapshot = volumes.loc[ts].dropna()
+        mine = snapshot.get(row["symbol"], np.nan)
+        if np.isnan(mine):
+            ranks.append(np.nan)
+            quote.append(np.nan)
+            continue
+        ranks.append(float((snapshot > mine).sum() + 1))
+        quote.append(float(mine))
+    return ranks, quote
+
+
+def single_slot(df: pd.DataFrame) -> pd.DataFrame:
+    """同一实例最多持有一个币种：前一笔未平仓时，后续信号被并发限制拒绝。"""
+    accepted = []
+    busy_until = -1
+    for _, row in df.sort_values(["entry_ts", "symbol"]).iterrows():
+        if row["entry_ts"] < busy_until:
+            continue
+        accepted.append(row)
+        busy_until = row["entry_ts"] + (row["hold_bars_15m"] + 1) * M15_MS
+    return pd.DataFrame(accepted, columns=df.columns)
 
 
 def liquidity_tiers() -> dict[str, list[str]]:
@@ -210,7 +270,8 @@ def stats(df: pd.DataFrame) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pool", default="lowmid", choices=["lowmid", "all"])
+    parser.add_argument("--pool", default="lowmid", choices=["lowmid", "all", "live"],
+                        help="live = 生产扫描范围（runtime_universe 的成交额排名上限与下限）")
     parser.add_argument("--fee", type=float, default=FEE, help="单边手续费率，默认 0.0005")
     parser.add_argument("--by-tier", action="store_true",
                         help="按全期日均成交额五等分输出分层结果（只用于报告分组，不参与选币）")
@@ -277,10 +338,24 @@ def main() -> None:
         print("已写入:", os.path.join(args.out, "live_rule_report_rolling_rank.json"))
         return
 
-    rows, counters = collect(args.pool, data1, data15, btc, args.fee)
+    live = args.pool == "live"
+    live_symbols = None
+    if live:
+        live_symbols = sorted(sym for sym in json.load(open(os.path.join(CONFIG, "universe.json")))["altcoins"]
+                              if LS.eligible_runtime_alt(sym))
+    rows, counters = collect(args.pool, data1, data15, btc, args.fee, symbols=live_symbols)
     df = pd.DataFrame(rows)
     if df.empty:
         raise SystemExit("没有可复现的成交")
+    if live:
+        limit = int(RUNTIME_UNIVERSE["limit"])
+        floor = float(RUNTIME_UNIVERSE["min_quote_volume_24h_usdt"])
+        df["rank_at_signal"], df["quote_volume_24h"] = live_universe_rank(rows, rolling_quote_volume_24h(data1, live_symbols))
+        in_universe = (df.rank_at_signal <= limit) & (df.quote_volume_24h >= floor)
+        counters["outside_live_universe"] = int((~in_universe).sum())
+        df = df[in_universe].copy()
+        if df.empty:
+            raise SystemExit("生产扫描范围内没有可复现的成交")
     df["split"] = np.where(df.signal_ts < SPLIT_TS, "train", "test")
     df["month"] = pd.to_datetime(df.entry_ts, unit="ms", utc=True).dt.strftime("%Y-%m")
     df = df.sort_values("entry_ts")
@@ -302,12 +377,27 @@ def main() -> None:
         "test": stats(df[df.split == "test"]),
         "monthly": {month: stats(group) for month, group in df.groupby("month")},
     }
+    if live:
+        slot = single_slot(df)
+        summary["universe_rule"] = {
+            "ranking": "rolling 24h quote volume (USDT) at structure bar close among runtime-eligible altcoins",
+            "eligible_symbols": len(live_symbols),
+            "limit": limit, "min_quote_volume_24h_usdt": floor, "causal": True,
+        }
+        summary["single_slot"] = {
+            "rule": "max_concurrent_positions = 1；前一笔未平仓时后续信号被拒绝",
+            "rejected": int(len(df) - len(slot)),
+            "full": stats(slot),
+            "train": stats(slot[slot.split == "train"]),
+            "test": stats(slot[slot.split == "test"]),
+        }
     with open(os.path.join(args.out, f"live_rule_report{suffix}.json"), "w") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
 
     print(f"结构 {counters['events']} 个 → 成交 {summary['full']['trades']} 笔"
           f"（无确认 {counters['no_confirmation']}，薄盘过滤 {counters['atr_guard']}，"
-          f"极端止损过滤 {counters['risk_guard']}）")
+          f"极端止损过滤 {counters['risk_guard']}"
+          + (f"，不在生产扫描范围 {counters['outside_live_universe']}" if live else "") + "）")
     for label in ("full", "train", "test"):
         part = summary[label]
         if not part.get("trades"):
@@ -317,6 +407,16 @@ def main() -> None:
               f"回撤={part['max_drawdown_R']:.2f}R 连亏={part['max_consecutive_loss']} "
               f"TP/SL/时间={part['tp_pct']:.0%}/{part['sl_pct']:.0%}/{part['time_pct']:.0%}")
     print("月度:", " ".join(f"{m}:{s['trades']}笔/{s['expect_R']:+.2f}R" for m, s in sorted(summary["monthly"].items())))
+    if live:
+        slot = summary["single_slot"]
+        print(f"单仓口径：拒绝 {slot['rejected']} 笔")
+        for label in ("full", "train", "test"):
+            part = slot[label]
+            if not part.get("trades"):
+                continue
+            print(f"  {label:5s} 笔数={part['trades']:3d} 胜率={part['win_rate']:.1%} "
+                  f"期望={part['expect_R']:+.2f}R 总计={part['expect_R'] * part['trades']:+.2f}R "
+                  f"回撤={part['max_drawdown_R']:.2f}R")
     print("已写入:", os.path.join(args.out, f"live_rule_report{suffix}.json"))
 
 

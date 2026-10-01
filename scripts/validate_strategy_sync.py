@@ -48,20 +48,24 @@ def main() -> int:
     strategy_doc = (LAB / "STRATEGY.md").read_text()
     spec_doc = (LAB / "research" / "STRATEGY_SPEC.md").read_text()
 
-    if config.get("version") != "1.3":
-        fail(errors, "config/strategy.json 不是规则版本 1.3")
-    if not re.search(r"版本：1\.3", strategy_doc):
-        fail(errors, "STRATEGY.md 未标记规则版本 1.3")
-    if "规则说明书 v1.3" not in spec_doc:
-        fail(errors, "STRATEGY_SPEC.md 未标记规则版本 1.3")
-    if "实时信号扫描器 v1.3" not in live_signal:
-        fail(errors, "研究实时信号扫描器未标记规则版本 1.3")
+    if config.get("version") != "1.4":
+        fail(errors, "config/strategy.json 不是规则版本 1.4")
+    if not re.search(r"版本：1\.4", strategy_doc):
+        fail(errors, "STRATEGY.md 未标记规则版本 1.4")
+    if "规则说明书 v1.4" not in spec_doc:
+        fail(errors, "STRATEGY_SPEC.md 未标记规则版本 1.4")
+    if "实时信号扫描器 v1.4" not in live_signal:
+        fail(errors, "研究实时信号扫描器未标记规则版本 1.4")
     if config.get("source_of_truth") != "strategies/sweep_reversal_short/STRATEGY.md":
         fail(errors, "config 未声明 STRATEGY.md 为规则真源")
-    if runtime.get("mode") != "dynamic" or runtime.get("category") != "hotAltcoins":
-        fail(errors, "运行范围必须是 dynamic.hotAltcoins")
-    if runtime.get("limit") != 20 or runtime.get("refresh_seconds") != 30:
-        fail(errors, "运行范围必须是每 30 秒刷新、上限 20")
+    if runtime.get("mode") != "dynamic" or runtime.get("category") != "sweepCandidates":
+        fail(errors, "运行范围必须是 dynamic.sweepCandidates")
+    if runtime.get("limit") != 100 or runtime.get("refresh_seconds") != 30:
+        fail(errors, "运行范围必须是每 30 秒刷新、上限 100")
+    if runtime.get("min_quote_volume_24h_usdt") != 3_000_000:
+        fail(errors, "运行范围的 24h 报价成交额下限必须是 300 万 USDT")
+    if config.get("universe", {}).get("production_scope") != "dynamic.sweepCandidates":
+        fail(errors, "config.universe.production_scope 必须是 dynamic.sweepCandidates")
     if integration.get("signal_generation") != "implemented":
         fail(errors, "实验室未声明信号生成已同步")
     if config.get("entry_timeframe_minutes") != 60 or config.get("confirmation_timeframe_minutes") != 15:
@@ -129,6 +133,18 @@ def main() -> int:
         fail(errors, "StrategyScope.hotAltcoins 未按动态成交额前 20 实现")
     if "StrategyUniverseRules.isEligibleHotAltcoin" not in domain:
         fail(errors, "StrategyScope.hotAltcoins 未使用统一资产类别过滤")
+    if not re.search(r"case \.sweepReversalShort: return \.sweepCandidates", domain):
+        fail(errors, "sweepReversalShort 的默认范围不是 sweepCandidates")
+    if "prefix(StrategyUniverseRules.sweepCandidateLimit)" not in domain or "StrategyUniverseRules.isEligibleSweep" not in domain:
+        fail(errors, "StrategyScope.sweepCandidates 未按统一上限与成交额下限实现")
+    limit_match = re.search(r"sweepCandidateLimit\s*=\s*([0-9_]+)", universe_rules)
+    floor_match = re.search(r"sweepMinimumQuoteVolume24h\s*:\s*Decimal\s*=\s*([0-9_]+)", universe_rules)
+    if not limit_match or int(limit_match.group(1).replace("_", "")) != runtime.get("limit"):
+        fail(errors, "StrategyUniverseRules.sweepCandidateLimit 与 config.runtime_universe.limit 不一致")
+    if not floor_match or int(floor_match.group(1).replace("_", "")) != runtime.get("min_quote_volume_24h_usdt"):
+        fail(errors, "StrategyUniverseRules.sweepMinimumQuoteVolume24h 与 config 的成交额下限不一致")
+    if not re.search(r"func isEligibleSweep\(_ contract: ContractMarket\) -> Bool \{\s*isEligibleHotAltcoin\(contract\)\s*&& contract\.volume24h >= sweepMinimumQuoteVolume24h", universe_rules):
+        fail(errors, "isEligibleSweep 未复用统一资产类别过滤并施加成交额下限")
     excluded = config.get("backtest_universe", {}).get("files", [])
     universe_config_path = LAB / "config" / "universe.json"
     try:
@@ -291,8 +307,8 @@ def main() -> int:
 
     if "rsiWilder" not in engine:
         fail(errors, "扫顶策略未使用实验室定义的 Wilder RSI")
-    if "sweep_reversal_short v1.3" not in engine:
-        fail(errors, "StrategyEngine 未声明对应的策略实验室版本 1.3")
+    if "sweep_reversal_short v1.4" not in engine:
+        fail(errors, "StrategyEngine 未声明对应的策略实验室版本 1.4")
     if "evaluateWithConfirmation" not in engine or "confirmationWindowMinutes" not in engine:
         fail(errors, "StrategyEngine 未接入 15m 收盘确认 API")
     # 确认窗口的时间基：K 线时间戳是开盘时间，窗口必须从结构 bar 收盘时刻起算。
@@ -344,8 +360,10 @@ def main() -> int:
         fail(errors, "策略动态范围刷新周期未保持 30 秒")
     if "interval: .fifteenMinutes" not in stream:
         fail(errors, "后台未为扫顶策略订阅 15m 确认 K 线")
-    if not re.search(r"--pool.*default=\"hot20\"", live_signal):
-        fail(errors, "实验室实时扫描器默认池不是 hot20")
+    if not re.search(r"--pool.*default=\"live\"", live_signal):
+        fail(errors, "实验室实时扫描器默认池不是 live（生产选币范围）")
+    if 'json.load(handle)["runtime_universe"]' not in live_signal:
+        fail(errors, "实验室实时扫描器未从 config.runtime_universe 读取生产选币范围")
     # HLSR 的机器参数必须来自 config/strategy.json：此前 generator/backtest 各自
     # 硬编码 40%/3000万/冷却16/杠杆2.0/分批30-30-40，改配置没有任何效果。
     hlsr_lab = ROOT / "strategies" / "hlsr"
@@ -434,8 +452,8 @@ def main() -> int:
             fail(errors, f"{label} 未指向唯一绩效证据脚本 report_live_rule.py")
 
     for document, label in ((strategy_doc, "STRATEGY.md"), (spec_doc, "STRATEGY_SPEC.md")):
-        if "dynamic.hotAltcoins" not in document or "前 20" not in document:
-            fail(errors, f"{label} 未明确动态热门榜前 20 运行范围")
+        if "dynamic.sweepCandidates" not in document or "前 100" not in document or "300 万" not in document:
+            fail(errors, f"{label} 未明确 24h 成交额前 100、≥300 万 USDT 的运行范围")
         if "177" not in document or "历史" not in document:
             fail(errors, f"{label} 未把 177 币标记为历史回测基线")
         if "历史不足 200 根" not in document or not ("关闭门控" in document or "门控关闭" in document):
@@ -679,7 +697,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("策略实验室与运行时代码同步检查通过（全策略 1% 风险契约 + sweep v1.3 + HLSR 1.0 + DME 1.0）")
+    print("策略实验室与运行时代码同步检查通过（全策略 1% 风险契约 + sweep v1.4 + HLSR 1.0 + DME 1.0）")
     return 0
 
 

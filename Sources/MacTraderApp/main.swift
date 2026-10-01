@@ -65,6 +65,7 @@ enum StrategyState: String, CaseIterable, Identifiable {
 enum StrategySymbolCategory: String, CaseIterable, Identifiable {
     case mainstream = "主流币"
     case hotAltcoins = "热门山寨币"
+    case sweepCandidates = "扫顶候选山寨币（前 100、≥300 万 USDT）"
     case emaAltcoinCandidates = "双均线候选山寨币（前 50）"
     case hlsrCandidates = "高位扫顶候选山寨币"
     case doublePumpCandidates = "翻倍衰竭候选山寨币"
@@ -77,6 +78,7 @@ enum StrategySymbolCategory: String, CaseIterable, Identifiable {
         switch self {
         case .mainstream: return .mainstream
         case .hotAltcoins: return .hotAltcoins
+        case .sweepCandidates: return .sweepCandidates
         case .emaAltcoinCandidates: return .emaAltcoinCandidates
         case .hlsrCandidates: return .hlsrCandidates
         case .doublePumpCandidates: return .doublePumpCandidates
@@ -254,6 +256,10 @@ final class DashboardModel: ObservableObject {
         case .hotAltcoins:
             let altcoins = source.filter(Self.isEligibleHotAltcoin)
             return Array(altcoins.sorted { Self.compactVolume($0.volume) > Self.compactVolume($1.volume) }.prefix(20))
+        case .sweepCandidates:
+            let altcoins = source.filter { StrategyUniverseRules.isEligibleSweep(Self.domainContract(from: $0)) }
+            return Array(altcoins.sorted { Self.compactVolume($0.volume) > Self.compactVolume($1.volume) }
+                .prefix(StrategyUniverseRules.sweepCandidateLimit))
         case .emaAltcoinCandidates:
             let altcoins = source.filter(Self.isEligibleHotAltcoin)
             return Array(altcoins.sorted { Self.compactVolume($0.volume) > Self.compactVolume($1.volume) }.prefix(50))
@@ -2189,7 +2195,7 @@ struct NewStrategySheet: View {
         case .emaAltcoinLong:
             return "动态扫描合规山寨币成交额前 50"
         case .sweepReversalShort:
-            return "动态扫描合规热门榜前 20 个山寨币"
+            return "动态扫描 24h 报价成交额前 100、且不低于 300 万 USDT 的合规山寨币"
         case .external:
             return "策略包运行时不可用（暂停）"
         }

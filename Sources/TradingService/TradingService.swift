@@ -463,7 +463,8 @@ public actor PaperTradingStore {
                 // The formal DME rule requires at least 10m USDT rolling
                 // quote volume. Fail closed when the contract snapshot is
                 // missing or below the guardrail; this keeps low-liquidity
-                // instruments out even if they briefly appear in hot20.
+                // instruments out even if a stale resolved target list still
+                // contains them.
                 guard let contract = resolvedContractsByID[snapshot.instrumentID],
                       StrategyUniverseRules.isEligibleDoublePump(contract) else { continue }
             }

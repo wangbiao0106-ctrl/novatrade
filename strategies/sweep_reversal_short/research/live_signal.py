@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""高位流动性扫顶反转（做空）策略 · 实时信号扫描器 v1.3
+"""高位流动性扫顶反转（做空）策略 · 实时信号扫描器 v1.4
 
 与 STRATEGY.md / STRATEGY_SPEC.md 及运行时 `StrategyEngine.evaluateWithConfirmation`
 一致：1h 只建立二次扫顶结构，入场必须等结构收盘后 1 小时窗口内（时间戳
@@ -11,7 +11,7 @@
   ★入场信号 / 持仓中 / 确认失败·已取消 / 已离场
 
 用法:
-  python live_signal.py                       # 用最新数据扫描动态热门榜前20
+  python live_signal.py                       # 用最新数据扫描生产选币范围（24h 报价成交额前 100 且 ≥300 万 USDT）
   python live_signal.py --asof 2026-08-10T00:00Z   # 历史时点重放（验证/复盘）
   python live_signal.py --json results/live.json  # 同时输出 JSON
   python live_signal.py --min-qv 1e8          # 只扫描流动性过滤后的合约
@@ -35,6 +35,8 @@ STABLECOINS = {
 }
 with open(os.path.join(CONFIG_DIR, "universe.json"), encoding="utf-8") as handle:
     EXCLUDED_BASES = frozenset(item.upper() for item in json.load(handle).get("exclude", []))
+with open(os.path.join(CONFIG_DIR, "strategy.json"), encoding="utf-8") as handle:
+    RUNTIME_UNIVERSE = json.load(handle)["runtime_universe"]
 
 
 def _load_signal_parameters() -> dict:
@@ -75,7 +77,8 @@ def _base_symbol(symbol):
     return symbol.split("-")[0].upper()
 
 
-def _eligible_hot_alt(symbol):
+def eligible_runtime_alt(symbol):
+    """镜像运行时 StrategyUniverseRules 的资产类别过滤（不含成交额条件）。"""
     normalized = symbol.upper()
     # Research files use short base symbols; a full instrument id must still
     # satisfy the same USDT linear-swap boundary as the Swift runtime.
@@ -86,24 +89,39 @@ def _eligible_hot_alt(symbol):
             and base not in STABLECOINS and base not in EXCLUDED_BASES)
 
 
-def load_market(tf="1h", min_qv=0.0, pool="hot20", asof_ms=None):
+def production_pool(data, asof_ms=None, limit=None, min_quote_volume=None):
+    """生产选币范围：合规山寨币按扫描时点最近 24 根 1h 报价成交额排序，
+    先剔除低于 `min_quote_volume_24h_usdt` 的标的，再取前 `limit` 个。
+
+    运行时用 OKX ticker 的 `volCcy24h × last` 近似同一个 24h 报价成交额。
+    """
+    limit = int(RUNTIME_UNIVERSE["limit"] if limit is None else limit)
+    floor = float(RUNTIME_UNIVERSE["min_quote_volume_24h_usdt"]
+                  if min_quote_volume is None else min_quote_volume)
+    scores = []
+    for symbol, values in data.items():
+        if symbol == "BTC" or not eligible_runtime_alt(symbol):
+            continue
+        end = len(values["t"])
+        if asof_ms is not None:
+            end = int(np.searchsorted(values["t"], asof_ms, side="right"))
+        quote = float(values["qv"][max(0, end - 24):end].sum())
+        if quote >= floor:
+            scores.append((quote, symbol))
+    return {symbol for _, symbol in sorted(scores, reverse=True)[:limit]}
+
+
+def load_market(tf="1h", min_qv=0.0, pool="live", asof_ms=None):
     data = E.load_tf(tf, min_qv=min_qv)
     if "BTC" not in data or len(data["BTC"].get("c", ())) == 0:
         raise RuntimeError("缺少 BTC 数据（门控需要）")
-    # hot20 是生产规则：按扫描时点最近 24 根 1h 报价成交量动态选取。
+    # live 是生产规则（config/strategy.json 的 runtime_universe）；
     # lowmid/all 只保留给历史回测基线和结果复核。
     uni_path = os.path.join(CONFIG_DIR, "universe.json")
-    if pool == "hot20":
-        candidates = [s for s in data if s != "BTC" and _eligible_hot_alt(s)]
-        scores = []
-        for symbol in candidates:
-            values = data[symbol]
-            end = len(values["t"])
-            if asof_ms is not None:
-                end = int(np.searchsorted(values["t"], asof_ms, side="right"))
-            start = max(0, end - 24)
-            scores.append((float(values["qv"][start:end].sum()), symbol))
-        alt = {symbol for _, symbol in sorted(scores, reverse=True)[:20]}
+    if pool == "live":
+        # 成交额必须按小时 K 线计算；--tf 不是 1h 时另行读取 1h 序列排名。
+        ranking = data if tf == "1h" else E.load_tf("1h", min_qv=min_qv)
+        alt = production_pool(ranking, asof_ms)
     elif pool == "all":
         alt = set(json.load(open(uni_path))["altcoins"])
     else:
@@ -279,8 +297,8 @@ def main():
     ap.add_argument("--asof", default=None, help="历史时点 UTC，如 2026-08-10T00:00Z")
     ap.add_argument("--json", default=None)
     ap.add_argument("--min-qv", type=float, default=0.0)
-    ap.add_argument("--pool", default="hot20", choices=["hot20", "lowmid", "all"],
-                    help="hot20=动态热门榜前20(生产规则) lowmid/all=历史回测基线")
+    ap.add_argument("--pool", default="live", choices=["live", "lowmid", "all"],
+                    help="live=生产选币范围(config/strategy.json 的 runtime_universe) lowmid/all=历史回测基线")
     ap.add_argument("--min-atr-pct", type=float, default=None,
                     help="最小波动过滤：ATR14/价格低于该百分比(%%)的币不下单（薄盘保护）")
     ap.add_argument("--max-risk-atr", type=float, default=None,
@@ -343,7 +361,12 @@ def main():
     )
     print(f"扫描时点: {last_ts}  (BTC {bc:.0f} vs SMA200 {bs:.0f} → "
           f"门控 {'开·可做空' if gate_on else '关·停止开新仓'})")
-    pool_label = {"hot20": "动态热门榜前20个山寨币", "lowmid": "中低流动性山寨币历史基线", "all": "全部山寨币历史基线"}[args.pool]
+    pool_label = {
+        "live": (f"生产选币范围（24h 报价成交额前 {RUNTIME_UNIVERSE['limit']}、"
+                 f"≥{RUNTIME_UNIVERSE['min_quote_volume_24h_usdt'] / 1e6:g}M USDT 的合规山寨币）"),
+        "lowmid": "中低流动性山寨币历史基线",
+        "all": "全部山寨币历史基线",
+    }[args.pool]
     print(f"标的池: {pool_label} "
           f"({len(pool_set)} 个)  状态条目: {len(rows)}")
     order = {"★入场信号": 0, "持仓中": 1, "等待15m确认": 2, "等待二次扫顶": 3,

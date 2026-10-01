@@ -1,12 +1,12 @@
 # Sweep Reversal Short
 
-山寨币二次扫顶做空，策略实验室规则版本 1.3，已同步到 `StrategyType.sweepReversalShort` 和 `Sources/TradingService/StrategyEngine.swift`。
+山寨币二次扫顶做空，策略实验室规则版本 1.4，已同步到 `StrategyType.sweepReversalShort` 和 `Sources/TradingService/StrategyEngine.swift`。
 
 - 稳定策略标识：`sweepReversalShort`（`StrategyType.identifier`，程序匹配和路由使用）
 - UI 显示名称：`山寨币二次扫顶做空`（`StrategyConfig.displayName`，修改文案不影响程序标识）
 
 - 集成规则：[`STRATEGY.md`](STRATEGY.md)
-- **上线规则绩效证据**：[`research/report_live_rule.py`](research/report_live_rule.py)（177 币基线 41 笔 / 56.1% / +0.37R，逐笔与 `research/live_signal.py` 对齐）
+- **上线规则绩效证据**：[`research/report_live_rule.py`](research/report_live_rule.py)（177 币基线 41 笔 / 56.1% / +0.37R，逐笔与 `research/live_signal.py` 对齐；`--pool live` 复现生产选币范围：55 笔 / 47.3% / +0.21R，单仓 26 笔 +11.58R，见 [`STRATEGY.md`](STRATEGY.md) §5）
 - 研究材料和实验配置：[`research/`](research/)
 - 执行与触发时机调优记录：[`research/EXECUTION_TUNING.md`](research/EXECUTION_TUNING.md)
 - 中低流动性币专项调优：[`research/LOWMID_TUNING.md`](research/LOWMID_TUNING.md)
@@ -18,7 +18,7 @@
 
 研究脚本从 `data/kline/okx/swap/5m` 读取 K 线，派生数组和结果写入本目录的 `results/`。生产执行只使用 Swift 源码，不读取研究目录。
 
-生产扫描范围固定为 `dynamic.hotAltcoins`：每 30 秒刷新行情，排除主流币、稳定币及非加密资产后，按 24h 报价成交额取前 20 个；策略不保存固定币种名单。策略运行时扫描多个币种，但同一实例只允许一个币种下单和持仓。`config/universe_recommended.json` 的 177 个标的是历史回测快照，只用于复现研究结果。
+生产扫描范围固定为 `dynamic.sweepCandidates`（v1.4）：每 30 秒刷新行情，排除主流币、稳定币及非加密资产，再剔除 24h 报价成交额低于 300 万 USDT 的合约后，按成交额取前 100 个；报价成交额按 OKX ticker 的 `volCcy24h × last` 计算，不使用以张计的 `vol24h`。策略不保存固定币种名单。策略运行时扫描多个币种，但同一实例只允许一个币种下单和持仓。`config/universe_recommended.json` 的 177 个标的是历史回测快照，只用于复现研究结果。
 
 当前同步范围包含 1h 结构、15m 收盘确认、市价入场、账户权益 sizing、条件止损/止盈、96 根 1h（384 根 15m）时间离场和账户级 5% mark-to-market 熔断；策略入场不再使用固定数量。
 
