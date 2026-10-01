@@ -170,7 +170,12 @@ public struct StrategyEngine: Sendable {
             if signal != nil { direction = "short" }
         }
         let indicators: [String: [Double]] = ["rsi": Self.trimmed(rsi), "atr": Self.trimmed(atr)]
-        return StrategyStatus(id: config.id, state: .running, direction: direction, cooldown: signal == nil ? max(0, status.cooldown - 1) : config.cooldownBars, pnl: status.pnl, lastSignal: signal ?? status.lastSignal, indicators: indicators, lastEvaluatedBar: latestBar)
+        // Double pump cools down only after an exit (STRATEGY.md §6); the
+        // backend sets that cooldown when the position closes. Starting it at
+        // the signal would also silence the symbol after a signal that was
+        // skipped (global single position, entry slippage guard).
+        let signalCooldown = config.type == .doublePumpExhaustionShort ? 0 : config.cooldownBars
+        return StrategyStatus(id: config.id, state: .running, direction: direction, cooldown: signal == nil ? max(0, status.cooldown - 1) : signalCooldown, pnl: status.pnl, lastSignal: signal ?? status.lastSignal, indicators: indicators, lastEvaluatedBar: latestBar)
     }
 
     /// Production execution path: the 1h candles establish the sweep/resweep

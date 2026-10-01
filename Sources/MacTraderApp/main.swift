@@ -631,30 +631,24 @@ final class DashboardModel: ObservableObject {
         return created
     }
 
+    /// Positions attributable to a strategy. Ownership mirrors the backend's
+    /// `strategyRemotePositions`: only the instruments and directions of this
+    /// strategy's non-terminal entry orders. The strategy's universe must not
+    /// be used here, or "close and delete" would flatten manual positions and
+    /// other strategies' positions on the same instruments.
     func strategyOpenPositions(for strategy: TradingStrategy) -> [PositionSnapshot] {
         guard let serviceID = strategy.serviceID else { return [] }
-        let instrumentIDs = strategyInstrumentIDs(for: serviceID)
-        return livePositions.filter { instrumentIDs.contains($0.instrumentID) && $0.quantity != 0 }
-    }
-
-    private func strategyInstrumentIDs(for serviceID: UUID) -> Set<String> {
-        var ids = Set(orders.filter { $0.strategyID == serviceID }.map(\.instrumentID))
-        guard let config = strategyConfigs.first(where: { $0.id == serviceID }) else { return ids }
-        ids.formUnion(config.scope.instrumentIDs)
-        if config.scope.mode == .dynamicCategory, let category = config.scope.category {
-            let uiCategory: StrategySymbolCategory
-            switch category {
-            case .mainstream: uiCategory = .mainstream
-            case .hotAltcoins: uiCategory = .hotAltcoins
-            case .emaAltcoinCandidates: uiCategory = .emaAltcoinCandidates
-            case .hlsrCandidates: uiCategory = .hlsrCandidates
-            case .doublePumpCandidates: uiCategory = .doublePumpCandidates
-            case .highGain60: uiCategory = .highGain60
-            case .highGain100: uiCategory = .highGain100
-            }
-            ids.formUnion(strategyContracts(for: uiCategory).map(\.id))
+        let terminal: Set<String> = ["cancelled", "canceled", "rejected", "expired", "failed", "closed"]
+        let owned = orders.filter { $0.strategyID == serviceID && !terminal.contains($0.status.lowercased()) }
+        let directionsByInstrument = Dictionary(grouping: owned, by: \.instrumentID).mapValues { values in
+            Set(values.map { $0.side.lowercased() })
         }
-        return ids
+        return livePositions.filter { position in
+            guard position.quantity != 0, let directions = directionsByInstrument[position.instrumentID] else { return false }
+            let side = position.side.lowercased()
+            let isShort = side == "short" || (side == "net" && position.quantity < 0)
+            return directions.contains(isShort ? "short" : "long")
+        }
     }
 
     private func closeSide(for position: PositionSnapshot) -> String {
@@ -1030,7 +1024,7 @@ struct StrategyStatusModule: View {
             Button("平仓并删除", role: .destructive) { delete(true) }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("检测到 (openPositions.count) 个未平仓位。必须先平仓并确认远端持仓归零后才能删除策略。")
+            Text("检测到 \(openPositions.count) 个未平仓位。必须先平仓并确认远端持仓归零后才能删除策略。")
         }
     }
 }
@@ -1684,7 +1678,7 @@ struct StrategyCard: View {
             Button("平仓并删除", role: .destructive) { delete(true) }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("检测到 (openPositions.count) 个未平仓位。必须先平仓并确认远端持仓归零后才能删除策略。")
+            Text("检测到 \(openPositions.count) 个未平仓位。必须先平仓并确认远端持仓归零后才能删除策略。")
         }
     }
 }

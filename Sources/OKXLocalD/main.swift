@@ -23,6 +23,8 @@ struct OKXLocalD {
     // isolation trap (or a deadlock for an async callback while app.wait runs).
     private nonisolated static func configureWebSockets(_ app: HBApplication, backend: TradingBackend) {
         app.ws.addUpgrade()
+        // Browsers do not apply same-origin policy to WebSocket upgrades.
+        app.ws.add(middleware: LoopbackOriginGuardMiddleware())
         // One shared hub: a single upstream OKX socket and a single auxiliary
         // poll serve every client subscribed to the same instrument/interval
         // instead of opening one upstream connection per client.
@@ -286,9 +288,13 @@ private final class StreamHub: @unchecked Sendable {
             // Historical REST snapshots are never emitted as live candles.
             // Retry the history load so strategy indicators have enough
             // context before the socket begins delivering new bars.
+            // REST history must be reloaded on the next subscription when the
+            // prewarm failed, and after every reconnect thereafter.
+            var needsHistoryReload = true
             for attempt in 0..<3 where !Task.isCancelled {
                 do {
                     try await backend.prewarmStrategyMarket(instrumentID: instrumentID, interval: interval)
+                    needsHistoryReload = false
                     break
                 } catch {
                     if attempt < 2 {
@@ -305,6 +311,19 @@ private final class StreamHub: @unchecked Sendable {
                     self.sendConnection(hubKey: hubKey, state: "okx_wss_connecting", instrumentID: instrumentID)
                 case .subscribed:
                     self.sendConnection(hubKey: hubKey, state: "okx_wss_subscribed", instrumentID: instrumentID)
+                    // `.subscribed` is reported again after every reconnect.
+                    // OKX does not replay bars that closed while the socket
+                    // was down, so reload them over REST; otherwise indicators
+                    // run over a silent gap and a dangling open bar blocks
+                    // HLSR evaluation.
+                    if needsHistoryReload {
+                        do {
+                            try await backend.prewarmStrategyMarket(instrumentID: instrumentID, interval: interval, forceRefresh: true)
+                        } catch {
+                            await backend.appendLog("\(instrumentID) \(interval.rawValue) 重连后补齐 K 线失败：\(error.localizedDescription)", level: "warning")
+                        }
+                    }
+                    needsHistoryReload = true
                 case let .reconnecting(reason, retryInSeconds):
                     self.sendConnection(hubKey: hubKey, state: "okx_wss_reconnecting", instrumentID: instrumentID)
                     await backend.appendLog("OKX WSS \(instrumentID) \(interval.rawValue) 断开：\(reason)，\(retryInSeconds) 秒后重连", level: "warning")

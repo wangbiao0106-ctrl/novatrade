@@ -353,6 +353,19 @@ func candleStoreReplacesUnconfirmedCandleAndKeepsOrder() async {
 }
 
 @Test
+func candleStoreNeverDowngradesConfirmedCandle() async {
+    let store = CandleStore()
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+    let confirmed = Candle(timestamp: start, open: 10, high: 13, low: 9, close: 12, confirmed: true)
+    // A REST snapshot fetched before the bar closed arrives late.
+    let stale = Candle(timestamp: start, open: 10, high: 12, low: 9, close: 11, confirmed: false)
+    await store.ingest(confirmed, instrumentID: "BTC-USDT-SWAP", interval: .oneMinute)
+    await store.ingest([stale], instrumentID: "BTC-USDT-SWAP", interval: .oneMinute)
+    let values = await store.values(instrumentID: "BTC-USDT-SWAP", interval: .oneMinute)
+    #expect(values == [confirmed])
+}
+
+@Test
 func paperBrokerFillsOnlyOnFollowingCandleAndAppliesFeeAndSlippage() async throws {
     let risk = RiskEngine(limits: RiskLimits(minOrderIntervalSeconds: 0), initialEquity: 10_000)
     let broker = PaperBroker(risk: risk, feeRate: 0.001, slippageBps: 10)

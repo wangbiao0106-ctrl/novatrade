@@ -741,12 +741,12 @@ public actor MarketDataService {
         self.ttl = ttl
     }
 
-    public func snapshot(instrumentID: String, interval: KlineInterval) async throws -> MarketSnapshot {
+    public func snapshot(instrumentID: String, interval: KlineInterval, forceRefresh: Bool = false) async throws -> MarketSnapshot {
         let cacheKey = key(instrumentID, interval)
         // Historical candles are a prewarm only. Once a subscription has
         // loaded them, the WSS stream owns all subsequent candle updates; the
         // TTL re-arms a REST reload only to heal gaps after a stream outage.
-        if let cached = cache[cacheKey], let fetchedAt = cacheFetchedAt[cacheKey], fetchedAt.addingTimeInterval(ttl.snapshot) > Date() {
+        if !forceRefresh, let cached = cache[cacheKey], let fetchedAt = cacheFetchedAt[cacheKey], fetchedAt.addingTimeInterval(ttl.snapshot) > Date() {
             return cached
         }
         if let task = cacheTasks[cacheKey] { return try await task.value }
@@ -1452,9 +1452,10 @@ public actor TradingBackend {
     private func cancelRemoteEntryOrders(for strategyID: UUID) async throws {
         // Pause/delete waits for commands that already crossed the submission
         // boundary, then cancels their authenticated order IDs. Releasing the
-        // actor here allows those network commands to finish.
+        // actor here allows those network commands to finish. Sleep instead
+        // of yielding so a slow CLI call does not spin a CPU core.
         while strategyEntrySubmissionsInFlight.contains(strategyID) {
-            await Task.yield()
+            try await Task.sleep(for: .milliseconds(50))
         }
         await broker.cancelPendingOrders(strategyID: strategyID)
         let orderIDs = await strategyRemoteOrderIDs(strategyID)
@@ -1847,7 +1848,8 @@ public actor TradingBackend {
                 stopHit = signal?.stopPrice.map { price <= $0 } ?? false
                 takeHit = signal?.takePrice.map { price >= $0 } ?? false
             }
-            let timedOut = timestamp.timeIntervalSince(order.requestedAt) >= 96 * 3600
+            let maxHold = Self.strategyMaxHoldSeconds(config)
+            let timedOut = timestamp.timeIntervalSince(order.requestedAt) >= maxHold
             guard stopHit || takeHit || timedOut else { continue }
             let positionKey = "\(position.id):\(position.instrumentID)"
             if let pending = pendingRemoteExits[positionKey],
@@ -1897,12 +1899,27 @@ public actor TradingBackend {
                     remoteOrderID: result.orderID
                 )
                 savePendingRemoteExits()
-                appendLog("策略平仓已提交，等待成交确认：\(config.name) / \(position.instrumentID) / \(result.orderID) / \(stopHit ? "止损" : takeHit ? "止盈" : "96根时间离场")", level: "exit")
+                appendLog("策略平仓已提交，等待成交确认：\(config.name) / \(position.instrumentID) / \(result.orderID) / \(stopHit ? "止损" : takeHit ? "止盈" : "持仓超时离场")", level: "exit")
                 await market.invalidateAccountState()
             } catch {
                 submittedExitPositionIDs.remove(positionKey)
                 appendLog("策略平仓失败：\(config.name) / \(position.instrumentID)：\(error.localizedDescription)", level: "warning")
             }
+        }
+    }
+
+    /// Time exit measured from the entry order's signal bar. Mirrors each
+    /// lab's `max_hold_bars` on its entry timeframe: double pump holds at
+    /// most 24 × 15m after the signal bar closes, the 1h rules 96 hours.
+    static func strategyMaxHoldSeconds(_ config: StrategyConfig) -> TimeInterval {
+        switch config.type {
+        case .doublePumpExhaustionShort:
+            let bars = max(1, config.parameters["maxHoldBars"] ?? 24)
+            return (bars + 1) * 15 * 60
+        case .emaAltcoinLong:
+            return max(1, config.parameters["maxHoldBars"] ?? 96) * 3600
+        default:
+            return 96 * 3600
         }
     }
 
@@ -2259,7 +2276,10 @@ public actor TradingBackend {
                 let realized = historyRealized ?? pending.realizedPnL ?? fallbackRealized
                 await riskEngine.recordStrategyRealized(realized, strategyID: pending.strategyID, now: timestamp)
                 await riskEngine.release(instrumentID: pending.instrumentID, notional: reservedNotional, strategyID: pending.strategyID, margin: reservedMargin, riskAmount: reservedRisk, closedPosition: true)
-                if let config = await paper.allStrategies().first(where: { $0.id == pending.strategyID }), config.type == .hlsr {
+                // Both 15m short rules define their cooldown from the exit,
+                // not from the signal (double pump STRATEGY.md §5.6).
+                if let config = await paper.allStrategies().first(where: { $0.id == pending.strategyID }),
+                   config.type == .hlsr || config.type == .doublePumpExhaustionShort {
                     await paper.setCooldown(strategyID: pending.strategyID, instrumentID: pending.instrumentID, bars: config.type.defaultCooldownBars)
                 }
                 appendLog("策略平仓已成交并结算：\(pending.instrumentID)，已实现盈亏 \(realized)", level: "fill")
@@ -2501,6 +2521,8 @@ public actor TradingBackend {
                 await paper.markRemoteOrderTerminal(orderID)
                 releases.append((reservation, realizedPnL))
             }
+            var strategyConfigs: [StrategyConfig] = []
+            if !releases.isEmpty { strategyConfigs = await paper.allStrategies() }
             for (reservation, realizedPnL) in releases {
                 await riskEngine.release(
                     instrumentID: reservation.instrumentID,
@@ -2512,6 +2534,12 @@ public actor TradingBackend {
                 )
                 if let strategyID = reservation.strategyID, let realizedPnL {
                     await riskEngine.recordStrategyRealized(realizedPnL, strategyID: strategyID)
+                    // A native SL/TP close is still an exit; apply the same
+                    // post-exit cooldown as a service-submitted exit.
+                    if let config = strategyConfigs.first(where: { $0.id == strategyID }),
+                       config.type == .hlsr || config.type == .doublePumpExhaustionShort {
+                        await paper.setCooldown(strategyID: strategyID, instrumentID: reservation.instrumentID, bars: config.type.defaultCooldownBars)
+                    }
                 }
             }
 
@@ -2638,8 +2666,10 @@ public actor TradingBackend {
         return (spec, notional)
     }
 
-    public func placeLiveOrder(_ request: LiveOrderRequest) async throws -> LiveOrderResult {
+    public func placeLiveOrder(_ incoming: LiveOrderRequest) async throws -> LiveOrderResult {
         guard liveTradingEnabled else { throw ATKError.liveTradingDisabled }
+        let clientOrderID = incoming.clientOrderID ?? Self.hlsrClientOrderID(UUID())
+        let request = Self.request(incoming, clientOrderID: clientOrderID)
         let account = try await account()
         guard account.mode == .live else { throw ATKError.demoProfile(profile: account.profile ?? "unknown") }
         let ticker = try await market.ticker(instrumentID: request.instrumentID)
@@ -2647,17 +2677,44 @@ public actor TradingBackend {
         let (decision, submissionToken) = await authorizeRemoteSubmission(instrumentID: request.instrumentID, notional: notional, reduceOnly: request.reduceOnly)
         guard decision.allowed else { throw ATKError.unavailable(decision.reason ?? "风控拒绝订单") }
         await paper.setRisk(await riskEngine.snapshot())
+        let result: LiveOrderCommandResult
         do {
-            let result = try await market.placeLiveOrder(request)
-            await confirmRemoteSubmission(submissionToken, orderID: result.orderID)
+            result = try await market.placeLiveOrder(request)
+        } catch {
+            guard let orderID = try await recoverManualSubmission(error, token: submissionToken, instrumentID: request.instrumentID, clientOrderID: clientOrderID, demo: false) else { throw error }
+            result = LiveOrderCommandResult(orderID: orderID, clientOrderID: clientOrderID, message: "响应中断，已按 clOrdId 确认订单")
+        }
+        await confirmRemoteSubmission(submissionToken, orderID: result.orderID)
+        await market.invalidateAccountState()
+        await paper.setRisk(await riskEngine.snapshot())
+        appendLog("实盘订单已提交 \(request.instrumentID) \(request.side) \(request.quantity)", level: "warning")
+        return LiveOrderResult(orderID: result.orderID, clientOrderID: result.clientOrderID, instrumentID: request.instrumentID, side: request.side, orderType: request.orderType, quantity: request.quantity, message: result.message)
+    }
+
+    private static func request(_ request: LiveOrderRequest, clientOrderID: String) -> LiveOrderRequest {
+        LiveOrderRequest(instrumentID: request.instrumentID, side: request.side, orderType: request.orderType, quantity: request.quantity, positionSide: request.positionSide, marginMode: request.marginMode, reduceOnly: request.reduceOnly, price: request.price, takeProfitTriggerPrice: request.takeProfitTriggerPrice, stopLossTriggerPrice: request.stopLossTriggerPrice, leverage: request.leverage, clientOrderID: clientOrderID)
+    }
+
+    /// Returns the exchange order id when a failed manual submit was in fact
+    /// accepted, or nil (reservation released) when OKX confirms the order
+    /// does not exist. An unverifiable result throws a distinct error so the
+    /// operator checks the exchange instead of blindly re-submitting.
+    private func recoverManualSubmission(_ error: Error, token: String?, instrumentID: String, clientOrderID: String, demo: Bool) async throws -> String? {
+        switch await resolveFailedSubmission(instrumentID: instrumentID, clientOrderID: clientOrderID, demo: demo) {
+        case let .accepted(orderID):
+            appendLog("订单响应失败但 OKX 已接受 \(instrumentID) 订单 \(orderID)：\(error.localizedDescription)", level: "warning")
+            return orderID
+        case .notPlaced:
+            await failRemoteSubmission(token)
+            await paper.setRisk(await riskEngine.snapshot())
+            return nil
+        case let .unknown(lookupError):
+            await failRemoteSubmission(token)
             await market.invalidateAccountState()
             await paper.setRisk(await riskEngine.snapshot())
-            appendLog("实盘订单已提交 \(request.instrumentID) \(request.side) \(request.quantity)", level: "warning")
-            return LiveOrderResult(orderID: result.orderID, clientOrderID: result.clientOrderID, instrumentID: request.instrumentID, side: request.side, orderType: request.orderType, quantity: request.quantity, message: result.message)
-        } catch {
-            await failRemoteSubmission(submissionToken)
-            await paper.setRisk(await riskEngine.snapshot())
-            throw error
+            let message = "下单结果未知（clOrdId \(clientOrderID)），请先在 OKX 核对 \(instrumentID) 再重试：\(error.localizedDescription)；查询失败：\(lookupError.localizedDescription)"
+            appendLog(message, level: "warning")
+            throw ATKError.unavailable(message)
         }
     }
 
@@ -2665,25 +2722,26 @@ public actor TradingBackend {
         let account = try await account()
         guard account.mode == .paper else { throw ATKError.unavailable("当前不是 OKX 模拟账户") }
         let ticker = try await market.ticker(instrumentID: request.instrumentID)
-        let liveRequest = LiveOrderRequest(instrumentID: request.instrumentID, side: request.side, orderType: "market", quantity: request.quantity, marginMode: "cross", reduceOnly: request.reduceOnly)
+        let clientOrderID = Self.hlsrClientOrderID(UUID())
+        let liveRequest = LiveOrderRequest(instrumentID: request.instrumentID, side: request.side, orderType: "market", quantity: request.quantity, marginMode: "cross", reduceOnly: request.reduceOnly, clientOrderID: clientOrderID)
         let (_, notional) = try await validatedRemoteOrder(liveRequest, ticker: ticker)
         let (decision, submissionToken) = await authorizeRemoteSubmission(instrumentID: request.instrumentID, notional: notional, reduceOnly: request.reduceOnly)
         guard decision.allowed else { throw ATKError.unavailable(decision.reason ?? "风控拒绝模拟订单") }
         await paper.setRisk(await riskEngine.snapshot())
+        let remoteOrderID: String
         do {
-            let result = try await market.placeDemoOrder(liveRequest)
-            await confirmRemoteSubmission(submissionToken, orderID: result.orderID)
-            await market.invalidateAccountState()
-            await paper.setRisk(await riskEngine.snapshot())
-            let order = PaperOrder(strategyID: UUID(), instrumentID: request.instrumentID, side: request.side.lowercased() == "sell" ? "short" : "long", quantity: request.quantity, status: "submitted", remoteOrderID: result.orderID)
-            await paper.record(order)
-            appendLog("挂单：OKX 模拟盘 \(request.instrumentID) \(request.side) \(request.quantity)，订单 \(result.orderID)", level: "order")
-            return order
+            remoteOrderID = try await market.placeDemoOrder(liveRequest).orderID
         } catch {
-            await failRemoteSubmission(submissionToken)
-            await paper.setRisk(await riskEngine.snapshot())
-            throw error
+            guard let orderID = try await recoverManualSubmission(error, token: submissionToken, instrumentID: request.instrumentID, clientOrderID: clientOrderID, demo: true) else { throw error }
+            remoteOrderID = orderID
         }
+        await confirmRemoteSubmission(submissionToken, orderID: remoteOrderID)
+        await market.invalidateAccountState()
+        await paper.setRisk(await riskEngine.snapshot())
+        let order = PaperOrder(strategyID: UUID(), instrumentID: request.instrumentID, side: request.side.lowercased() == "sell" ? "short" : "long", quantity: request.quantity, status: "submitted", remoteOrderID: remoteOrderID)
+        await paper.record(order)
+        appendLog("挂单：OKX 模拟盘 \(request.instrumentID) \(request.side) \(request.quantity)，订单 \(remoteOrderID)", level: "order")
+        return order
     }
 
     public func privatePositions() async throws -> [PositionSnapshot] { try await market.privatePositions() }
@@ -2694,15 +2752,18 @@ public actor TradingBackend {
     public func status(for id: UUID) async -> StrategyStatus? { await paper.status(for: id) }
     /// Loads the historical window needed by a background strategy monitor
     /// without evaluating old bars or submitting historical signals.
-    public func prewarmStrategyMarket(instrumentID: String, interval: KlineInterval) async throws {
-        let snapshot = try await market.snapshot(instrumentID: instrumentID, interval: interval)
+    /// `forceRefresh` bypasses the snapshot TTL. The stream uses it after a
+    /// WSS reconnect: bars that closed while the socket was down are never
+    /// replayed by OKX, so only a REST reload can fill that gap.
+    public func prewarmStrategyMarket(instrumentID: String, interval: KlineInterval, forceRefresh: Bool = false) async throws {
+        let snapshot = try await market.snapshot(instrumentID: instrumentID, interval: interval, forceRefresh: forceRefresh)
         await candles.ingest(snapshot.candles, instrumentID: instrumentID, interval: interval)
         await paper.prewarm(snapshot)
         if interval == .fifteenMinutes {
             // HLSR always has a separately fetched 4H warm-up. Fetching this
             // series explicitly avoids pretending 500 cached 15m bars are
             // enough to supply the required 55 completed 4H bars.
-            let fourHour = try await market.snapshot(instrumentID: instrumentID, interval: .fourHours)
+            let fourHour = try await market.snapshot(instrumentID: instrumentID, interval: .fourHours, forceRefresh: forceRefresh)
             await candles.ingest(fourHour.candles, instrumentID: instrumentID, interval: .fourHours)
             await paper.prewarm(fourHour)
         }
@@ -2770,9 +2831,24 @@ public actor TradingBackend {
             strategyEntrySubmissionsInFlight.remove(config.id)
             strategyEntryInFlightInstruments.remove(instrumentID)
         }
+        // Callers pass a config captured before several suspension points. A
+        // pause that ran in between saw no in-flight submission and returned
+        // without anything to cancel, so re-read the persisted state only after
+        // claiming the in-flight slot (later pauses wait for this submission).
+        guard let live = await paper.allStrategies().first(where: { $0.id == config.id }), live.enabled else {
+            appendLog("策略 \(config.name) 未发送：策略已停止或已删除", level: "warning")
+            return false
+        }
         // 同一币种单仓：策略实例对动态扫描池中的每个币种都只允许一笔。
-        if let positions = try? await market.privatePositions(),
-           positions.contains(where: { $0.instrumentID == instrumentID && abs($0.quantity) > 0 }) {
+        // 读取失败时不能当作"无持仓"放行。
+        let existingPositions: [PositionSnapshot]
+        do {
+            existingPositions = try await market.privatePositions()
+        } catch {
+            appendLog("策略 \(config.name) 未发送：无法读取远端持仓（\(error.localizedDescription)）", level: "warning")
+            return false
+        }
+        if existingPositions.contains(where: { $0.instrumentID == instrumentID && abs($0.quantity) > 0 }) {
             appendLog("策略 \(config.name) 未发送：\(instrumentID) 已有持仓，同一标的只允许一笔", level: "warning")
             return false
         }
@@ -2808,6 +2884,16 @@ public actor TradingBackend {
         // a gap and can exceed the strategy's risk budget.
         let entry = ticker.last
         let isLong = signal.type == "entry_long"
+        // DME 规则：入场价相对信号收盘价偏离超过滑点上限时放弃该笔交易，
+        // 不追价（double_pump_exhaustion_short STRATEGY.md §4，max_entry_slippage_pct）。
+        if config.type == .doublePumpExhaustionShort, signal.price > 0 {
+            let limit = Decimal(config.parameters["maxEntrySlippage"] ?? 0.003)
+            let deviation = abs(entry - signal.price) / signal.price
+            guard deviation <= limit else {
+                appendLog("策略 \(config.name) 未发送：\(instrumentID) 当前价 \(entry) 偏离信号收盘价 \(signal.price) 超过 \(limit * 100)%，不追价", level: "warning")
+                return false
+            }
+        }
         // Move protection towards the entry when rounding. This preserves the
         // risk budget and prevents ATR-derived off-tick prices being rejected.
         let stopPrice = signal.stopPrice.flatMap { spec.alignedPrice($0, roundingUp: isLong) }
@@ -2880,29 +2966,69 @@ public actor TradingBackend {
         // crash cannot forget the notional cap after OKX has accepted it.
         await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
         let side = signal.type == "entry_short" ? "sell" : "buy"
-        let request = LiveOrderRequest(instrumentID: instrumentID, side: side, orderType: "market", quantity: quantity, marginMode: "cross", takeProfitTriggerPrice: takePrice, stopLossTriggerPrice: stopPrice, leverage: Decimal(config.leverage))
+        // Derived from the signal so every retry of the same signal carries
+        // the same exchange identity and can be looked up after a timeout.
+        let clientOrderID = Self.hlsrClientOrderID(signal.id)
+        let request = LiveOrderRequest(instrumentID: instrumentID, side: side, orderType: "market", quantity: quantity, marginMode: "cross", takeProfitTriggerPrice: takePrice, stopLossTriggerPrice: stopPrice, leverage: Decimal(config.leverage), clientOrderID: clientOrderID)
+        let remoteOrderID: String
         do {
-            let result = try await market.placeDemoOrder(request)
-            // Persist the strategy ownership immediately after the exchange
-            // accepts the order. If the process exits before the reservation
-            // map is updated, restart recovery can still discover and protect
-            // the remote position from this durable entry record.
-            let order = PaperOrder(strategyID: config.id, instrumentID: instrumentID, side: side == "sell" ? "short" : "long", quantity: quantity, requestedAt: signal.timestamp, status: "submitted", remoteOrderID: result.orderID, signal: signal)
-            await paper.record(order)
-            // Keep the reservation under the authenticated order ID until a
-            // position disappears.  This covers exchange-native SL/TP exits,
-            // which never pass through enforceStrategyExits.
-            await confirmRemoteSubmission(submissionToken, orderID: result.orderID)
-            await market.invalidateAccountState()
-            await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
-            appendLog("挂单：策略 \(config.name) / \(instrumentID) / \(side) \(quantity)，订单 \(result.orderID)", level: "order")
-            if signal.stopPrice != nil || signal.takePrice != nil || signal.takePrices != nil { appendLog("策略 \(config.name) 已附带保护规则；分批止盈/保本/跟踪由策略监控处理", level: "info") }
-            return true
+            remoteOrderID = try await market.placeDemoOrder(request).orderID
         } catch {
-            await failRemoteSubmission(submissionToken)
-            await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
-            appendLog("策略 \(config.name) OKX 模拟下单失败：\(error.localizedDescription)", level: "warning")
-            return false
+            switch await resolveFailedSubmission(instrumentID: instrumentID, clientOrderID: clientOrderID, demo: true) {
+            case let .accepted(orderID):
+                appendLog("策略 \(config.name) 下单响应失败但 OKX 已接受订单 \(orderID)：\(error.localizedDescription)", level: "warning")
+                remoteOrderID = orderID
+            case .notPlaced:
+                await failRemoteSubmission(submissionToken)
+                await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
+                appendLog("策略 \(config.name) OKX 模拟下单失败：\(error.localizedDescription)", level: "warning")
+                return false
+            case let .unknown(lookupError):
+                // The order may exist. Release the local reservation (the
+                // next reconciliation rebuilds exposure from remote
+                // positions) but report the signal as consumed so it is
+                // never sent a second time.
+                await failRemoteSubmission(submissionToken)
+                await market.invalidateAccountState()
+                await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
+                appendLog("策略 \(config.name) 下单结果未知，已停止重发该信号，请人工核对 \(instrumentID)：\(error.localizedDescription)；查询失败：\(lookupError.localizedDescription)", level: "warning")
+                return true
+            }
+        }
+        // Persist the strategy ownership immediately after the exchange
+        // accepts the order. If the process exits before the reservation
+        // map is updated, restart recovery can still discover and protect
+        // the remote position from this durable entry record.
+        let order = PaperOrder(strategyID: config.id, instrumentID: instrumentID, side: side == "sell" ? "short" : "long", quantity: quantity, requestedAt: signal.timestamp, status: "submitted", remoteOrderID: remoteOrderID, signal: signal)
+        await paper.record(order)
+        // Keep the reservation under the authenticated order ID until a
+        // position disappears.  This covers exchange-native SL/TP exits,
+        // which never pass through enforceStrategyExits.
+        await confirmRemoteSubmission(submissionToken, orderID: remoteOrderID)
+        await market.invalidateAccountState()
+        await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
+        appendLog("挂单：策略 \(config.name) / \(instrumentID) / \(side) \(quantity)，订单 \(remoteOrderID)", level: "order")
+        if signal.stopPrice != nil || signal.takePrice != nil || signal.takePrices != nil { appendLog("策略 \(config.name) 已附带保护规则；分批止盈/保本/跟踪由策略监控处理", level: "info") }
+        return true
+    }
+
+    private enum FailedSubmissionOutcome {
+        case accepted(orderID: String)
+        case notPlaced
+        case unknown(Error)
+    }
+
+    /// A timed-out or truncated CLI response does not mean OKX rejected the
+    /// order. Look up the exact client order id before treating the attempt
+    /// as unsent; only OKX's explicit "order does not exist" counts as absent.
+    private func resolveFailedSubmission(instrumentID: String, clientOrderID: String, demo: Bool) async -> FailedSubmissionOutcome {
+        do {
+            if let order = try await market.privateOrder(instrumentID: instrumentID, clientOrderID: clientOrderID, demo: demo) {
+                return .accepted(orderID: order.id)
+            }
+            return .notPlaced
+        } catch {
+            return .unknown(error)
         }
     }
 
@@ -2993,12 +3119,51 @@ public actor TradingBackend {
     }
 }
 
+/// Rejects browser-originated and DNS-rebound requests to the loopback API.
+/// The daemon has no credentials of its own, so without this any web page
+/// could POST a `text/plain` body (no CORS preflight) to enable live trading
+/// and place orders, or open the stream and read account data. Native
+/// clients (URLSession, curl) send no `Origin`; browsers always send one on
+/// cross-origin POST and WebSocket upgrades.
+public struct LoopbackOriginGuardMiddleware: HBMiddleware {
+    public init() {}
+
+    public func apply(to request: HBRequest, next: HBResponder) -> EventLoopFuture<HBResponse> {
+        guard Self.isAllowed(host: request.headers.first(name: "host"), origin: request.headers.first(name: "origin")) else {
+            return request.failure(HBHTTPError(.forbidden))
+        }
+        return next.respond(to: request)
+    }
+
+    public static func isAllowed(host: String?, origin: String?) -> Bool {
+        guard let host, isLoopbackAuthority(host) else { return false }
+        guard let origin else { return true }
+        guard let url = URL(string: origin), url.scheme == "http" || url.scheme == "https",
+              let originHost = url.host else { return false }
+        let authority = url.port.map { "\(originHost):\($0)" } ?? originHost
+        return isLoopbackAuthority(authority) && authority.lowercased() == host.lowercased()
+    }
+
+    private static func isLoopbackAuthority(_ authority: String) -> Bool {
+        let value = authority.lowercased()
+        let hostPart: String
+        if value.hasPrefix("[") {
+            guard let end = value.firstIndex(of: "]") else { return false }
+            hostPart = String(value[value.index(after: value.startIndex)..<end])
+        } else {
+            hostPart = value.split(separator: ":", maxSplits: 1).first.map(String.init) ?? value
+        }
+        return ["127.0.0.1", "localhost", "::1"].contains(hostPart)
+    }
+}
+
 public struct TradingHTTPServer {
     public let backend: TradingBackend
 
     public init(backend: TradingBackend = TradingBackend()) { self.backend = backend }
 
     public func configure(_ app: HBApplication) throws {
+        app.middleware.add(LoopbackOriginGuardMiddleware())
         let jsonEncoder = JSONEncoder()
         jsonEncoder.dateEncodingStrategy = .iso8601
         app.encoder = jsonEncoder

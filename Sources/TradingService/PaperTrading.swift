@@ -10,6 +10,12 @@ public actor CandleStore {
     public func ingest(_ candle: Candle, instrumentID: String, interval: KlineInterval) {
         let key = "\(instrumentID):\(interval.rawValue)"
         var values = candlesByKey[key, default: []]
+        // A stale REST snapshot or delayed WSS frame must not turn a confirmed
+        // bar back into an open one. An unconfirmed bar inside the history
+        // makes HLSR refuse to evaluate until it scrolls out of the window.
+        if let existing = values.first(where: { $0.timestamp == candle.timestamp }), existing.confirmed, !candle.confirmed {
+            return
+        }
         values.upsert(candle)
         if values.count > capacity { values.removeFirst(values.count - capacity) }
         candlesByKey[key] = values
