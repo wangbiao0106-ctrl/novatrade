@@ -255,7 +255,13 @@ public struct ATKClient: Sendable {
         let markets = rows.compactMap { row -> ContractMarket? in
             guard let id = row["instId"] as? String,
                   let last = Self.decimal(row["last"]), last > 0 else { return nil }
-            let open = Self.decimal(row["open24h"]) ?? last
+            // OKX exposes both UTC and UTC+8 day-open prices.  The market
+            // sidebar's daily move must use the UTC day boundary; keep the
+            // rolling 24h value as a compatibility fallback for older CLI
+            // payloads that do not include `sodUtc0`.
+            let utcDayOpen = Self.decimal(row["sodUtc0"]).flatMap { $0 > 0 ? $0 : nil }
+            let rollingOpen = Self.decimal(row["open24h"]).flatMap { $0 > 0 ? $0 : nil }
+            let open = utcDayOpen ?? rollingOpen ?? last
             let change = open == 0 ? 0 : (last - open) / open * 100
             let volume = Self.decimal(row["volCcy24h"]) ?? Self.decimal(row["vol24h"]) ?? 0
             let base = id.split(separator: "-").first.map(String.init) ?? id

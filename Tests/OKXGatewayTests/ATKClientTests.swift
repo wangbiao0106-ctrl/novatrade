@@ -321,6 +321,28 @@ func todayPnLUsesUTCDayBoundary() {
 }
 
 @Test
+func marketContractsUseUTCDayOpenForChangePercent() async throws {
+    let runner = StubATKRunner(outputs: [
+        "market tickers SWAP --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","last":"110","open24h":"108","sodUtc0":"100","sodUtc8":"105","volCcy24h":"2500"}]"#)
+    ])
+
+    let markets = try await ATKClient(runner: runner).marketContracts()
+    #expect(markets.count == 1)
+    #expect(markets[0].changePercent == Decimal(10))
+}
+
+@Test
+func marketContractsFallbackWhenUTCDayOpenIsZero() async throws {
+    let runner = StubATKRunner(outputs: [
+        "market tickers SWAP --json": ATKCommandResult(stdout: #"[{"instId":"NEW-USDT-SWAP","last":"110","open24h":"100","sodUtc0":"0","volCcy24h":"2500"}]"#)
+    ])
+
+    let markets = try await ATKClient(runner: runner).marketContracts()
+    #expect(markets.count == 1)
+    #expect(markets[0].changePercent == Decimal(10))
+}
+
+@Test
 func parsesStrictUSDTLinearSwapInstrumentSpecification() async throws {
     let runner = StubATKRunner(outputs: [
         "market instruments --instType SWAP --instId BTC-USDT-SWAP --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","ctVal":"0.01","ctMult":"1","lotSz":"1","minSz":"1","tickSz":"0.1","state":"live","ctType":"linear","settleCcy":"USDT"}]"#)
