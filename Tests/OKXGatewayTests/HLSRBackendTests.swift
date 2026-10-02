@@ -954,3 +954,33 @@ private func hlsrBackendFixtures() -> (lower: [Candle], fourHour: [Candle]) {
     }
     return (lower, fourHour)
 }
+
+@Test("A filled strategy entry counts its exposure once after the publication window")
+func filledStrategyEntryCountsExposureOnce() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, _, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+    let place = try #require((await runner.commandsContainingPlace()).first)
+    let sizeIndex = try #require(place.firstIndex(of: "--sz"))
+    let quantity = try #require(Decimal(string: place[sizeIndex + 1]))
+
+    // OKX turns out to have filled the entry: the position is live and the
+    // filled order has left the open-order list.
+    await runner.setClientOrderLookupFails(false)
+    await runner.setClientOrder(clientOrderID, order: OrderSnapshot(id: "late-entry", instrumentID: "ALT-USDT-SWAP", side: "sell", status: "filled", quantity: quantity, filledQuantity: quantity))
+    await runner.setPositions([PositionSnapshot(id: "pos-1", instrumentID: "ALT-USDT-SWAP", side: "short", quantity: quantity, entryPrice: 100, markPrice: 100)])
+    _ = try await backend.account()
+    #expect(try persistedReservationKeys(directory) == ["late-entry"])
+
+    // Beyond the 30-second publication window only the position may count:
+    // the reservation it came from is the same exposure, not a second one.
+    let url = directory.appendingPathComponent("remote-reservations.json")
+    var object = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: [String: Any]] ?? [:]
+    for key in object.keys { object[key]?["createdAt"] = Date().addingTimeInterval(-3_600).timeIntervalSinceReferenceDate }
+    try JSONSerialization.data(withJSONObject: object).write(to: url)
+    let restarted = makeBackend(runner: runner, directory: directory)
+    _ = try await restarted.account()
+    #expect((await restarted.riskEngine.snapshot()).globalNotionals["ALT-USDT-SWAP"] == quantity * 100)
+    #expect(try persistedReservationKeys(directory) == ["late-entry"])
+}

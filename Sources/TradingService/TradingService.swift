@@ -2770,7 +2770,12 @@ public actor TradingBackend {
 
             // Include reservations created after the remote snapshot. The
             // exchange view may lag a just-submitted order, but local risk may
-            // never be reset below that in-flight authorization.
+            // never be reset below that in-flight authorization. A filled
+            // entry is already counted through its position above, so a
+            // strategy reservation whose order left the open-order list is
+            // not added again once the publication and cancel-grace windows
+            // have passed; adding it would double the instrument's exposure
+            // for the life of every strategy position.
             for (orderID, reservation) in remoteReservations {
                 let orderMissing = orders.allSatisfy { $0.id != orderID }
                 if reservation.inFlight || orderMissing {
@@ -2780,7 +2785,6 @@ public actor TradingBackend {
                     }
                     let retainMissing = reservation.inFlight ||
                         Self.isUnresolvedReservation(orderID) ||
-                        reservation.strategyID != nil ||
                         age < 30 ||
                         (cancelAge.map { $0 < Self.cancelSettlementGrace } ?? false)
                     guard retainMissing else { continue }
