@@ -58,7 +58,6 @@ class HighShortStrategyTests(unittest.TestCase):
         path = Path("BEAT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz")
         self.assertEqual(hlsr_market_export.symbol_from_path(path), "BEAT-USDT-SWAP")
 
-
 class SourceIntegrityTests(unittest.TestCase):
     """源数据完整性：不完整桶必须丢弃，暖机不足不得给出信号。"""
 
@@ -80,6 +79,18 @@ class SourceIntegrityTests(unittest.TestCase):
         return {"timestamp_ms": ts, "open": price, "high": price + 0.5, "low": price - 0.5,
                 "close": price, "volume": 1, "quote_volume": 1, "confirmed": confirmed}
 
+    def test_market_export_drops_non_finite_source_candles(self):
+        import hlsr_market_export
+
+        base = 1_700_000_000_000 // 900_000 * 900_000
+        rows = []
+        for child in range(3):
+            row = self._row(base + child * 300_000, 100 + child)
+            if child == 1:
+                row["open"] = "inf"
+            rows.append(row)
+        self.assertEqual(hlsr_market_export.load_15m(self._write_source(rows)), [])
+
     def test_incomplete_source_bucket_is_dropped(self):
         import hlsr_signal_generator as generator
 
@@ -93,6 +104,30 @@ class SourceIntegrityTests(unittest.TestCase):
         bars = generator.load_bars(self._write_source(rows), source_minutes=5)
         self.assertEqual(len(bars), 2)
         self.assertEqual([bar.ts for bar in bars], [base, base + 900_000])
+
+    def test_non_finite_source_candles_are_dropped(self):
+        import hlsr_signal_generator as generator
+
+        base = 1_700_000_000_000 // 900_000 * 900_000
+        rows = []
+        for child in range(3):
+            row = self._row(base + child * 300_000, 100 + child)
+            if child == 1:
+                row["quote_volume"] = "nan"
+            rows.append(row)
+        self.assertEqual(generator.load_bars(self._write_source(rows), source_minutes=5), [])
+
+    def test_string_false_confirmation_is_dropped(self):
+        import hlsr_signal_generator as generator
+
+        base = 1_700_000_000_000 // 900_000 * 900_000
+        rows = []
+        for child in range(3):
+            row = self._row(base + child * 300_000, 100 + child)
+            if child == 1:
+                row["confirmed"] = "0"
+            rows.append(row)
+        self.assertEqual(generator.load_bars(self._write_source(rows), source_minutes=5), [])
 
     def test_generate_signals_needs_enough_four_hour_history(self):
         import hlsr_signal_generator as generator

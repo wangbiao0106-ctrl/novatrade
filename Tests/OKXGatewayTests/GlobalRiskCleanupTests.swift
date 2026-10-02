@@ -1,0 +1,62 @@
+import Foundation
+import Testing
+import ATKGateway
+import TradingDomain
+@testable import TradingService
+
+private actor RiskCleanupRunner: ATKCommandRunning {
+    private var equity: Decimal = 1_000
+    private var hasPosition = true
+    private var closeCount = 0
+
+    func setEquity(_ value: Decimal) { equity = value }
+    func confirmFlat() { hasPosition = false }
+    func closes() -> Int { closeCount }
+
+    func run(arguments: [String]) async throws -> ATKCommandResult {
+        let command = arguments.joined(separator: " ")
+        if command.contains("swap close") {
+            closeCount += 1
+            // An accepted close stays visible until confirmFlat, just as an
+            // asynchronous exchange operation can precede position updates.
+            return ATKCommandResult(stdout: #"{"code":"0","data":[{"instId":"BTC-USDT-SWAP"}]}"#)
+        }
+        if command == "config show --json" {
+            return ATKCommandResult(stdout: #"{"default_profile":"demo","profiles":{"demo":{"site":"global","api_key":"key","demo":true}}}"#)
+        }
+        if command.hasPrefix("account balance-all") {
+            return ATKCommandResult(stdout: "{\"trading\":{\"totalEq\":\"\(equity)\",\"adjEq\":\"\(equity)\",\"details\":[{\"ccy\":\"USDT\",\"eq\":\"\(equity)\",\"availEq\":\"\(equity)\",\"eqUsd\":\"\(equity)\"}]},\"valuation\":{\"totalBal\":\"\(equity)\"}}")
+        }
+        if command == "account config --json" { return ATKCommandResult(stdout: #"[{"label":"demo"}]"#) }
+        if command.hasPrefix("account positions") || command == "swap positions --json" {
+            return ATKCommandResult(stdout: hasPosition
+                ? #"[{"instId":"BTC-USDT-SWAP","pos":"1","posId":"risk-position","avgPx":"100","posSide":"long"}]"# : "[]")
+        }
+        if command.hasPrefix("market instruments") {
+            return ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","ctVal":"1","ctMult":"1","lotSz":"1","minSz":"1","tickSz":"0.1","state":"live","ctType":"linear","settleCcy":"USDT"}]"#)
+        }
+        return ATKCommandResult(stdout: "[]")
+    }
+}
+
+@Test
+func globalCircuitBreakerRetriesAcceptedCloseUntilRemotePositionIsFlat() async throws {
+    let runner = RiskCleanupRunner()
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("risk-cleanup-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let market = MarketDataService(client: ATKClient(runner: runner), ttl: MarketCacheTTL(account: 0, positions: 0, orders: 0))
+    let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory))
+    _ = try await backend.account()
+
+    await runner.setEquity(900)
+    _ = try await backend.account()
+    #expect((await backend.riskEngine.snapshot()).killSwitch)
+    #expect(await runner.closes() == 1)
+
+    _ = try await backend.account()
+    #expect(await runner.closes() == 2)
+    await runner.confirmFlat()
+    _ = try await backend.account()
+    _ = try await backend.account()
+    #expect(await runner.closes() == 2)
+}

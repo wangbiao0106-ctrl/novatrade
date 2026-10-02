@@ -7,7 +7,7 @@ import TradingDomain
 @main
 struct OKXLocalD {
     static func main() throws {
-        let port = Int(ProcessInfo.processInfo.environment["OKX_LOCALD_PORT"] ?? "8787") ?? 8787
+        let port = ProcessInfo.processInfo.environment[LocalService.portEnvironmentKey].flatMap(Int.init) ?? LocalService.defaultPort
         let app = HBApplication(configuration: .init(address: .hostname("127.0.0.1", port: port), serverName: "NovaTrade"))
         let service = TradingHTTPServer()
         let backend = service.backend
@@ -23,7 +23,9 @@ struct OKXLocalD {
     // isolation trap (or a deadlock for an async callback while app.wait runs).
     private nonisolated static func configureWebSockets(_ app: HBApplication, backend: TradingBackend) {
         app.ws.addUpgrade()
-        // One shared hub: a single upstream OKX socket and a single auxiliary
+        // Browsers do not apply same-origin policy to WebSocket upgrades.
+        app.ws.add(middleware: LoopbackOriginGuardMiddleware())
+        // One shared hub: a single upstream OKX socket and a single account/log
         // poll serve every client subscribed to the same instrument/interval
         // instead of opening one upstream connection per client.
         let hub = StreamHub(backend: backend)
@@ -37,49 +39,23 @@ struct OKXLocalD {
                       let body = text.data(using: .utf8),
                       let subscription = try? JSONDecoder().decode(StreamSubscription.self, from: body) else { return }
                 writer.send(StreamEvent(type: "connection", timestamp: .now, payload: "subscribed:\(subscription.channels.joined(separator: ","))"))
-                if let previousID = state.subscriptionID, let previousInstrument = state.instrumentID, let previousInterval = state.interval {
-                    hub.unsubscribe(id: previousID, instrumentID: previousInstrument, interval: previousInterval)
+                if let previous = state.active {
+                    hub.unsubscribe(id: previous.id, instrumentID: previous.subscription.instrumentID, interval: previous.subscription.interval)
                 }
-                let instrumentID = subscription.instrumentID ?? "BTC-USDT-SWAP"
-                let interval = subscription.interval ?? .fifteenMinutes
-                let subscriptionID = UUID()
-                state.subscriptionID = subscriptionID
-                state.instrumentID = instrumentID
-                state.interval = interval
+                state.active = nil
                 guard !subscription.channels.isEmpty else { return }
-                hub.subscribe(StreamHub.Subscriber(id: subscriptionID, writer: writer, channels: Set(subscription.channels)), instrumentID: instrumentID, interval: interval)
+                let id = UUID()
+                state.active = (id, subscription)
+                hub.subscribe(StreamHub.Subscriber(id: id, writer: writer, channels: Set(subscription.channels)), instrumentID: subscription.instrumentID, interval: subscription.interval)
             }
             ws.onClose { _ in
-                if let id = state.subscriptionID, let instrumentID = state.instrumentID, let interval = state.interval {
-                    hub.unsubscribe(id: id, instrumentID: instrumentID, interval: interval)
+                if let active = state.active {
+                    hub.unsubscribe(id: active.id, instrumentID: active.subscription.instrumentID, interval: active.subscription.interval)
                 }
             }
         })
     }
 
-}
-
-private struct StreamSubscription: Decodable {
-    let channels: [String]
-    let instrumentID: String?
-    let interval: KlineInterval?
-    enum CodingKeys: String, CodingKey { case channels, instrumentID = "instrumentID", instrument = "instId", interval, bar }
-    init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        channels = try values.decodeIfPresent([String].self, forKey: .channels) ?? []
-        instrumentID = try values.decodeIfPresent(String.self, forKey: .instrumentID) ?? values.decodeIfPresent(String.self, forKey: .instrument)
-        interval = try values.decodeIfPresent(KlineInterval.self, forKey: .interval) ?? values.decodeIfPresent(KlineInterval.self, forKey: .bar)
-    }
-}
-
-private struct StreamEvent: Codable {
-    let type: String
-    let timestamp: Date?
-    let instrumentID: String?
-    let payload: String?
-    init(type: String, timestamp: Date? = nil, instrumentID: String? = nil, payload: String? = nil) {
-        self.type = type; self.timestamp = timestamp; self.instrumentID = instrumentID; self.payload = payload
-    }
 }
 
 private final class StreamWriter: @unchecked Sendable {
@@ -108,13 +84,42 @@ private final class StreamWriter: @unchecked Sendable {
     }
 }
 
+/// Per-socket subscription. NIO delivers a socket's read and close callbacks
+/// on that socket's event loop, so they never race each other.
 private final class StreamState: @unchecked Sendable {
-    var subscriptionID: UUID?
-    var instrumentID: String?
-    var interval: KlineInterval?
+    var active: (id: UUID, subscription: StreamSubscription)?
 }
 
-/// Shares one upstream OKX candle subscription and one auxiliary poll across
+/// Bounds how many REST history prewarms run at once. Each prewarm spawns
+/// `okx` CLI processes, and a 100-symbol strategy universe starts about 200
+/// candle streams together; unbounded, that is hundreds of concurrent
+/// processes and a burst against the OKX REST rate limit. Order calls do not
+/// pass through this gate, so they never queue behind market data.
+private actor PrewarmGate {
+    private let limit: Int
+    private var active = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(limit: Int) { self.limit = limit }
+
+    func run(_ body: @Sendable () async throws -> Void) async throws {
+        if active < limit {
+            active += 1
+        } else {
+            // `release` hands its slot straight to the next waiter.
+            await withCheckedContinuation { waiters.append($0) }
+        }
+        defer { release() }
+        try Task.checkCancellation()
+        try await body()
+    }
+
+    private func release() {
+        if waiters.isEmpty { active -= 1 } else { waiters.removeFirst().resume() }
+    }
+}
+
+/// Shares one upstream OKX candle subscription and one account/log poll across
 /// every WebSocket client watching the same instrument and interval. Fan-out
 /// happens here; the backend ingests each realtime candle exactly once.
 private final class StreamHub: @unchecked Sendable {
@@ -132,6 +137,7 @@ private final class StreamHub: @unchecked Sendable {
 
     private let lock = NSLock()
     private let backend: TradingBackend
+    private let prewarmGate = PrewarmGate(limit: 4)
     private var subscribersByKey: [String: [Subscriber]] = [:]
     private var tasksByKey: [String: Task<Void, Never>] = [:]
     private var strategyTargets: Set<StrategyTarget> = []
@@ -143,21 +149,32 @@ private final class StreamHub: @unchecked Sendable {
             guard let self else { return }
             while !Task.isCancelled {
                 let configs = await backend.strategies()
-                let contracts: [ContractMarket]
                 do {
-                    contracts = try await backend.contracts(forceRefresh: true)
+                    _ = try await backend.contracts(forceRefresh: true)
                 } catch {
-                    contracts = await backend.cachedContracts()
                     await backend.appendLog("策略币种范围刷新失败，继续使用上次合约列表：\(error.localizedDescription)", level: "warning")
                 }
+                let resolvedTargets = try? await backend.strategyUniverseTargets()
+                let targetsByStrategy = Dictionary(uniqueKeysWithValues: (resolvedTargets ?? []).map { ($0.strategyID, $0.instrumentIDs) })
                 var targets = Set<StrategyTarget>()
                 for config in configs where config.enabled {
-                    for instrumentID in config.scope.resolvedInstrumentIDs(from: contracts) {
+                    // Consume the same resolved cache exposed by
+                    // /api/v1/strategies/targets and used by
+                    // PaperTradingStore.evaluate. This avoids a second full
+                    // universe filter and makes actual subscriptions auditable.
+                    let instrumentIDs = targetsByStrategy[config.id] ?? []
+                    for instrumentID in instrumentIDs {
                         targets.insert(StrategyTarget(instrumentID: instrumentID, interval: config.interval))
                         if config.type == .sweepReversalShort {
                             // 1h establishes the structure; 15m is the only
                             // execution confirmation stream for this rule.
                             targets.insert(StrategyTarget(instrumentID: instrumentID, interval: .fifteenMinutes))
+                        }
+                        if config.type == .hlsr {
+                            // HLSR consumes confirmed 15m bars for entry and a
+                            // separate completed 4H history for regime state.
+                            targets.insert(StrategyTarget(instrumentID: instrumentID, interval: .fifteenMinutes))
+                            targets.insert(StrategyTarget(instrumentID: instrumentID, interval: .fourHours))
                         }
                     }
                     if config.type == .sweepReversalShort && (config.parameters["btcGateEnabled"] ?? 1) >= 1 {
@@ -216,7 +233,7 @@ private final class StreamHub: @unchecked Sendable {
 
     // MARK: - Supervision
 
-    /// Starts/stops the candle upstream and the auxiliary poll as channel
+    /// Starts/stops the candle upstream and the account/log poll as channel
     /// demand changes. Both subtasks stop when the last subscriber leaves
     /// (the supervisor itself is cancelled by `unsubscribe`).
     private func supervisor(hubKey: String, instrumentID: String, interval: KlineInterval) -> Task<Void, Never> {
@@ -253,7 +270,7 @@ private final class StreamHub: @unchecked Sendable {
         var auxiliary = false
         for subscriber in subscribersByKey[key] ?? [] {
             if !subscriber.channels.isDisjoint(with: ["candle", "strategy", "risk"]) { candle = true }
-            if !subscriber.channels.isDisjoint(with: ["ticker", "orderbook", "trade", "account", "log"]) { auxiliary = true }
+            if !subscriber.channels.isDisjoint(with: ["account", "log"]) { auxiliary = true }
         }
         return (candle, auxiliary)
     }
@@ -266,15 +283,26 @@ private final class StreamHub: @unchecked Sendable {
 
     // MARK: - Upstream candle stream
 
+    private func prewarm(instrumentID: String, interval: KlineInterval, forceRefresh: Bool = false) async throws {
+        let backend = backend
+        try await prewarmGate.run {
+            try await backend.prewarmStrategyMarket(instrumentID: instrumentID, interval: interval, forceRefresh: forceRefresh)
+        }
+    }
+
     private func candleUpstream(hubKey: String, instrumentID: String, interval: KlineInterval) -> Task<Void, Never> {
         Task { [weak self] in
             guard let self else { return }
             // Historical REST snapshots are never emitted as live candles.
             // Retry the history load so strategy indicators have enough
             // context before the socket begins delivering new bars.
+            // REST history must be reloaded on the next subscription when the
+            // prewarm failed, and after every reconnect thereafter.
+            var needsHistoryReload = true
             for attempt in 0..<3 where !Task.isCancelled {
                 do {
-                    try await backend.prewarmStrategyMarket(instrumentID: instrumentID, interval: interval)
+                    try await self.prewarm(instrumentID: instrumentID, interval: interval)
+                    needsHistoryReload = false
                     break
                 } catch {
                     if attempt < 2 {
@@ -291,6 +319,19 @@ private final class StreamHub: @unchecked Sendable {
                     self.sendConnection(hubKey: hubKey, state: "okx_wss_connecting", instrumentID: instrumentID)
                 case .subscribed:
                     self.sendConnection(hubKey: hubKey, state: "okx_wss_subscribed", instrumentID: instrumentID)
+                    // `.subscribed` is reported again after every reconnect.
+                    // OKX does not replay bars that closed while the socket
+                    // was down, so reload them over REST; otherwise indicators
+                    // run over a silent gap and a dangling open bar blocks
+                    // HLSR evaluation.
+                    if needsHistoryReload {
+                        do {
+                            try await self.prewarm(instrumentID: instrumentID, interval: interval, forceRefresh: true)
+                        } catch {
+                            await backend.appendLog("\(instrumentID) \(interval.rawValue) 重连后补齐 K 线失败：\(error.localizedDescription)", level: "warning")
+                        }
+                    }
+                    needsHistoryReload = true
                 case let .reconnecting(reason, retryInSeconds):
                     self.sendConnection(hubKey: hubKey, state: "okx_wss_reconnecting", instrumentID: instrumentID)
                     await backend.appendLog("OKX WSS \(instrumentID) \(interval.rawValue) 断开：\(reason)，\(retryInSeconds) 秒后重连", level: "warning")
@@ -307,24 +348,12 @@ private final class StreamHub: @unchecked Sendable {
         }
     }
 
-    // MARK: - Auxiliary polling
+    // MARK: - Account and log polling
 
     private func auxiliaryPoll(hubKey: String, instrumentID: String) -> Task<Void, Never> {
         Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                if self.subscribers(of: hubKey).contains(where: { $0.channels.contains("ticker") }),
-                   let ticker = try? await backend.market.ticker(instrumentID: instrumentID) {
-                    self.send(hubKey: hubKey, type: "ticker", value: ticker, instrumentID: instrumentID) { $0.channels.contains("ticker") }
-                }
-                if self.subscribers(of: hubKey).contains(where: { $0.channels.contains("orderbook") }),
-                   let book = try? await backend.market.orderBook(instrumentID: instrumentID) {
-                    self.send(hubKey: hubKey, type: "orderbook", value: book, instrumentID: instrumentID) { $0.channels.contains("orderbook") }
-                }
-                if self.subscribers(of: hubKey).contains(where: { $0.channels.contains("trade") }),
-                   let trades = try? await backend.market.trades(instrumentID: instrumentID) {
-                    self.send(hubKey: hubKey, type: "trade", value: trades, instrumentID: instrumentID) { $0.channels.contains("trade") }
-                }
                 if self.subscribers(of: hubKey).contains(where: { $0.channels.contains("account") }),
                    let account = try? await backend.account() {
                     self.send(hubKey: hubKey, type: "account", value: account, instrumentID: instrumentID) { $0.channels.contains("account") }

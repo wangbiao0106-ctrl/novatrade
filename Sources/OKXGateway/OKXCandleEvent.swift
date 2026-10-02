@@ -67,3 +67,26 @@ actor OKXCandleConnectionHealth {
 
     func fail(_ reason: String) { heartbeat.failureReason = reason }
 }
+
+/// OKX accepts at most 3 WebSocket connection requests per second per IP.
+/// Every candle stream opens its own socket, and a 100-symbol strategy
+/// universe needs about 200 of them, so all connection attempts in this
+/// process (first connects and reconnects alike) take a slot from one shared
+/// pacer instead of opening in the same instant and being refused.
+actor OKXConnectionPacer {
+    static let shared = OKXConnectionPacer(spacing: .milliseconds(400))
+
+    private let spacing: Duration
+    private var nextSlot: ContinuousClock.Instant?
+
+    init(spacing: Duration) { self.spacing = spacing }
+
+    /// Reserves the next free slot and sleeps until it arrives. The slot is
+    /// reserved before suspending, so concurrent callers queue in order.
+    func waitForSlot() async throws {
+        let now = ContinuousClock.now
+        let slot = max(now, nextSlot ?? now)
+        nextSlot = slot.advanced(by: spacing)
+        if slot > now { try await Task.sleep(until: slot, clock: .continuous) }
+    }
+}

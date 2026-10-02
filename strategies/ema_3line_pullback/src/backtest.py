@@ -51,7 +51,7 @@ def selection_key(name: str, summary: dict) -> tuple:
     return (summary["trades"] >= MIN_SELECTION_TRADES, summary["total_r"], summary["avg_r"])
 
 
-INDICATOR_CACHE: dict[str, tuple[list[float], list[float], list[float], list[float], list[float]]] = {}
+INDICATOR_CACHE: dict[tuple[str, int, int, int], tuple[list[float], list[float], list[float], list[float], list[float]]] = {}
 
 @dataclass
 class Bar:
@@ -75,13 +75,20 @@ def atr(bs: list[Bar], n: int = 14) -> list[float]:
     return ema(tr,n)
 
 def resample(rows: list[Bar]) -> list[Bar]:
+    """Build complete UTC hours from confirmed 5-minute bars.
+
+    A count-only check accepts a duplicate timestamp plus a missing bar (or a
+    partial final hour), which fabricates an OHLC candle and can create a
+    signal at a time when the hour was never fully observable.
+    """
     groups: dict[int,list[Bar]] = {}
     for b in rows:
         hour=(b.ts//3_600_000)*3_600_000; groups.setdefault(hour,[]).append(b)
     out=[]
     for ts, g in sorted(groups.items()):
         g.sort(key=lambda x:x.ts)
-        if len(g) < 12: continue
+        expected = [ts + i * 300_000 for i in range(12)]
+        if [bar.ts for bar in g] != expected: continue
         out.append(Bar(ts,g[0].o,max(x.h for x in g),min(x.l for x in g),g[-1].c,sum(x.q for x in g)))
     return out
 
@@ -101,17 +108,33 @@ def eligible(path: Path, universe: str) -> bool:
     if b in STABLE or b in NON_CRYPTO: return False
     return (b in MAJOR) if universe == "major" else (b not in MAJOR)
 
+
+def prior_mean(values: list[float], period: int) -> list[float]:
+    """Mean of the preceding ``period`` values, excluding the current bar."""
+    if period <= 0:
+        raise ValueError("period must be positive")
+    prefix = [0.0]
+    for value in values:
+        prefix.append(prefix[-1] + value)
+    result = []
+    for index in range(len(values)):
+        start = max(0, index - period)
+        count = index - start
+        result.append((prefix[index] - prefix[start]) / count if count else 0.0)
+    return result
+
 def simulate(bs: list[Bar], name: str, p: dict, start: int, end: int, fee: float, slip: float, btc_state: dict[int, tuple[float, float, float, float]] | None = None) -> list[Trade]:
     if len(bs)<160 or end-start < 2: return []
     closes=[b.c for b in bs]
-    # 缓存键必须是稳定的标的名（调用方传 base(path)）：`id(bs)` 只保证对象存活
-    # 期间唯一，列表被回收后地址复用会让另一个品种取到本品种的指标。
-    key=name
+    # Include the data range in the key. Reusing only the symbol name can
+    # return stale indicators when a caller replays the same symbol with a
+    # different window (a common pattern in walk-forward tests).
+    key=(name, len(bs), bs[0].ts, bs[-1].ts)
     if key not in INDICATOR_CACHE:
-        q=[]; prefix=[0.0]
-        for b in bs: prefix.append(prefix[-1]+b.q)
-        for i in range(len(bs)):
-            lo=max(0,i-47); q.append((prefix[i+1]-prefix[lo])/max(i-lo+1,1))
+        # Volume expansion is defined against bars that were already known at
+        # the signal close.  Including q[i] in this denominator lets a spike
+        # lower its own threshold and made the research filter optimistic.
+        q = prior_mean([b.q for b in bs], 48)
         INDICATOR_CACHE[key]=(ema(closes,20),ema(closes,60),ema(closes,120),atr(bs),q)
     e20,e60,e120,aa,qmean=INDICATOR_CACHE[key]
     trades=[]; pending=None; pos=None; i=max(125,start)

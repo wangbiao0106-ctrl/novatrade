@@ -1,0 +1,232 @@
+{
+  "strategy": "extreme_wick_short",
+  "version": "0.3.0",
+  "data": {
+    "symbols": 278,
+    "start": 1774940400000,
+    "end": 1790793900000,
+    "timeframe_minutes": 15
+  },
+  "observation_pool": {
+    "events": 612,
+    "intraday_gain_gt": 1.0,
+    "thirty_day_low_multiple_min": 0.0
+  },
+  "signal_events": 10,
+  "metrics": {
+    "trades": 8,
+    "wins": 5,
+    "win_rate": 0.625,
+    "total_r": 3.4526493440626833,
+    "avg_net_r": 0.43158116800783547,
+    "profit_factor": 2.385123312153379,
+    "total_leveraged_return_pct": 80.31420684896953,
+    "avg_leveraged_return_pct": 10.039275856121192,
+    "max_drawdown_leveraged_pct": 20.825176258735432,
+    "leverage": 2.0,
+    "symbols": 7,
+    "exit_reasons": {
+      "时间离场": 4,
+      "止损": 2,
+      "止盈": 2
+    }
+  },
+  "by_symbol": {
+    "ALLO": {
+      "trades": 1,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -0.4632257821745286,
+      "avg_net_r": -0.4632257821745286,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -11.50904266617196,
+      "avg_leveraged_return_pct": -11.50904266617196,
+      "max_drawdown_leveraged_pct": 11.50904266617196,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "时间离场": 1
+      }
+    },
+    "BICO": {
+      "trades": 1,
+      "wins": 1,
+      "win_rate": 1.0,
+      "total_r": 0.1924468777834904,
+      "avg_net_r": 0.1924468777834904,
+      "profit_factor": 999.0,
+      "total_leveraged_return_pct": 4.913302591467775,
+      "avg_leveraged_return_pct": 4.913302591467775,
+      "max_drawdown_leveraged_pct": 0.0,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "时间离场": 1
+      }
+    },
+    "BSB": {
+      "trades": 1,
+      "wins": 1,
+      "win_rate": 1.0,
+      "total_r": 1.9798085047530858,
+      "avg_net_r": 1.9798085047530858,
+      "profit_factor": 999.0,
+      "total_leveraged_return_pct": 25.4405785610563,
+      "avg_leveraged_return_pct": 25.4405785610563,
+      "max_drawdown_leveraged_pct": 0.0,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止盈": 1
+      }
+    },
+    "LAB": {
+      "trades": 1,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -1.0144406950756617,
+      "avg_net_r": -1.0144406950756617,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -20.825176258735432,
+      "avg_leveraged_return_pct": -20.825176258735432,
+      "max_drawdown_leveraged_pct": 20.825176258735432,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 1
+      }
+    },
+    "ONE": {
+      "trades": 2,
+      "wins": 1,
+      "win_rate": 0.5,
+      "total_r": -0.1933704681025301,
+      "avg_net_r": -0.09668523405126506,
+      "profit_factor": 0.8094870740772778,
+      "total_leveraged_return_pct": 6.326168489549165,
+      "avg_leveraged_return_pct": 3.1630842447745824,
+      "max_drawdown_leveraged_pct": 20.01704962186494,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "时间离场": 1,
+        "止损": 1
+      }
+    },
+    "OPN": {
+      "trades": 1,
+      "wins": 1,
+      "win_rate": 1.0,
+      "total_r": 0.9612806344391067,
+      "avg_net_r": 0.9612806344391067,
+      "profit_factor": 999.0,
+      "total_leveraged_return_pct": 27.296618369241386,
+      "avg_leveraged_return_pct": 27.296618369241386,
+      "max_drawdown_leveraged_pct": 0.0,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "时间离场": 1
+      }
+    },
+    "SOPH": {
+      "trades": 1,
+      "wins": 1,
+      "win_rate": 1.0,
+      "total_r": 1.990150272439721,
+      "avg_net_r": 1.990150272439721,
+      "profit_factor": 999.0,
+      "total_leveraged_return_pct": 48.6717577625623,
+      "avg_leveraged_return_pct": 48.6717577625623,
+      "max_drawdown_leveraged_pct": 0.0,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止盈": 1
+      }
+    }
+  },
+  "by_month_utc": {
+    "2026-05": {
+      "trades": 1,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -1.0144406950756617,
+      "avg_net_r": -1.0144406950756617,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -20.825176258735432,
+      "avg_leveraged_return_pct": -20.825176258735432,
+      "max_drawdown_leveraged_pct": 20.825176258735432,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 1
+      }
+    },
+    "2026-06": {
+      "trades": 4,
+      "wins": 3,
+      "win_rate": 0.75,
+      "total_r": 2.6703102348011543,
+      "avg_net_r": 0.6675775587002886,
+      "profit_factor": 6.764597605655437,
+      "total_leveraged_return_pct": 46.1414568555935,
+      "avg_leveraged_return_pct": 11.535364213898376,
+      "max_drawdown_leveraged_pct": 11.50904266617196,
+      "leverage": 2.0,
+      "symbols": 4,
+      "exit_reasons": {
+        "时间离场": 3,
+        "止盈": 1
+      }
+    },
+    "2026-09": {
+      "trades": 3,
+      "wins": 2,
+      "win_rate": 0.6666666666666666,
+      "total_r": 1.796779804337191,
+      "avg_net_r": 0.5989266014457303,
+      "profit_factor": 2.7702277970472355,
+      "total_leveraged_return_pct": 54.99792625211147,
+      "avg_leveraged_return_pct": 18.332642084037158,
+      "max_drawdown_leveraged_pct": 20.01704962186494,
+      "leverage": 2.0,
+      "symbols": 2,
+      "exit_reasons": {
+        "时间离场": 1,
+        "止损": 1,
+        "止盈": 1
+      }
+    }
+  },
+  "selected_parameters": {
+    "atr_period": 14,
+    "rsi_period": 14,
+    "volume_period": 20,
+    "breakout_lookback_bars": 20,
+    "upper_wick_min": 0.4,
+    "close_position_max": 0.6,
+    "volume_multiple": 1.0,
+    "rsi_min": 65.0,
+    "rsi_must_fall": true,
+    "breakout_min_pct": 0.01,
+    "stop_atr": 0.45,
+    "min_risk_atr": 0.5,
+    "max_risk_atr": 3.0,
+    "target_r": 2.0,
+    "max_hold_bars": 24,
+    "cooldown_bars": 16
+  },
+  "execution": {
+    "entry": "next_15m_open",
+    "same_bar_priority": "stop_first",
+    "leverage": 2.0,
+    "costs": {
+      "fee_rate_one_way": 0.0006,
+      "slippage_one_way": 0.0002,
+      "funding_rate_round_trip": 0.0
+    },
+    "cooldown_bars": 16
+  },
+  "status": "research_only"
+}

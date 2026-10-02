@@ -52,16 +52,18 @@ spec/                               稳定的工程规范和接口约定
 3. 根据实验室版本修改 `Sources/` 和 `Tests/`，在代码或同步记录中保留实验室版本与参数映射。运行时实现不得自行发明未写入实验室的条件。
 4. 执行 `python3 scripts/validate_strategy_sync.py`、相关研究入口的 `--help`/测试、`swift test` 和 `git diff --check`。校验失败时不能称为已同步，也不能先改代码再回填实验室文档。
 
-当前 `sweep_reversal_short` 的运行范围是 `dynamic.hotAltcoins`：后台每 30 秒刷新行情，排除主流币、稳定币及非加密资产后按 24h 报价成交额取前 20 个 USDT 线性永续山寨币。177 个推荐标的是历史回测快照，只用于复现研究结果。BTC 门控取不晚于信号时刻的最近已确认 1 小时 K 线；历史不足 200 根或无法对齐时关闭门控。
+当前 `sweep_reversal_short` 的运行范围是 `dynamic.sweepCandidates`：后台每 30 秒刷新行情，排除主流币、稳定币及非加密资产，剔除 24h 报价成交额低于 300 万 USDT 的合约后按成交额取前 100 个 USDT 线性永续山寨币。177 个推荐标的是历史回测快照，只用于复现研究结果。BTC 门控取不晚于信号时刻的最近已确认 1 小时 K 线；历史不足 200 根或无法对齐时关闭门控。
 
 ## 当前目录映射
 
 | 目录 | 用途 | 状态 |
 | --- | --- | --- |
-| `strategies/hlsr/` | 高位流动性扫顶反转及其 15 分钟回测 | 研究中，可生成信号；`STRATEGY.md` 是人类规则真源、`config/strategy.json` 是机器参数真源（四个参数块都被源码读取） |
-| `strategies/sweep_reversal_short/` | 山寨币二次扫顶做空（1h） | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.3）|
-| `strategies/ema_altcoin_long/` | 双均线交易山寨币多（1h） | 历史研究归档，不接入运行时 |
+| `strategies/hlsr/` | 高位扫顶反转及其 15 分钟回测 | 已接入 OKX 模拟盘执行层，默认禁用；`STRATEGY.md` 是人类规则真源、`config/strategy.json` 是机器参数真源（四个参数块都被源码读取）；三段退出状态机位于 `Sources/TradingService/HLSRPositionManager.swift` |
+| `strategies/sweep_reversal_short/` | 山寨币二次扫顶做空 | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.4）|
 | `strategies/ema_3line_pullback/` | EMA 20/60/120 回踩策略族历史研究（四方向） | 研究归档，不是规则真源，未接入运行时 |
+| `strategies/extreme_wick_short/` | 山寨日内涨幅超过 100% 的 15m 动能衰竭做空 | 研究候选，未接入运行时 |
+| `strategies/double_pump_exhaustion_short/` | 从翻倍动能衰竭研究中固定出的正式核心规则 | 正式规则；已接入纸面/模拟运行时，默认停用 |
+| `strategies/intraday_pump_retest_short/` | 山寨日内涨幅超过 60% 后高点回落、二次突涨缩量做空 | 研究候选，未接入运行时 |
 
 ## 迁移检查
 
@@ -72,3 +74,11 @@ spec/                               稳定的工程规范和接口约定
 3. 对 Python 入口执行 `--help`，确认默认输入和输出路径分别落在 `data/kline/` 与策略 `results/`。
 4. 运行 `python3 scripts/validate_strategy_sync.py`，确认实验室规则、参数映射和运行时范围一致。
 5. 用 `git status` 确认迁移没有生成未预期的大型数据文件。
+
+## 策略配置包
+
+实验定稿后的策略可以打成带 `manifest.json`、版本和 artifact 摘要的配置包。
+包导入/卸载由 [`scripts/strategy_package.py`](../scripts/strategy_package.py)
+完成，只写应用数据目录下的 `NovaTrade/strategy-packages/` 和其中的
+`registry.json`，不修改实验室源目录或 `Sources/`。包格式、生命周期和校验规则见
+[`spec/STRATEGY_PACKAGE.md`](STRATEGY_PACKAGE.md)。

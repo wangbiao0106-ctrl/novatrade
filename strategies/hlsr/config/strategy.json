@@ -1,8 +1,39 @@
 {
   "strategy": "HLSR",
   "version": "1.0",
+  "name_zh": "高位扫顶反转",
+  "display_name": "高位扫顶反转做空",
+  "name_en": "High-Level Liquidity Sweep Reversal",
+  "source_of_truth": "strategies/hlsr/STRATEGY.md",
+  "status": "implemented_paper_demo",
+  "runtime_integration": "implemented_paper_demo",
   "market": "OKX_USDT_LINEAR_PERPETUAL",
   "entry_timeframe_minutes": 15,
+  "confirmation_timeframe_minutes": 15,
+  "higher_timeframe_minutes": 240,
+  "candle_timestamp": "bar_open_time",
+  "confirmation_window_origin": "sweep_bar_close",
+  "confirmation_rule": "first confirmed 15m bar satisfying break_of_local_low or failed_retest within the next confirmation_window bars; enter at the following 15m open",
+  "runtime": {
+    "strategy_type": "hlsr",
+    "scope": "dynamic.hlsrCandidates",
+    "universe_refresh_seconds": 30,
+    "evaluation_interval": "confirmed_15m_close",
+    "higher_timeframe": "4H",
+    "higher_timeframe_minimum_history_bars": 55,
+    "entry_order": "next_15m_open_market",
+    "protective_orders": "managed_reduce_only_stop_and_three_partial_targets",
+    "stop_loss": "sweep_high + stop_atr * ATR14(15m)",
+    "time_exit": "none_before_window_end; mark_last_close_at_data_end",
+    "max_concurrent_positions": 1,
+    "max_open_risk_pct": 1.0,
+    "one_position_per_symbol": true,
+    "one_active_symbol_per_strategy": true,
+    "live_order_mode": "okx_demo_only",
+    "auto_submit_live_orders": false,
+    "quote_volume_required": true,
+    "quote_volume_field": "volCcyQuote"
+  },
   "hard_filters": {
     "gain_24h_gt": 0.4,
     "quote_volume_24h_gt": 30000000
@@ -21,13 +52,75 @@
   },
   "position_management": {
     "leverage": 2.0,
-    "partial_targets": [0.3, 0.3, 0.4],
+    "partial_targets": [
+      0.3,
+      0.3,
+      0.4
+    ],
     "move_stop_to_entry_after_tp1": true,
-    "cooldown_bars": 16
+    "cooldown_bars": 16,
+    "risk_per_trade_pct": 1.0,
+    "risk_per_trade_max_pct": 1.0,
+    "risk_per_trade_scope": "each_entry_order",
+    "risk_per_trade_basis": "account_equity_at_authorization",
+    "sizing_formula": "min(available_capital, account_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))",
+    "risk_budget_costs_included": false,
+    "max_concurrent_positions": 1,
+    "max_open_risk_percent": 1.0
+  },
+  "execution": {
+    "signal_confirmed_at": "15m candle close",
+    "entry": "next 15m candle open after confirmation",
+    "same_bar_priority": "stop_first",
+    "gap_through_stop": "fill_at_bar_open_whichever_is_worse",
+    "invalidation": "confirmed close above sweep high exits at close when stop was not touched",
+    "restart_state": "persist signal/position legs, target fills, stop mode and cooldown before resuming",
+    "live_order_mode": "okx_demo_only"
+  },
+  "runtime_integration_details": {
+    "signal_generation": "implemented",
+    "entry_submission": "implemented_okx_demo",
+    "protective_exit_orders": "implemented",
+    "partial_targets": "implemented",
+    "breakeven_after_tp1": "implemented",
+    "trailing_stop_after_tp2": "implemented",
+    "cooldown": "implemented_per_confirmed_15m_bar",
+    "per_instrument_state_isolation": true,
+    "note": "后台只评估确认 K 线；应用默认 disabled，仅人工启用 OKX 模拟盘，不自动提交真实 live 订单。"
   },
   "costs": {
     "fee_rate_one_way": 0.0006,
     "slippage": 0.0002,
     "funding_rate": 0.0
+  },
+  "validation": {
+    "research_status": "FAIL",
+    "minimum_out_of_sample_trades": 30,
+    "selection_is_frozen_before_test": true,
+    "runtime_requires_complete_15m_and_4h_history": true,
+    "no_live_fallback": true
+  },
+  "universe": {
+    "asset_type": "altcoin_usdt_linear_perpetual",
+    "excluded_symbols": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "BNB",
+      "XRP",
+      "DOGE",
+      "ADA",
+      "TRX",
+      "USDT",
+      "USDC",
+      "DAI"
+    ],
+    "requirements": [
+      "continuous_confirmed_signal_candles",
+      "quote_volume_available",
+      "sufficient_orderbook_depth"
+    ],
+    "production_scope": "dynamic.hlsrCandidates",
+    "mainstream_and_non_crypto_excluded": true
   }
 }

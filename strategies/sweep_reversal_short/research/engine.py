@@ -68,6 +68,18 @@ def sma(x, n):
     # 前 n 根用扩展均值（因果，无未来函数）
     return pd.Series(x).rolling(n, min_periods=1).mean().to_numpy()
 
+
+def prior_sma(x, n):
+    """Return the mean of the preceding bars, excluding the current bar.
+
+    Signal filters are evaluated at a bar close.  Using that bar's volume in
+    its own baseline makes a volume spike dilute the threshold that is meant
+    to detect it, and also makes historical research disagree with the live
+    scanner.  The first bar has no prior baseline and is therefore ``NaN``.
+    """
+    values = pd.Series(x, dtype="float64")
+    return values.rolling(n, min_periods=1).mean().shift(1).to_numpy()
+
 LAB_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "strategy.json")
 
 def lab_parameters(config_path=LAB_CONFIG_PATH):
@@ -98,6 +110,7 @@ def lab_parameters(config_path=LAB_CONFIG_PATH):
         "atr_period": int(signal["atr_period"]), "buf_atr": float(signal["buffer_atr"]),
         "tp_mult": float(signal["take_profit_r"]), "min_atr_pct": float(signal["min_atr_pct"]),
         "max_risk_atr": float(signal["max_risk_atr"]), "max_hold_bars": int(payload.get("position_management", {}).get("time_exit_bars", 96)),
+        "leverage": float(payload.get("position_management", {}).get("leverage", 2.0)),
         "fee": float(costs.get("fee_rate_one_way", 0.0005)),
     }
     return detect, filters, costs_out
@@ -155,7 +168,9 @@ def precompute(d, atr_n=14, sma_lens=(), major_wins=(), mom_wins=(), vol_n=48,
         out[f"rmb{w}"] = np.where(np.isnan(rm_shift), h[0], rm_shift)  # 不含当前bar
     for w in mom_wins:
         out[f"mn{w}"] = rolling_min(l, w)
-    out["volmean"] = sma(v, vol_n)
+    # Compare the sweep bar with the preceding bars only.  Including v[s] in
+    # this mean would let the candidate influence its own volume filter.
+    out["volmean"] = prior_sma(v, vol_n)
     return out
 
 # ---------------------------------------------------------------- 事件检测
@@ -430,8 +445,13 @@ def simulate(ev, d, mask, bufs, tp_mults, max_hold, fee, sl_mode="ext"):
             for i in range(m_):
                 j0, j1, ok = slices[i]
                 if not ok:
-                    outcomes[i] = entry[i] - c[min(k[i], n - 1)]
-                    outcomes_g[i] = outcomes[i]
+                    # Even an event whose entry is the final available bar is
+                    # still a round trip in the report.  The old branch
+                    # omitted both entry and exit fees, while every normal
+                    # exit path charged them.
+                    px = c[min(k[i], n - 1)]
+                    outcomes_g[i] = entry[i] - px
+                    outcomes[i] = outcomes_g[i] - fee * (entry[i] + px)
                     kinds[i] = 3
                     continue
                 op = o[j0:j1]; hi = h[j0:j1]; lo = l[j0:j1]

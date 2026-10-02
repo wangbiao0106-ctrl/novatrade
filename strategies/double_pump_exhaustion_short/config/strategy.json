@@ -1,0 +1,107 @@
+{
+  "strategy": "double_pump_exhaustion_short",
+  "version": "1.0.0",
+  "name_zh": "日内翻倍动能衰竭确认做空",
+  "name_en": "Double Pump Exhaustion Short",
+  "source_of_truth": "strategies/double_pump_exhaustion_short/STRATEGY.md",
+  "status": "finalized",
+  "runtime_integration": "implemented_paper_only",
+  "market": "OKX_USDT_LINEAR_PERPETUAL",
+  "input_timeframe_minutes": 5,
+  "entry_timeframe_minutes": 15,
+  "candle_timestamp": "bar_open_time",
+  "universe": {
+    "asset_type": "altcoin_usdt_linear_perpetual",
+    "excluded_symbols": [
+      "BTC",
+      "ETH",
+      "SOL",
+      "BNB",
+      "XRP",
+      "DOGE",
+      "ADA",
+      "TRX",
+      "USDT",
+      "USDC",
+      "DAI"
+    ],
+    "quote_volume_24h_min_usdt": 10000000,
+    "quote_volume_guardrail_backtest_included": false,
+    "minimum_contiguous_15m_bars": 96
+  },
+  "observation": {
+    "gain24_gt": 1.0,
+    "gain_measure": "current_15m_high_over_close_96_bars_ago",
+    "strict_boundary": true,
+    "timezone": "UTC"
+  },
+  "signal": {
+    "bearish_close_required": true,
+    "upper_wick_ratio_min": 0.4,
+    "close_position_max": 0.5,
+    "rsi_period": 14,
+    "rsi_min": 50.0,
+    "rsi_must_fall": true,
+    "volume_period": 20,
+    "volume_multiple_min": 0.5,
+    "breakout_min_pct": null
+  },
+  "entry": {
+    "mode": "market_after_confirmed_signal_close",
+    "fill_reference": "signal_close",
+    "position_start": "next_15m_bar",
+    "max_entry_slippage_pct": 0.003,
+    "limit_order_variants_formal": false
+  },
+  "risk": {
+    "atr_period": 14,
+    "stop_atr": 0.45,
+    "min_risk_atr": 0.5,
+    "max_risk_atr": 3.0,
+    "target_r": 1.0,
+    "max_hold_bars": 24,
+    "cooldown_bars": 16
+  },
+  "position_management": {
+    "leverage": 2.0,
+    "risk_per_trade_pct": 1.0,
+    "max_concurrent_positions": 1,
+    "one_position_per_symbol": true,
+    "daily_realized_loss_limit_pct": 5.0,
+    "risk_per_trade_basis": "account_equity_at_authorization",
+    "max_open_risk_percent": 1.0,
+    "sizing_formula": "min(available_capital, account_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))"
+  },
+  "costs": {
+    "fee_rate_one_way": 0.0006,
+    "slippage_one_way": 0.0002,
+    "funding_rate_round_trip": 0.0
+  },
+  "evidence": {
+    "source_strategy": "strategies/extreme_wick_short",
+    "source_experiment": "grid_0580",
+    "full_trades": 48,
+    "full_win_rate": 0.688,
+    "full_profit_factor": 2.12,
+    "full_total_r": 17.17,
+    "validation_is_retrospective": true,
+    "requires_fresh_out_of_sample": true
+  },
+  "runtime": {
+    "strategy_type": "doublePumpExhaustionShort",
+    "scope": "dynamic.doublePumpCandidates",
+    "universe_refresh_seconds": 30,
+    "evaluation_interval": "confirmed_15m_close",
+    "entry_order": "market_after_confirmed_signal_close",
+    "protective_orders": "attached_stop_loss_and_take_profit_reduce_only",
+    "max_concurrent_positions": 1,
+    "max_open_risk_pct": 1.0,
+    "one_position_per_symbol": true,
+    "one_active_symbol_per_strategy": true,
+    "live_order_mode": "paper_only",
+    "auto_submit_live_orders": false,
+    "enabled_by_default": false,
+    "quote_volume_required": true,
+    "quote_volume_field": "volCcyQuote"
+  }
+}

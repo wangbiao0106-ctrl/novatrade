@@ -1,3 +1,0 @@
-split,symbols,raw_signals,rejected_by_portfolio,trades,wins,win_rate,total_r,avg_r,profit_factor,max_drawdown_r,max_consecutive_losses,avg_hold_hours
-train,50,73,0,73,25,0.3425,9.2756,0.1271,1.1806,12.4806,9,10.88
-test,50,35,0,35,13,0.3714,8.2944,0.237,1.3545,9.4244,9,9.57

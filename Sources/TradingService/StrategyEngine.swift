@@ -37,6 +37,35 @@ public enum IndicatorCalculator {
         return result
     }
 
+    /// Causal moving average of the bars *before* each index.  A signal bar
+    /// must not dilute its own volume/volatility baseline (for example, a
+    /// sweep volume spike should be compared with the preceding 48 bars).
+    /// The first element has no history and is returned as zero.
+    public static func priorSMA(_ values: [Double], period: Int) -> [Double] {
+        guard !values.isEmpty, period > 0 else { return [] }
+        var result = Array(repeating: 0.0, count: values.count)
+        var sum = 0.0
+        for index in values.indices {
+            let count = min(index, period)
+            if count > 0 { result[index] = sum / Double(count) }
+            sum += values[index]
+            if index >= period { sum -= values[index - period] }
+        }
+        return result
+    }
+
+    /// Causal exponential moving average used by the EMA altcoin strategy.
+    public static func ema(_ values: [Double], period: Int) -> [Double] {
+        guard !values.isEmpty, period > 0 else { return [] }
+        let alpha = 2.0 / Double(period + 1)
+        var result: [Double] = []
+        result.reserveCapacity(values.count)
+        for value in values {
+            result.append(result.last.map { alpha * value + (1 - alpha) * $0 } ?? value)
+        }
+        return result
+    }
+
     /// 滚动窗口最大值（前 period 根用已有数据的最大值）
     public static func rollingMax(_ values: [Double], period: Int) -> [Double] {
         guard !values.isEmpty, period > 0 else { return [] }
@@ -57,12 +86,26 @@ public enum IndicatorCalculator {
         return sma(trueRanges, period: period)
     }
 
+    /// ATR with the EMA smoothing used by the formal EMA strategy.
+    public static func atrEMA(_ candles: [Candle], period: Int = 14) -> [Double] {
+        guard !candles.isEmpty else { return [] }
+        var trueRanges = [Double](); trueRanges.reserveCapacity(candles.count)
+        for (index, candle) in candles.enumerated() {
+            let high = NSDecimalNumber(decimal: candle.high).doubleValue
+            let low = NSDecimalNumber(decimal: candle.low).doubleValue
+            let previousClose = index > 0 ? NSDecimalNumber(decimal: candles[index - 1].close).doubleValue : NSDecimalNumber(decimal: candle.close).doubleValue
+            trueRanges.append(max(high - low, max(abs(high - previousClose), abs(low - previousClose))))
+        }
+        return ema(trueRanges, period: period)
+    }
 }
 
 public struct StrategyEngine: Sendable {
     public init() {}
 
-    // Strategy lab source: sweep_reversal_short v1.3.
+    // Strategy lab source: sweep_reversal_short v1.4.
+    // v1.4 只把生产范围改为 `dynamic.sweepCandidates`（StrategyUniverseRules
+    // 成交额前 100 且 ≥300 万 USDT），信号与出场规则和 v1.3 相同。
     // 同步记录 2026-09：v1.3 规则原文是"二次扫顶 1h bar 收盘后的后续 4 根
     // 15m"。此前实现把 K 线时间戳当作收盘时间，确认窗口错位到结构 bar 自身
     // 那一小时并漏掉 +75/+90/+105。本次只修实现的时间基，规则与参数未变
@@ -85,13 +128,27 @@ public struct StrategyEngine: Sendable {
     }
 
     public func evaluate(config: StrategyConfig, candles: [Candle], previous: StrategyStatus? = nil, btcCandles: [Candle]? = nil) -> StrategyStatus {
-        let confirmed = candles.filter(\.confirmed)
+        let confirmed = candles.filter(\.confirmed).sorted { $0.timestamp < $1.timestamp }
+        let status = previous ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+        guard config.type.hasRuntimeHandler else {
+            return StrategyStatus(id: status.id, state: .paused, direction: status.direction,
+                                  cooldown: status.cooldown, pnl: status.pnl,
+                                  lastSignal: status.lastSignal, indicators: status.indicators,
+                                  lastEvaluatedBar: status.lastEvaluatedBar)
+        }
+        // A stale status must not keep advertising a running strategy after
+        // the user pauses it, including when the input bar did not change.
+        if !config.enabled {
+            return StrategyStatus(id: status.id, state: .paused, direction: status.direction,
+                                  cooldown: status.cooldown, pnl: status.pnl,
+                                  lastSignal: status.lastSignal, indicators: status.indicators,
+                                  lastEvaluatedBar: status.lastEvaluatedBar)
+        }
         guard confirmed.count >= 3 else { return previous ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused) }
         let closes = confirmed.map { NSDecimalNumber(decimal: $0.close).doubleValue }
         let atrPeriod = Self.period(config.parameters["atrPeriod"], fallback: 14)
         let rsi = IndicatorCalculator.rsiWilder(closes, period: atrPeriod)
         let atr = IndicatorCalculator.atrSMA(confirmed, period: atrPeriod)
-        let status = previous ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
         // 按 bar 幂等：冷却与指标只在一根**新的**已确认 K 线上推进。REST 图表刷新
         // 会用同一根 K 线重复调用本函数，若每次都递减冷却，冷却会被读操作提前烧完。
         guard let latestBar = confirmed.last?.timestamp else { return status }
@@ -104,15 +161,23 @@ public struct StrategyEngine: Sendable {
         if status.cooldown > 0 {
             return StrategyStatus(id: status.id, state: config.enabled ? .running : .paused, direction: status.direction, cooldown: status.cooldown - 1, pnl: status.pnl, lastSignal: status.lastSignal, indicators: status.indicators, lastEvaluatedBar: latestBar)
         }
-        guard config.enabled else { return status.evaluated(at: latestBar) }
         var signal: StrategySignal?
         var direction = status.direction
         if config.type == .sweepReversalShort {
             signal = Self.evaluateSweepReversal(config: config, confirmed: confirmed, closes: closes, btcCandles: btcCandles)
             if signal != nil { direction = "short" }
         }
+        if config.type == .doublePumpExhaustionShort {
+            signal = Self.evaluateDoublePumpExhaustionShort(config: config, confirmed: confirmed, closes: closes, rsi: rsi, atr: atr)
+            if signal != nil { direction = "short" }
+        }
         let indicators: [String: [Double]] = ["rsi": Self.trimmed(rsi), "atr": Self.trimmed(atr)]
-        return StrategyStatus(id: config.id, state: .running, direction: direction, cooldown: signal == nil ? max(0, status.cooldown - 1) : config.cooldownBars, pnl: status.pnl, lastSignal: signal ?? status.lastSignal, indicators: indicators, lastEvaluatedBar: latestBar)
+        // Double pump cools down only after an exit (STRATEGY.md §6); the
+        // backend sets that cooldown when the position closes. Starting it at
+        // the signal would also silence the symbol after a signal that was
+        // skipped (global single position, entry slippage guard).
+        let signalCooldown = config.type == .doublePumpExhaustionShort ? 0 : config.cooldownBars
+        return StrategyStatus(id: config.id, state: .running, direction: direction, cooldown: signal == nil ? max(0, status.cooldown - 1) : signalCooldown, pnl: status.pnl, lastSignal: signal ?? status.lastSignal, indicators: indicators, lastEvaluatedBar: latestBar)
     }
 
     /// Production execution path: the 1h candles establish the sweep/resweep
@@ -126,9 +191,21 @@ public struct StrategyEngine: Sendable {
     /// inside the structure bar's own hour closed before the structure was
     /// known and must never confirm it.
     public func evaluateWithConfirmation(config: StrategyConfig, structureCandles: [Candle], confirmationCandles: [Candle], previous: StrategyStatus? = nil, btcCandles: [Candle]? = nil) -> StrategyStatus {
-        let structure = structureCandles.filter(\.confirmed)
-        let confirmations = confirmationCandles.filter(\.confirmed)
+        let structure = structureCandles.filter(\.confirmed).sorted { $0.timestamp < $1.timestamp }
+        let confirmations = confirmationCandles.filter(\.confirmed).sorted { $0.timestamp < $1.timestamp }
         let status = previous ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+        guard config.type.hasRuntimeHandler else {
+            return StrategyStatus(id: status.id, state: .paused, direction: status.direction,
+                                  cooldown: status.cooldown, pnl: status.pnl,
+                                  lastSignal: status.lastSignal, indicators: status.indicators,
+                                  lastEvaluatedBar: status.lastEvaluatedBar)
+        }
+        if !config.enabled {
+            return StrategyStatus(id: status.id, state: .paused, direction: status.direction,
+                                  cooldown: status.cooldown, pnl: status.pnl,
+                                  lastSignal: status.lastSignal, indicators: status.indicators,
+                                  lastEvaluatedBar: status.lastEvaluatedBar)
+        }
         guard !structure.isEmpty else { return status }
         let closes = structure.map { NSDecimalNumber(decimal: $0.close).doubleValue }
         let atrPeriod = Self.period(config.parameters["atrPeriod"], fallback: 14)
@@ -143,7 +220,7 @@ public struct StrategyEngine: Sendable {
             return status.evaluated(at: lastEvaluated)
         }
         let evaluated = { (value: StrategyStatus) in value.evaluated(at: latestBar) }
-        guard config.enabled, config.type == .sweepReversalShort else {
+        guard config.type == .sweepReversalShort else {
             return evaluated(StrategyStatus(id: status.id, state: config.enabled ? .running : .paused, direction: status.direction, cooldown: status.cooldown, pnl: status.pnl, lastSignal: status.lastSignal, indicators: indicators))
         }
         if status.cooldown > 0 {
@@ -179,6 +256,283 @@ public struct StrategyEngine: Sendable {
         return evaluated(StrategyStatus(id: status.id, state: .running, direction: "short", cooldown: cooldown, pnl: status.pnl, lastSignal: signal, indicators: indicators))
     }
 
+    // MARK: - HLSR high-level liquidity sweep reversal
+
+    /// Evaluates the production HLSR contract.  The lower timeframe is always
+    /// 15 minutes and the market regime is read from *completed* 4-hour bars.
+    /// This method deliberately takes the two series separately: deriving 4H
+    /// state from a short cache of 15m bars would silently make the strategy
+    /// trade without its required 55-bar warm-up.
+    ///
+    /// A signal is emitted only on the bar immediately following a qualifying
+    /// confirmation bar.  Its price is that bar's open, which keeps the
+    /// implementation causal (the confirmation close is never used as a
+    /// pretend fill).  The caller may evaluate an unconfirmed opening update
+    /// for this one bar; all structural inputs remain confirmed bars.
+    public func evaluateHLSR(config: StrategyConfig,
+                             candles15m: [Candle],
+                             fourHourCandles: [Candle],
+                             previous: StrategyStatus? = nil) -> StrategyStatus {
+        let status = previous ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
+        guard config.type.hasRuntimeHandler else {
+            return StrategyStatus(id: status.id, state: .paused, direction: status.direction,
+                                  cooldown: status.cooldown, pnl: status.pnl,
+                                  lastSignal: status.lastSignal, indicators: status.indicators,
+                                  lastEvaluatedBar: status.lastEvaluatedBar)
+        }
+        if !config.enabled {
+            return StrategyStatus(id: status.id, state: .paused, direction: status.direction,
+                                  cooldown: status.cooldown, pnl: status.pnl,
+                                  lastSignal: status.lastSignal, indicators: status.indicators,
+                                  lastEvaluatedBar: status.lastEvaluatedBar)
+        }
+        let lower = candles15m.sorted { $0.timestamp < $1.timestamp }
+        // The last candle can be an opening update used for next-open entry.
+        // Structural calculations below filter it out whenever it is not
+        // confirmed, while `latestBar` still advances idempotency.
+        guard let latestBar = lower.last?.timestamp else { return status }
+        if let last = status.lastEvaluatedBar, latestBar <= last { return status.evaluated(at: last) }
+
+        let confirmed = lower.filter(\.confirmed)
+        let htf = fourHourCandles.filter(\.confirmed).sorted { $0.timestamp < $1.timestamp }
+        let atrPeriod = Self.period(config.parameters["atrPeriod"], fallback: 14)
+        let lowerATR = IndicatorCalculator.atrEMA(confirmed, period: atrPeriod)
+        let indicators = ["atr": Self.trimmed(lowerATR)]
+        let marked: (StrategyStatus) -> StrategyStatus = { value in value.evaluated(at: latestBar) }
+        // A realtime opening update is allowed only as the final element. An
+        // incomplete bar in the historical prefix would make `filter` close
+        // the gap and shift confirmation indices, creating a false causal
+        // setup (especially after a delayed websocket reconnect).
+        guard lower.enumerated().allSatisfy({ index, candle in
+            candle.confirmed || index == lower.count - 1
+        }) else {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+        guard config.type.identifier == "hlsr" else {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+        if status.cooldown > 0 {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown - 1, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+
+        // At least one current opening bar plus a prior confirmed bar are
+        // needed.  HLSR has no valid way to infer quote volume or a causal
+        // confirmation from an incomplete history.
+        guard lower.count >= 3, confirmed.count >= 2, htf.count >= 55 else {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+        let entryIndex = lower.count - 1
+        guard let entryBar = lower.last,
+              !entryBar.confirmed,
+              entryBar.open.isFinite, entryBar.open > 0 else {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+        // The latest update must be the opening update after the confirmation;
+        // all bars through the confirmation bar must be confirmed and the
+        // entry is index + 1. A confirmed latest bar has already missed this
+        // causal execution point and is rejected below.
+        let confirmationIndex = confirmed.firstIndex { $0.timestamp == entryBar.timestamp } == nil
+            ? (confirmed.count - 1)
+            : (confirmed.count - 2)
+        guard confirmationIndex >= 1,
+              confirmed[confirmationIndex].timestamp < entryBar.timestamp,
+              entryBar.timestamp.timeIntervalSince(confirmed[confirmationIndex].timestamp) == 15 * 60 else {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+        // A current 15m close is required for a confirmation; the opening bar
+        // itself is never allowed to serve as a sweep or confirmation bar.
+        let sweepBars = confirmed
+        let closes = sweepBars.map { NSDecimalNumber(decimal: $0.close).doubleValue }
+        let highs = sweepBars.map { NSDecimalNumber(decimal: $0.high).doubleValue }
+        let lows = sweepBars.map { NSDecimalNumber(decimal: $0.low).doubleValue }
+        let opens = sweepBars.map { NSDecimalNumber(decimal: $0.open).doubleValue }
+        let quoteVolumes: [Double] = sweepBars.map { candle in
+            guard let value = candle.quoteVolume else { return .nan }
+            return NSDecimalNumber(decimal: value).doubleValue
+        }
+        guard quoteVolumes.allSatisfy({ $0.isFinite && $0 >= 0 }) else {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+        // Hard universe filters are evaluated at each candidate sweep using
+        // confirmed 15m bars only. Quote currency volume is deliberately
+        // separate from contract volume; a missing field fails closed.
+        let minimumGain = config.parameters["gain24hGt"] ?? 0.4
+        let minimumQuoteVolume = config.parameters["quoteVolume24hGt"] ?? 30_000_000
+        let lowerAtr = IndicatorCalculator.atrEMA(sweepBars, period: atrPeriod)
+        let lookback = Self.period(config.parameters["swingLookback"], fallback: 6)
+        let wickRatio = config.parameters["wickRatio"] ?? 0.6
+        let volumeMultiple = config.parameters["volumeMultiple"] ?? 1.0
+        let minimumScore = Self.period(config.parameters["minimumRejectionScore"], fallback: 2)
+        let rejectDepthATR = config.parameters["rejectDepthATR"] ?? 0.1
+        let confirmationWindow = Self.period(config.parameters["confirmationWindow"], fallback: 4)
+        let stopATR = config.parameters["stopATR"] ?? 0.25
+        let trailBars = Self.period(config.parameters["trailBars"], fallback: 2)
+        let allowRange = (config.parameters["allowRange"] ?? 1) >= 1
+        guard confirmationIndex < sweepBars.count,
+              confirmationIndex + 1 <= entryIndex else {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+
+        // Map a 15m timestamp to the newest *completed* 4H candle.  A 4H
+        // candle whose open + four hours is after the sweep is still forming
+        // and therefore cannot authorize the trade.
+        func regime(at timestamp: Date) -> (state: String, resistance: Double, midpoint: Double, majorLow: Double, atr: Double)? {
+            guard let index = htf.lastIndex(where: { $0.timestamp.addingTimeInterval(4 * 3600) <= timestamp }), index >= 0 else { return nil }
+            guard timestamp.timeIntervalSince(htf[index].timestamp.addingTimeInterval(4 * 3600)) < 4 * 3600 else { return nil }
+            let history = Array(htf.prefix(index + 1))
+            guard history.count >= 55 else { return nil }
+            guard zip(history, history.dropFirst()).allSatisfy({
+                $1.timestamp.timeIntervalSince($0.timestamp) == 4 * 3600
+            }) else { return nil }
+            let htfCloses = history.map { NSDecimalNumber(decimal: $0.close).doubleValue }
+            let htfHighs = history.map { NSDecimalNumber(decimal: $0.high).doubleValue }
+            let htfLows = history.map { NSDecimalNumber(decimal: $0.low).doubleValue }
+            let fast = IndicatorCalculator.ema(htfCloses, period: 20).last ?? 0
+            let slow = IndicatorCalculator.ema(htfCloses, period: 50).last ?? 0
+            let htfATR = IndicatorCalculator.atrEMA(history, period: 14).last ?? 0
+            guard let recentHigh = htfHighs.suffix(20).max(), let majorLow = htfLows.suffix(20).min(), htfATR.isFinite else { return nil }
+            let midpoint = (recentHigh + majorLow) / 2
+            guard midpoint > 0 else { return nil }
+            let width = (recentHigh - majorLow) / midpoint
+            let state: String
+            if htfCloses.last! < fast && fast < slow { state = "bearish" }
+            else if htfCloses.last! > fast && fast > slow { state = "bullish" }
+            else if width <= max(0.08, htfATR / midpoint * 8) { state = "range" }
+            else { state = "transition" }
+            guard state == "bearish" || (allowRange && state == "range") else { return nil }
+            return (state, recentHigh + htfATR * 0.25, midpoint, majorLow, htfATR)
+        }
+
+        let firstSweep = max(lookback, confirmationIndex - confirmationWindow)
+        guard firstSweep <= confirmationIndex - 1 else {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+        var selected: (index: Int, previousHigh: Double, regime: (state: String, resistance: Double, midpoint: Double, majorLow: Double, atr: Double), rejection: [String])?
+        // The research state machine scans sweeps chronologically and consumes
+        // the first confirmation. Preserve that ordering when two candidate
+        // sweeps overlap the same four-bar confirmation window.
+        for sweepIndex in firstSweep...confirmationIndex - 1 {
+            guard sweepIndex >= lookback,
+                  let regime = regime(at: sweepBars[sweepIndex].timestamp) else { continue }
+            guard sweepIndex >= 96, sweepIndex >= 20 else { continue }
+            let window = Array(lower[(sweepIndex - 96)...entryIndex])
+            guard zip(window, window.dropFirst()).allSatisfy({
+                $1.timestamp.timeIntervalSince($0.timestamp) == 15 * 60
+            }) else { continue }
+            let gain24h = closes[sweepIndex] / closes[sweepIndex - 96] - 1
+            let quoteVolume24h = quoteVolumes[(sweepIndex - 95)...sweepIndex].reduce(0, +)
+            // These are hard universe filters from the lab config.  Equality
+            // at either boundary is deliberately rejected (`>` in Python).
+            guard gain24h > minimumGain, quoteVolume24h > minimumQuoteVolume else { continue }
+            let previousHigh = highs[(sweepIndex - lookback)..<sweepIndex].max() ?? highs[sweepIndex]
+            guard highs[sweepIndex] > previousHigh, closes[sweepIndex] < previousHigh else { continue }
+            guard sweepIndex < lowerAtr.count, lowerAtr[sweepIndex].isFinite, lowerAtr[sweepIndex] > 0 else { continue }
+            let candleRange = max(highs[sweepIndex] - lows[sweepIndex], 1e-12)
+            let upperWick = (highs[sweepIndex] - max(opens[sweepIndex], closes[sweepIndex])) / candleRange
+            let meanVolume = quoteVolumes[(sweepIndex - 20)..<sweepIndex].reduce(0, +) / 20
+            var rejection: [String] = []
+            if upperWick >= wickRatio { rejection.append("large_upper_wick") }
+            if closes[sweepIndex] < opens[sweepIndex] { rejection.append("bearish_close") }
+            if quoteVolumes[sweepIndex] > meanVolume * volumeMultiple { rejection.append("volume_expansion") }
+            if closes[sweepIndex] < previousHigh - rejectDepthATR * lowerAtr[sweepIndex] { rejection.append("failed_breakout") }
+            guard rejection.count >= minimumScore else { continue }
+            // Python's state machine chooses the first confirmation.  Reject a
+            // later one if an earlier bar in this window had already confirmed.
+            func confirmation(_ index: Int) -> Bool {
+                guard index > sweepIndex else { return false }
+                let breakLow = index > sweepIndex + 1 && closes[index] < (lows[(sweepIndex + 1)..<index].min() ?? lows[index])
+                let failedRetest = highs[index] >= previousHigh * 0.995 && closes[index] < opens[index] && closes[index] < previousHigh
+                return breakLow || failedRetest
+            }
+            guard confirmation(confirmationIndex),
+                  !(sweepIndex + 1..<confirmationIndex).contains(where: confirmation) else { continue }
+            selected = (sweepIndex, previousHigh, regime, rejection)
+            break
+        }
+        guard let setup = selected else {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+        let entry = NSDecimalNumber(decimal: entryBar.open).doubleValue
+        let sweepATR = lowerAtr[setup.index]
+        let stop = highs[setup.index] + stopATR * sweepATR
+        let risk = stop - entry
+        guard entry > 0, risk > entry * 0.002, risk <= entry * 0.15 else {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+        let zone: String
+        if highs[setup.index] <= setup.regime.resistance + setup.regime.atr { zone = "normal_extension" }
+        else if highs[setup.index] <= setup.regime.resistance + 2 * setup.regime.atr { zone = "primary_sweep" }
+        else { zone = "extreme_sweep" }
+        // zoneRequiredCode: 0 accepts any zone, 1/2/3 require
+        // normal_extension / primary_sweep / extreme_sweep respectively.
+        if let required = config.parameters["zoneRequiredCode"], required > 0 {
+            let expected = required == 1 ? "normal_extension" : required == 2 ? "primary_sweep" : "extreme_sweep"
+            guard zone == expected else { return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction, cooldown: status.cooldown, pnl: status.pnl, lastSignal: status.lastSignal, indicators: indicators)) }
+        }
+        let support = lows[max(0, confirmationIndex - 32)...confirmationIndex].min() ?? entry
+        var targets = [support < entry ? support : entry - risk,
+                       setup.regime.midpoint < entry ? setup.regime.midpoint : entry - 2 * risk,
+                       setup.regime.majorLow < entry ? setup.regime.majorLow : entry - 3 * risk]
+            .filter { $0 < entry }
+        targets.sort { $0 > $1 }
+        var targetValues: [Double] = []
+        for value in targets where !targetValues.contains(where: { abs($0 - value) < 1e-9 }) {
+            targetValues.append(value)
+        }
+        while targetValues.count < 3 {
+            let nextByR = entry - risk * Double(targetValues.count + 1)
+            let nextBelowPrevious = (targetValues.last ?? entry) - risk
+            let next = min(nextByR, nextBelowPrevious)
+            targetValues.append(next < entry ? next : entry - risk * Double(targetValues.count + 1))
+        }
+        targetValues = Array(targetValues.prefix(3))
+        let configuredFractions = [
+            config.parameters["partialTarget1"],
+            config.parameters["partialTarget2"],
+            config.parameters["partialTarget3"]
+        ].compactMap { $0 }.map { Decimal($0) }
+        let targetFractions = configuredFractions.count == 3 && configuredFractions.allSatisfy { $0 > 0 }
+            ? configuredFractions
+            : [Decimal(string: "0.3")!, Decimal(string: "0.3")!, Decimal(string: "0.4")!]
+        let moveStopToEntry = (config.parameters["moveStopToEntryAfterTP1"] ?? 1) >= 1
+        let signal = StrategySignal(strategyID: config.id, type: "entry_short", price: Decimal(entry),
+                                     reason: "高位扫顶反转：\(setup.regime.state)，\(setup.rejection.count)项拒绝，确认后下一根15m开盘入场（\(zone)）",
+                                     timestamp: entryBar.timestamp, stopPrice: Decimal(stop),
+                                     takePrice: Decimal(targetValues[0]), takePrices: targetValues.map { Decimal($0) },
+                                     targetFractions: targetFractions,
+                                     moveStopToEntryAfterTP1: moveStopToEntry, trailBars: trailBars,
+                                     invalidationPrice: Decimal(highs[setup.index]))
+        if status.lastSignal?.timestamp == signal.timestamp {
+            return marked(StrategyStatus(id: status.id, state: .running, direction: status.direction,
+                                         cooldown: status.cooldown, pnl: status.pnl,
+                                         lastSignal: status.lastSignal, indicators: indicators))
+        }
+        return marked(StrategyStatus(id: status.id, state: .running, direction: "short", cooldown: status.cooldown,
+                                     pnl: status.pnl, lastSignal: signal, indicators: indicators))
+    }
+
     /// 高位流动性二次扫顶反转（做空）——与 Python 回测 `engine.py` 逐条一致。
     /// 信号仅在“二次扫顶 bar 收盘”（即最新已确认 bar）时发出，并附带 ATR 标定的止损/止盈价位。
     private struct SweepSetup {
@@ -202,10 +556,11 @@ public struct StrategyEngine: Sendable {
     private static func btcGateAllows(at timestamp: Date, btcCandles: [Candle]?, enabled: Bool) -> Bool {
         guard enabled else { return true }
         guard let btcCandles else { return false }
-        let confirmedBTC = btcCandles.filter(\.confirmed)
+        let confirmedBTC = btcCandles.filter(\.confirmed).sorted { $0.timestamp < $1.timestamp }
         guard confirmedBTC.count >= 200,
               let index = confirmedBTC.lastIndex(where: { $0.timestamp <= timestamp }),
               index >= 199 else { return false }
+        guard timestamp.timeIntervalSince(confirmedBTC[index].timestamp) <= 3600 else { return false }
         let closes = confirmedBTC.map { NSDecimalNumber(decimal: $0.close).doubleValue }
         let sma = IndicatorCalculator.sma(closes, period: 200)
         return index < closes.count && index < sma.count && closes[index] < sma[index]
@@ -231,7 +586,7 @@ public struct StrategyEngine: Sendable {
         let volumes = confirmed.map { NSDecimalNumber(decimal: $0.volume).doubleValue }
         let atrSeries = IndicatorCalculator.atrSMA(confirmed, period: atrPeriod)
         let rsiSeries = IndicatorCalculator.rsiWilder(closes, period: atrPeriod)
-        let volMean = IndicatorCalculator.sma(volumes, period: 48)
+        let volMean = IndicatorCalculator.priorSMA(volumes, period: 48)
         let majorMax = IndicatorCalculator.rollingMax(highs, period: majorWindow)
 
         let signalBar = n - 1
@@ -277,6 +632,81 @@ public struct StrategyEngine: Sendable {
     private static func evaluateSweepReversal(config: StrategyConfig, confirmed: [Candle], closes: [Double], btcCandles: [Candle]?) -> StrategySignal? {
         guard let setup = findSweepSetup(config: config, confirmed: confirmed, closes: closes, btcCandles: btcCandles) else { return nil }
         return makeSweepSignal(config: config, setup: setup, entry: setup.structureEntry, timestamp: setup.timestamp, reason: "高位二次扫顶反转（12天高点被两次假突破，收盘回落）")
+    }
+
+    /// 日内翻倍动能衰竭确认做空（DME Short）。所有条件只使用已确认的
+    /// 15m K 线及其左侧历史；报价成交额缺失时 fail-closed。该实现与
+    /// strategies/double_pump_exhaustion_short/config/strategy.json 的正式
+    /// 规则保持一一对应，运行时不读取策略目录。
+    private static func evaluateDoublePumpExhaustionShort(config: StrategyConfig,
+                                                           confirmed: [Candle],
+                                                           closes: [Double],
+                                                           rsi: [Double],
+                                                           atr: [Double]) -> StrategySignal? {
+        let minimumHistory = period(config.parameters["minimumHistoryBars"], fallback: 97)
+        guard confirmed.count >= minimumHistory,
+              closes.count == confirmed.count,
+              rsi.count == confirmed.count,
+              atr.count == confirmed.count else { return nil }
+        let index = confirmed.count - 1
+        guard index >= 96, closes[index] > 0, closes[index - 96] > 0 else { return nil }
+        // The 24h window must be contiguous. A missing 15m bar cannot be
+        // silently treated as a stale close from a different session.
+        let start = index - 96
+        for cursor in (start + 1)...index {
+            guard confirmed[cursor].timestamp.timeIntervalSince(confirmed[cursor - 1].timestamp) == 15 * 60 else { return nil }
+        }
+        let gain24 = (NSDecimalNumber(decimal: confirmed[index].high).doubleValue / closes[start]) - 1
+        let gainThreshold = config.parameters["gain24Gt"] ?? 1.0
+        guard gain24 > gainThreshold else { return nil }
+
+        let open = NSDecimalNumber(decimal: confirmed[index].open).doubleValue
+        let high = NSDecimalNumber(decimal: confirmed[index].high).doubleValue
+        let low = NSDecimalNumber(decimal: confirmed[index].low).doubleValue
+        let close = closes[index]
+        let range = high - low
+        guard range > 0, close < open else { return nil }
+        let upperWick = high - max(open, close)
+        let closePosition = (close - low) / range
+        guard upperWick / range >= (config.parameters["upperWickMin"] ?? 0.4),
+              closePosition <= (config.parameters["closePositionMax"] ?? 0.5),
+              rsi[index] >= (config.parameters["rsiMin"] ?? 50.0),
+              index > 0, rsi[index] < rsi[index - 1] else { return nil }
+
+        let volumePeriod = period(config.parameters["volumePeriod"], fallback: 20)
+        guard index >= volumePeriod else { return nil }
+        var priorVolumes: [Double] = []
+        priorVolumes.reserveCapacity(volumePeriod)
+        for cursor in (index - volumePeriod)..<index {
+            guard let quote = confirmed[cursor].quoteVolume else { return nil }
+            let value = NSDecimalNumber(decimal: quote).doubleValue
+            guard value.isFinite, value >= 0 else { return nil }
+            priorVolumes.append(value)
+        }
+        guard let currentQuote = confirmed[index].quoteVolume else { return nil }
+        let currentVolume = NSDecimalNumber(decimal: currentQuote).doubleValue
+        let priorMean = priorVolumes.reduce(0, +) / Double(volumePeriod)
+        guard currentVolume.isFinite, currentVolume >= 0,
+              priorMean.isFinite,
+              currentVolume >= priorMean * (config.parameters["volumeMultiple"] ?? 0.5) else { return nil }
+
+        let atrValue = atr[index]
+        guard atrValue.isFinite, atrValue > 0 else { return nil }
+        let stop = high + (config.parameters["stopATR"] ?? 0.45) * atrValue
+        let risk = stop - close
+        let minRisk = config.parameters["minRiskATR"] ?? 0.5
+        let maxRisk = config.parameters["maxRiskATR"] ?? 3.0
+        guard risk > 0, risk / atrValue >= minRisk, risk / atrValue <= maxRisk else { return nil }
+        let targetR = config.parameters["targetR"] ?? 1.0
+        let take = close - targetR * risk
+        guard take > 0 else { return nil }
+        return StrategySignal(strategyID: config.id,
+                              type: "entry_short",
+                              price: Decimal(close),
+                              reason: "滚动24小时涨幅超过100%，15分钟上影线动能衰竭确认",
+                              timestamp: confirmed[index].timestamp,
+                              stopPrice: Decimal(stop),
+                              takePrice: Decimal(take))
     }
 
 }

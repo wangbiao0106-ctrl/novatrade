@@ -3,7 +3,7 @@ import Testing
 import TradingDomain
 @testable import TradingService
 
-/// 山寨币二次扫顶做空（1h）策略引擎测试：与 Python 回测（strategies/sweep_reversal_short/engine.py）逐条对应。
+/// 山寨币二次扫顶做空策略引擎测试：与 Python 回测（strategies/sweep_reversal_short/engine.py）逐条对应。
 /// 构造序列：完整 288 根暖机 → 高位摆动点 p → 首次扫顶 s（放量、收盘回落）→ 二次扫顶 j（更低高点、收盘回落，最后一根）。
 
 private func makeSweepCandles(resweep: Bool = true) -> [Candle] {
@@ -100,7 +100,7 @@ private func makeBTCBearishCandlesWithPriorTimestamp() -> [Candle] {
 
 private func makeSweepConfig() -> StrategyConfig {
     StrategyConfig(
-        name: "山寨币二次扫顶做空（1h）", instrumentID: "SATS-USDT-SWAP", interval: .oneHour, type: .sweepReversalShort,
+        name: "山寨币二次扫顶做空", scope: .dynamic(.sweepCandidates), interval: .oneHour, type: .sweepReversalShort,
         parameters: ["L": 10, "R": 5, "majorWindow": 288, "sweepWait": 96, "rejectWait": 5,
                      "resweepWait": 12, "rsiMin": 62, "volMult": 1.5, "rsDeep": 0.2,
                      "bufATR": 0.5, "tpMult": 2.2, "minATRPct": 0.5, "maxRiskATR": 5.0, "btcGateEnabled": 1],
@@ -146,8 +146,8 @@ private func makeSecondBarConfirmation(entryTimestamp: Date) -> [Candle] {
 @Test
 func sweepReversalKeepsIdentifierSeparateFromDisplayName() {
     let config = makeSweepConfig()
-    #expect(config.strategyIdentifier == "sweepReversalShort")
-    #expect(config.displayName == "山寨币二次扫顶做空（1h）")
+    #expect(config.type.identifier == "sweepReversalShort")
+    #expect(config.name == "山寨币二次扫顶做空")
     #expect(StrategyType.sweepReversalShort.identifier == "sweepReversalShort")
 }
 
@@ -345,17 +345,19 @@ func sweepReversalOneHourEventNeverLeaksAnotherInstrumentsSignal() async throws 
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-sweep-scope-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = PaperTradingStore(directory: directory)
-    // 运行时只接受 dynamic.hotAltcoins 范围；引擎用例里的 .single 范围会被拒。
+    // 策略实例扫描动态范围；另一个标的的事件必须返回自己的中性状态，
+    // 不能带出 A 标的的信号。
     let config = StrategyConfig(
-        name: "山寨币二次扫顶做空（1h）", scope: .dynamic(.hotAltcoins), interval: .oneHour,
+        name: "山寨币二次扫顶做空", scope: .dynamic(.sweepCandidates), interval: .oneHour,
         type: .sweepReversalShort, parameters: makeSweepConfig().parameters,
         enabled: true, cooldownBars: 96
     )
     _ = try await store.create(config)
 
+    // 两个标的都高于 sweepCandidates 的 300 万 USDT 成交额下限。
     let contracts = [
-        ContractMarket(id: "SATS-USDT-SWAP", name: "SATS", baseCurrency: "SATS", quoteCurrency: "USDT", last: 1, volume24h: 1_000_000),
-        ContractMarket(id: "ALT-USDT-SWAP", name: "ALT", baseCurrency: "ALT", quoteCurrency: "USDT", last: 1, volume24h: 900_000),
+        ContractMarket(id: "SATS-USDT-SWAP", name: "SATS", baseCurrency: "SATS", quoteCurrency: "USDT", last: 1, volume24h: 10_000_000),
+        ContractMarket(id: "ALT-USDT-SWAP", name: "ALT", baseCurrency: "ALT", quoteCurrency: "USDT", last: 1, volume24h: 9_000_000),
     ]
     let structure = makeSweepCandles()
     let structureTimestamp = structure[318].timestamp
@@ -369,9 +371,7 @@ func sweepReversalOneHourEventNeverLeaksAnotherInstrumentsSignal() async throws 
 
     // B 标的：同一时刻的 1h 收盘事件不得带出 A 标的的信号。
     let bStatuses = await store.evaluate(MarketSnapshot(instrumentID: "ALT-USDT-SWAP", interval: .oneHour, candles: structure), contracts: contracts)
-    let bStatus = bStatuses.first(where: { $0.id == config.id })
-    #expect(bStatus != nil)
-    #expect(bStatus?.lastSignal == nil)
+    #expect(bStatuses.count == 1)
     #expect(await store.status(for: config.id, instrumentID: "ALT-USDT-SWAP")?.lastSignal == nil)
     // A 标的自己的信号必须仍然可见：修复不能靠"清空状态"实现。
     #expect(await store.status(for: config.id, instrumentID: "SATS-USDT-SWAP")?.lastSignal?.id == leakedSignal?.id)

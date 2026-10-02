@@ -1,0 +1,8 @@
+{
+  "family": "wick_fixed",
+  "exit": {
+    "mode": "fixed",
+    "target_r": 3.0,
+    "max_hold_bars": 96
+  }
+}

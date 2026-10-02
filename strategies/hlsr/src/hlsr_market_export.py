@@ -7,6 +7,7 @@ import argparse
 import csv
 import gzip
 import json
+import math
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -24,21 +25,72 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "strategies/hlsr/results"
 SELECTION_DAYS = 60
 
 
+def report_path(path: Path) -> str:
+    """Path as written into committed reports: relative to the repository
+    root, never an absolute path that leaks the local home directory. Data
+    outside the repository (e.g. a symlinked checkout) keeps only its name."""
+    for candidate in (path.absolute(), path.resolve()):
+        try:
+            return candidate.relative_to(PROJECT_ROOT).as_posix()
+        except ValueError:
+            continue
+    return path.name
+
+
 def load_15m(path: Path) -> list[Bar]:
-    groups: dict[int, Bar] = {}
+    # Preserve source timestamps until completeness is checked. Aggregating
+    # directly into one value per bucket lets a duplicate 5m row hide a gap.
+    groups: dict[int, dict[int, Bar]] = {}
     with gzip.open(path, "rt") as handle:
         for line in handle:
             if not line.strip():
                 continue
             row = json.loads(line)
-            if not row.get("confirmed", True):
+            if not isinstance(row, dict):
                 continue
-            ts = int(row["timestamp_ms"])
+            confirmed = row.get("confirmed", True)
+            if isinstance(confirmed, str):
+                confirmed = confirmed.strip().lower() not in {"", "0", "false", "no"}
+            if not confirmed:
+                continue
+            try:
+                ts = int(row["timestamp_ms"])
+                bar = Bar(ts, float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"]), float(row.get("volume", 0)), float(row.get("quote_volume", 0)))
+            except (KeyError, TypeError, ValueError, OverflowError):
+                continue
+            values = (bar.open, bar.high, bar.low, bar.close, bar.volume, bar.quote_volume)
+            if (
+                ts < 0
+                or not all(math.isfinite(value) for value in values)
+                or bar.open <= 0
+                or bar.high <= 0
+                or bar.low <= 0
+                or bar.close <= 0
+                or bar.volume < 0
+                or bar.quote_volume < 0
+                or bar.high < max(bar.open, bar.close)
+                or bar.low > min(bar.open, bar.close)
+                or bar.high < bar.low
+            ):
+                continue
             bucket = ts // 900_000 * 900_000
-            bar = Bar(ts, float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"]), float(row.get("volume", 0)), float(row.get("quote_volume", 0)))
-            previous = groups.get(bucket)
-            groups[bucket] = bar if previous is None else Bar(bucket, previous.open, max(previous.high, bar.high), min(previous.low, bar.low), bar.close, previous.volume + bar.volume, previous.quote_volume + bar.quote_volume)
-    return sorted(groups.values(), key=lambda bar: bar.ts)
+            groups.setdefault(bucket, {})[ts] = bar
+    result: list[Bar] = []
+    for bucket, children_by_ts in sorted(groups.items()):
+        expected = [bucket + index * 300_000 for index in range(3)]
+        if sorted(children_by_ts) != expected:
+            continue
+        children = [children_by_ts[ts] for ts in expected]
+        result.append(Bar(
+            bucket,
+            children[0].open,
+            max(child.high for child in children),
+            min(child.low for child in children),
+            children[-1].close,
+            sum(child.volume for child in children),
+            sum(child.quote_volume for child in children),
+        ))
+    return result
 
 
 def symbol_from_path(path: Path) -> str:
@@ -150,7 +202,7 @@ def main() -> None:
     passed = all(criteria.values())
     output = args.output_dir
     output.mkdir(parents=True, exist_ok=True)
-    report = {"strategy": "HLSR", "source": str(root), "timeframe": "5m source -> 15m entry", "window": {"start": start.isoformat(), "end": end.isoformat()}, "source_files": len(paths), "eligible_symbols": len(eligible), "selected_symbols": selected, "hard_filters": dict(lab["hard"]), "screening_stats": {symbol: stats[symbol] for symbol in selected}, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": {**oos, "beta": oos_beta, "positive_probability": oos_positive_probability}, "actual_reward_risk": actual_rr, "risk_reward_requirement": "reward/risk >= 2.0 (interpreted from risk:reward <= 1:2)", "acceptance": criteria, "passed": passed}
+    report = {"strategy": "HLSR", "source": report_path(root), "timeframe": "5m source -> 15m entry", "leverage": float(lab["position"].get("leverage", 2.0)), "window": {"start": start.isoformat(), "end": end.isoformat()}, "source_files": len(paths), "eligible_symbols": len(eligible), "selected_symbols": selected, "hard_filters": dict(lab["hard"]), "screening_stats": {symbol: stats[symbol] for symbol in selected}, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": {**oos, "beta": oos_beta, "positive_probability": oos_positive_probability}, "actual_reward_risk": actual_rr, "risk_reward_requirement": "reward/risk >= 2.0 (interpreted from risk:reward <= 1:2)", "acceptance": criteria, "passed": passed}
     (output / "hlsr_market_export_report.json").write_text(json.dumps(report, indent=2))
     with (output / "hlsr_market_export_trades.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(all_trades[0]) if all_trades else ["symbol", "entry_ts", "net_r"], lineterminator="\n")

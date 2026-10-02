@@ -7,12 +7,14 @@ import argparse
 import csv
 import itertools
 import json
+import math
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from altcoin_backtest import (
     Bar,
+    BAR_INTERVAL_MS,
     EXCLUDED_BASES,
     Result,
     Trade,
@@ -22,6 +24,7 @@ from altcoin_backtest import (
     candidate_symbols,
     ema,
     load_bars,
+    number,
     rolling_sum,
     parse_utc,
     short_entry_price,
@@ -48,6 +51,10 @@ def load_lab_config(path: Path | None = None) -> dict:
     """读取实验室机器参数真源，返回 {signal, hard, position, costs}。"""
     payload = json.loads(Path(path or LAB_CONFIG).read_text())
     return {
+        "strategy": payload.get("strategy", "HLSR"),
+        "name_zh": payload.get("name_zh", "高位扫顶反转"),
+        "display_name": payload.get("display_name", "高位扫顶反转做空"),
+        "name_en": payload.get("name_en", "High-Level Liquidity Sweep Reversal"),
         "signal": payload.get("signal_parameters", {}),
         "hard": payload.get("hard_filters", {}),
         "position": payload.get("position_management", {}),
@@ -79,13 +86,28 @@ class HTFBar:
 
 
 def resample(bars: list[Bar], minutes: int) -> list[HTFBar]:
+    """Aggregate confirmed 15-minute bars into complete higher-timeframe bars.
+
+    Merely checking the number of children is unsafe: a duplicated timestamp
+    can make up for a missing child and produce an OHLC bar with a hidden gap.
+    The HLSR input is the 15-minute series returned by ``load_bars``; require
+    every expected timestamp in each bucket before using its close in regime
+    detection.
+    """
     interval = minutes * 60_000
+    child_interval = 15 * 60_000
+    expected_children = interval // child_interval
+    if expected_children < 1 or interval % child_interval:
+        raise ValueError("minutes must be a positive multiple of 15")
     groups: dict[int, list[Bar]] = {}
     for bar in bars:
         groups.setdefault(bar.ts // interval * interval, []).append(bar)
     result = []
     for ts, values in sorted(groups.items()):
         values.sort(key=lambda value: value.ts)
+        expected = [ts + index * child_interval for index in range(expected_children)]
+        if [value.ts for value in values] != expected:
+            continue
         result.append(HTFBar(ts, values[0].open, max(v.high for v in values), min(v.low for v in values), values[-1].close, sum(v.quote_volume for v in values)))
     return result
 
@@ -430,6 +452,11 @@ def cached_bar_symbols(data_dir: Path, start_ms: int, end_ms: int, limit: int) -
     选币只能用窗口早期的数据。此前用窗口最后 24h 的成交额排名，等于用测试期末尾
     的信息挑标的（选择性前视），会把样本外指标系统性抬高。
     """
+    if limit < 1 or start_ms < 0 or end_ms <= start_ms or start_ms % BAR_INTERVAL_MS or end_ms % BAR_INTERVAL_MS:
+        return []
+    required = SELECTION_DAYS * 96
+    if start_ms + required * BAR_INTERVAL_MS > end_ms:
+        return []
     suffix = f"_15m_{start_ms}_{end_ms}.json"
     ranked: list[tuple[float, str]] = []
     for path in sorted(data_dir.glob(f"*_15m_{start_ms}_{end_ms}.json")):
@@ -439,9 +466,54 @@ def cached_bar_symbols(data_dir: Path, start_ms: int, end_ms: int, limit: int) -
         if not _is_eligible_symbol(symbol):
             continue
         try:
-            rows = json.loads(path.read_text())
-            volume = sum(float(row.get("quote_volume", 0)) for row in rows[:96 * SELECTION_DAYS])
-        except (AttributeError, OSError, TypeError, ValueError):
+            raw_rows = json.loads(path.read_text())
+            if not isinstance(raw_rows, list):
+                continue
+            rows: list[tuple[int, float]] = []
+            valid = True
+            for row in raw_rows:
+                if not isinstance(row, dict):
+                    valid = False
+                    break
+                timestamp = number(row.get("ts"), default=None)
+                quote_volume = number(row.get("quote_volume"), default=None)
+                values = [number(row.get(key), default=None) for key in ("open", "high", "low", "close", "volume")]
+                if (
+                    timestamp is None
+                    or quote_volume is None
+                    or any(value is None for value in values)
+                    or not math.isfinite(timestamp)
+                    or timestamp != int(timestamp)
+                    or timestamp < start_ms
+                    or timestamp >= end_ms
+                    or int(timestamp) % BAR_INTERVAL_MS
+                    or not math.isfinite(quote_volume)
+                    or quote_volume < 0
+                    or not all(math.isfinite(value) for value in values)
+                    or values[0] <= 0
+                    or values[1] <= 0
+                    or values[2] <= 0
+                    or values[3] <= 0
+                    or values[4] < 0
+                    or values[1] < max(values[0], values[3])
+                    or values[2] > min(values[0], values[3])
+                    or values[1] < values[2]
+                ):
+                    valid = False
+                    break
+                rows.append((int(timestamp), quote_volume))
+            if not valid or len(rows) < required:
+                continue
+            rows.sort(key=lambda row: row[0])
+            if any(current[0] == previous[0] for previous, current in zip(rows, rows[1:])):
+                continue
+            training_rows = rows[:required]
+            if any(timestamp != start_ms + index * BAR_INTERVAL_MS for index, (timestamp, _) in enumerate(training_rows)):
+                continue
+            volume = sum(value for _, value in training_rows)
+            if not math.isfinite(volume) or volume <= 0:
+                continue
+        except (AttributeError, OSError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
             continue
         ranked.append((-volume, symbol))
     ranked.sort()
@@ -454,23 +526,28 @@ def save_cached_symbols(data_dir: Path, start_ms: int, end_ms: int, limit: int, 
     path.write_text(json.dumps(symbols, separators=(",", ":")))
 
 
-def select_symbols(data_dir: Path, start_ms: int, end_ms: int, limit: int, cache_dir: Path | None = None) -> list[str]:
+def select_symbols(data_dir: Path, start_ms: int, end_ms: int, limit: int,
+                   cache_dir: Path | None = None,
+                   allow_live_selection_fallback: bool = False) -> list[str]:
     cache_dir = cache_dir or data_dir
-    cached = cached_symbols(cache_dir, start_ms, end_ms, limit)
-    if len(cached) >= limit:
-        return cached
+    # Revalidate every cached symbol against the actual local bars.  A JSON
+    # list alone is not evidence that the file still covers the requested
+    # window or that its rows are valid.
     local = cached_bar_symbols(data_dir, start_ms, end_ms, limit)
     if len(local) >= limit:
         save_cached_symbols(cache_dir, start_ms, end_ms, limit, local)
         return local
+    if not allow_live_selection_fallback:
+        raise RuntimeError(
+            f"local historical caches contain only {len(local)} of {limit} valid symbols; "
+            "pass --allow-live-selection-fallback only for exploratory, forward-biased selection"
+        )
     try:
         symbols = candidate_symbols(limit)
         if not symbols:
             raise RuntimeError("OKX returned no eligible symbols")
     except Exception as error:
-        symbols = cached_bar_symbols(data_dir, start_ms, end_ms, limit)
-        if not symbols:
-            raise RuntimeError(f"unable to select symbols from OKX or local bar caches: {error}") from error
+        raise RuntimeError(f"unable to select symbols from OKX after local historical caches were insufficient: {error}") from error
     save_cached_symbols(cache_dir, start_ms, end_ms, limit, symbols)
     return symbols
 
@@ -490,6 +567,8 @@ def main() -> None:
     parser.add_argument("--end", help="固定结束时间，ISO-8601，例如 2026-09-26T19:00:00+00:00")
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--allow-live-selection-fallback", action="store_true",
+                        help="允许历史缓存不足时用当前 OKX live 成交额选币（报告会标记选择前视）")
     parser.add_argument("--config", type=Path, default=LAB_CONFIG, help="实验室机器参数真源")
     parser.add_argument("--fee-rate", type=float, default=None, help="默认取 config 的 costs.fee_rate_one_way")
     parser.add_argument("--slippage", type=float, default=None, help="默认取 config 的 costs.slippage")
@@ -512,7 +591,13 @@ def main() -> None:
     start = end - timedelta(days=args.days)
     start_ms, end_ms = int(start.timestamp() * 1000), int(end.timestamp() * 1000)
     data_dir, output_dir = args.data_dir, args.output_dir
-    symbols = select_symbols(data_dir, start_ms, end_ms, args.symbols, output_dir)
+    local_symbol_count = len(cached_bar_symbols(data_dir, start_ms, end_ms, args.symbols))
+    try:
+        symbols = select_symbols(data_dir, start_ms, end_ms, args.symbols, output_dir,
+                                 allow_live_selection_fallback=args.allow_live_selection_fallback)
+    except RuntimeError as error:
+        parser.error(str(error))
+    selection_method = "historical_local" if local_symbol_count >= args.symbols else "live_fallback"
     data = load_period(symbols, start_ms, end_ms, data_dir)
     params_list = parameter_grid(fixed)
     folds = []
@@ -542,7 +627,7 @@ def main() -> None:
     criteria = acceptance_criteria(oos_result, reward_risk_ratio(oos_values),
                                    oos_probability["positive_mean_probability"])
     passed = all(criteria.values())
-    report = {"strategy": "HLSR", "strategy_name_en": "High-Level Liquidity Sweep Reversal", "strategy_name_zh": "高位流动性扫顶反转策略", "core_formula": "high_value_zone + liquidity_sweep + rejection + structure_break + right_side_confirmation = short", "window": {"start": start.isoformat(), "end": end.isoformat()}, "market": "OKX Perpetual", "entry_timeframe": "15m", "htf": ["4H"], "leverage": float(lab["position"].get("leverage", 2.0)), "hard_filters": dict(lab["hard"]), "symbols": symbols, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": oos_result, "acceptance": criteria, "actual_reward_risk": reward_risk_ratio(oos_values), "passed": passed, "survivorship_bias": "current live USDT swaps are used because historical listing metadata is unavailable", "core_entry_module": ["value_zone", "liquidity_sweep", "rejection", "structure_confirmation"], "risk_management_module": ["position_size", "leverage", "stop_distance", "volatility", "funding_rate", "open_interest", "liquidation_data"], "assumptions": {"same_bar_priority": "stop_first", "fee_rate_one_way": args.fee_rate, "slippage_one_way": args.slippage, "funding_rate_per_trade": args.funding_rate, "reentry": "cooldown after exit; no averaging down"}}
+    report = {"strategy": lab["strategy"], "strategy_name_en": lab["name_en"], "strategy_name_zh": lab["name_zh"], "strategy_display_name": lab["display_name"], "core_formula": "high_value_zone + liquidity_sweep + rejection + structure_break + right_side_confirmation = short", "window": {"start": start.isoformat(), "end": end.isoformat()}, "market": "OKX Perpetual", "entry_timeframe": "15m", "htf": ["4H"], "leverage": float(lab["position"].get("leverage", 2.0)), "hard_filters": dict(lab["hard"]), "symbols": symbols, "selection_method": selection_method, "parameter_count": len(params_list), "folds": folds, "sample_out_of_sample": oos_result, "acceptance": criteria, "actual_reward_risk": reward_risk_ratio(oos_values), "passed": passed, "survivorship_bias": "current live USDT swaps are used because historical listing metadata is unavailable", "core_entry_module": ["value_zone", "liquidity_sweep", "rejection", "structure_confirmation"], "risk_management_module": ["position_size", "leverage", "stop_distance", "volatility", "funding_rate", "open_interest", "liquidation_data"], "assumptions": {"same_bar_priority": "stop_first", "fee_rate_one_way": args.fee_rate, "slippage_one_way": args.slippage, "funding_rate_per_trade": args.funding_rate, "reentry": "cooldown after exit; no averaging down"}}
     output_dir.mkdir(parents=True, exist_ok=True)
     prefix = f"high_short_{args.days}d"
     (output_dir / f"{prefix}_report.json").write_text(json.dumps(report, indent=2))

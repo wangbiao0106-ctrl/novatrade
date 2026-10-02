@@ -3,15 +3,9 @@ import PackageDescription
 
 let package = Package(
     name: "OKXSelfTrader",
-    platforms: [.macOS(.v15), .iOS(.v18)],
+    platforms: [.macOS(.v15)],
     products: [
-        .library(name: "TradingDomain", targets: ["TradingDomain"]),
-        .library(name: "OKXGateway", targets: ["OKXGateway"]),
-        .library(name: "ATKGateway", targets: ["ATKGateway"]),
-        .library(name: "TradingService", targets: ["TradingService"]),
-        .library(name: "TradingServiceClient", targets: ["TradingServiceClient"]),
         .executable(name: "mac-trader", targets: ["MacTraderApp"]),
-        .executable(name: "okx-atk-cli", targets: ["OKXSelfTraderCLI"]),
         .executable(name: "okx-locald", targets: ["OKXLocalD"])
     ],
     dependencies: [
@@ -29,9 +23,12 @@ let package = Package(
             .product(name: "HummingbirdWebSocket", package: "hummingbird-websocket")
         ]),
         .target(name: "TradingServiceClient", dependencies: ["TradingDomain"]),
-        .executableTarget(name: "MacTraderApp", dependencies: ["TradingDomain", "TradingServiceClient"]),
-        .executableTarget(name: "OKXSelfTraderCLI", dependencies: ["ATKGateway"]),
+        .executableTarget(
+            name: "MacTraderApp",
+            dependencies: ["TradingDomain", "TradingServiceClient"],
+            exclude: ["Resources"]
+        ),
         .executableTarget(name: "OKXLocalD", dependencies: ["TradingService"]),
-        .testTarget(name: "OKXGatewayTests", dependencies: ["OKXGateway", "ATKGateway", "TradingDomain", "TradingService", "TradingServiceClient"])
+        .testTarget(name: "OKXGatewayTests", dependencies: ["OKXGateway", "ATKGateway", "TradingDomain", "TradingService"])
     ]
 )

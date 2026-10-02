@@ -6,7 +6,7 @@ import TradingDomain
 @Test
 func candleStreamDecodesLiveAndClosedBarsInTimeOrder() throws {
     let frame = #"{"arg":{"channel":"candle1H","instId":"BTC-USDT-SWAP"},"data":[["1700003600000","100","110","95","104","12","12","1248","0"],["1700000000000","90","101","88","100","20","20","2000","1"]]}"#
-    let event = try OKXPublicClient.candleFrame(frame, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
+    let event = try OKXCandleSocket.candleFrame(frame, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     guard case let .candles(candles) = event else {
         Issue.record("Expected candle rows")
         return
@@ -16,35 +16,42 @@ func candleStreamDecodesLiveAndClosedBarsInTimeOrder() throws {
     #expect(!candles[1].confirmed)
     #expect(candles[1].close == 104)
     #expect(candles[1].volume == 12)
+    #expect(candles[1].quoteVolume == 1248)
     #expect(candles[1].timestamp == Date(timeIntervalSince1970: 1_700_003_600))
 }
 
 @Test
 func candleStreamSeparatesAcknowledgementsAndHeartbeatFromPrices() throws {
     let subscribed = #"{"event":"subscribe","arg":{"channel":"candle1H","instId":"BTC-USDT-SWAP"},"connId":"abc"}"#
-    #expect(try OKXPublicClient.candleFrame(subscribed, instrumentID: "BTC-USDT-SWAP", interval: .oneHour) == .subscribed)
-    #expect(try OKXPublicClient.candleFrame("pong", instrumentID: "BTC-USDT-SWAP", interval: .oneHour) == .pong)
-    #expect(try OKXPublicClient.candleFrame(subscribed, instrumentID: "ETH-USDT-SWAP", interval: .oneHour) == .ignored)
-    #expect(try OKXPublicClient.candleFrame(subscribed, instrumentID: "BTC-USDT-SWAP", interval: .oneMinute) == .ignored)
+    #expect(try OKXCandleSocket.candleFrame(subscribed, instrumentID: "BTC-USDT-SWAP", interval: .oneHour) == .subscribed)
+    #expect(try OKXCandleSocket.candleFrame("pong", instrumentID: "BTC-USDT-SWAP", interval: .oneHour) == .pong)
+    #expect(try OKXCandleSocket.candleFrame(subscribed, instrumentID: "ETH-USDT-SWAP", interval: .oneHour) == .ignored)
+    #expect(try OKXCandleSocket.candleFrame(subscribed, instrumentID: "BTC-USDT-SWAP", interval: .oneMinute) == .ignored)
 }
 
 @Test
 func candleStreamRejectsSubscriptionFailuresAndTruncatedBars() {
     let error = #"{"event":"error","code":"60012","msg":"Invalid request","connId":"abc"}"#
     #expect(throws: OKXGatewayError.self) {
-        try OKXPublicClient.candleFrame(error, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
+        try OKXCandleSocket.candleFrame(error, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     }
     let truncated = #"{"arg":{"channel":"candle1H","instId":"BTC-USDT-SWAP"},"data":[["1700000000000","100","110","95","104","12"]]}"#
     #expect(throws: OKXGatewayError.self) {
-        try OKXPublicClient.candleFrame(truncated, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
+        try OKXCandleSocket.candleFrame(truncated, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     }
 }
 
-@Test
-func candleStreamRejectsNonFiniteTimestamps() {
-    let invalid = #"{"arg":{"channel":"candle1H","instId":"BTC-USDT-SWAP"},"data":[["NaN","100","110","95","104","12","12","1248","1"]]}"#
-    #expect(throws: OKXGatewayError.self) {
-        try OKXPublicClient.candleFrame(invalid, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
+@Test(arguments: [
+    #"["NaN","100","110","95","104","12","12","1248","1"]"#,
+    // A numeric prefix must not be read as a truncated price.
+    #"["1700000000000","100","110","95","104oops","12","12","1248","1"]"#,
+    // Only "0" or "1" may decide whether a bar is closed.
+    #"["1700000000000","100","110","95","104","12","12","1248","unknown"]"#
+])
+func candleStreamRejectsMalformedRows(row: String) {
+    let frame = #"{"arg":{"channel":"candle1H","instId":"BTC-USDT-SWAP"},"data":["# + row + "]}"
+    #expect(throws: OKXGatewayError.invalidResponse) {
+        try OKXCandleSocket.candleFrame(frame, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     }
 }
 
@@ -80,4 +87,17 @@ func candleHeartbeatPongAndCandleDataKeepIdleSubscriptionsAlive() {
     heartbeat.received(at: 143, subscribed: true)
     #expect(heartbeat.action(at: 152) == .none)
     #expect(heartbeat.action(at: 163) == .ping)
+}
+
+@Test
+func connectionPacerSpacesConcurrentConnectionAttempts() async throws {
+    let pacer = OKXConnectionPacer(spacing: .milliseconds(60))
+    let clock = ContinuousClock()
+    let start = clock.now
+    try await withThrowingTaskGroup(of: Void.self) { group in
+        for _ in 0..<4 { group.addTask { try await pacer.waitForSlot() } }
+        try await group.waitForAll()
+    }
+    // Four attempts need three gaps; none may share a slot.
+    #expect(clock.now - start >= .milliseconds(180))
 }

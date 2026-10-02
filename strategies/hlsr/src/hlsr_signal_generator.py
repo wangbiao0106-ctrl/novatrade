@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
@@ -159,29 +160,60 @@ def load_bars(path: Path, source_minutes: int = 5) -> list[Bar]:
     桶内源 K 线数量不足时整根丢弃：否则导出末尾那根只含 1-2 根 5m 的"幽灵 bar"
     会被当成已收盘 15m K 线参与确认判断。
     """
-    groups: dict[int, list[Bar]] = {}
+    # Keep one source candle per timestamp.  A duplicate row must not make a
+    # bucket appear complete when another child is missing.
+    groups: dict[int, dict[int, Bar]] = {}
     interval = 15 * 60_000
-    expected_children = max(1, interval // (max(1, int(source_minutes)) * 60_000))
+    source_minutes = int(source_minutes)
+    if source_minutes <= 0 or interval % (source_minutes * 60_000):
+        raise ValueError("source_minutes must be a positive divisor of 15")
+    expected_children = interval // (source_minutes * 60_000)
     for row in _rows(path):
-        if not row.get("confirmed", True):
+        if not isinstance(row, dict):
             continue
-        ts = int(row.get("timestamp_ms", row.get("ts")))
-        bar = Bar(
-            ts=ts,
-            open=float(row["open"]),
-            high=float(row["high"]),
-            low=float(row["low"]),
-            close=float(row["close"]),
-            volume=float(row.get("volume", 0.0)),
-            quote_volume=float(row.get("quote_volume", row.get("volCcyQuote", row.get("volume", 0.0)))),
-        )
+        confirmed = row.get("confirmed", True)
+        if isinstance(confirmed, str):
+            confirmed = confirmed.strip().lower() not in {"", "0", "false", "no"}
+        if not confirmed:
+            continue
+        try:
+            ts = int(row.get("timestamp_ms", row.get("ts")))
+            bar = Bar(
+                ts=ts,
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume=float(row.get("volume", 0.0)),
+                quote_volume=float(row.get("quote_volume", row.get("volCcyQuote", row.get("volume", 0.0)))),
+            )
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        values = (bar.open, bar.high, bar.low, bar.close, bar.volume, bar.quote_volume)
+        if (
+            ts < 0
+            or not all(math.isfinite(value) for value in values)
+            or bar.open <= 0
+            or bar.high <= 0
+            or bar.low <= 0
+            or bar.close <= 0
+            or bar.volume < 0
+            or bar.quote_volume < 0
+            or bar.high < max(bar.open, bar.close)
+            or bar.low > min(bar.open, bar.close)
+            or bar.high < bar.low
+        ):
+            continue
         bucket = ts // interval * interval
-        groups.setdefault(bucket, []).append(bar)
+        groups.setdefault(bucket, {})[ts] = bar
     bars: list[Bar] = []
     for bucket in sorted(groups):
-        children = sorted(groups[bucket], key=lambda value: value.ts)
-        if len(children) < expected_children:
+        children_by_ts = groups[bucket]
+        expected = [bucket + index * source_minutes * 60_000
+                    for index in range(expected_children)]
+        if sorted(children_by_ts) != expected:
             continue
+        children = [children_by_ts[ts] for ts in expected]
         bars.append(Bar(
             bucket,
             children[0].open,
@@ -301,20 +333,25 @@ def _candidate_signal(
         confirmation=confirmation,
         gain_24h=gain_24h,
         quote_volume_24h=quote_volume_24h,
-        rejection_score=len(rejection_reasons),
-        rejection_reasons=rejection_reasons,
+        rejection_score=len(reasons),
+        rejection_reasons=reasons,
         invalidation="close_above_sweep_high_or_stop",
         leverage=leverage,
         params={**params.as_dict(), "entry_reference": entry_source},
     )
 
 
-def generate_signals(symbol: str, bars: list[Bar], params: Params = STANDARD_PARAMS,
+def generate_signals(symbol: str, bars: list[Bar], params: Params | None = None,
                      slippage: float | None = None, config: LabConfig | None = None) -> list[dict]:
     """Return confirmed HLSR signals in chronological order."""
     if len(bars) < 180:
         return []
     config = config or LabConfig.load()
+    # When callers omit explicit parameters, use the loaded machine source of
+    # truth.  The old default bound STANDARD_PARAMS at function definition
+    # time, so changing config/strategy.json affected the CLI but not library
+    # callers (and therefore could silently invalidate tests and integrations).
+    params = params or config.params
     if slippage is None:
         slippage = config.slippage
     partial_plan = config.partial_plan

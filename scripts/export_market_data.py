@@ -168,10 +168,26 @@ def output_filename(symbol: str, bar: str, start: datetime, end: datetime) -> st
     return f"{safe}_{bar}_{start.strftime('%Y%m%dT%H%M%SZ')}_{end.strftime('%Y%m%dT%H%M%SZ')}.jsonl.gz"
 
 
-def existing_result(symbol: str, filename: str, destination: Path) -> ContractResult | None:
+def existing_result(symbol: str, filename: str, destination: Path,
+                    start_ms: int, end_ms: int, bar: str) -> ContractResult | None:
+    """Return a skip result only when an existing export covers the request.
+
+    A syntactically valid but truncated gzip file used to be treated as
+    complete because only its row count was inspected.  That silently removed
+    the missing history from every subsequent backtest.  Check boundaries and
+    continuity before allowing the skip path.
+    """
     try:
         candles = read_candles(destination)
         timestamps = sorted(candles)
+        interval = BAR_MILLISECONDS[bar]
+        expected = list(range(timestamps[0], timestamps[-1] + interval, interval)) if timestamps else []
+        required = {"timestamp", "timestamp_ms", "open", "high", "low", "close", "quote_volume", "confirmed"}
+        structurally_valid = all(required.issubset(candle) for candle in candles.values())
+        if (not timestamps or timestamps[0] > start_ms or
+                timestamps[-1] < end_ms - interval or timestamps != expected or
+                not structurally_valid):
+            return None
         return ContractResult(
             symbol,
             filename,
@@ -211,7 +227,7 @@ def export_symbol(
 ) -> ContractResult:
     destination = output_dir / filename
     if update_from is None and destination.exists() and not force:
-        if existing := existing_result(symbol, filename, destination):
+        if existing := existing_result(symbol, filename, destination, start_ms, end_ms, bar):
             return existing
     temporary = destination.with_suffix(destination.suffix + ".part")
     try:

@@ -8,6 +8,7 @@ import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import itertools
 import json
+import math
 import random
 import time
 import urllib.error
@@ -23,6 +24,12 @@ EXCLUDED_BASES = {"BTC", "ETH", "OKB", "SOL", "BNB", "XRP", "TRX", "TON"}
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data/kline/okx/swap/15m"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "strategies/hlsr/results"
+BAR_INTERVAL_MS = 15 * 60 * 1000
+# Universe selection must be made from information available at the beginning
+# of the walk-forward window.  A 60-day training slice is long enough to
+# avoid selecting a token from one anomalous day while remaining strictly
+# before the first validation/test fold.
+SELECTION_DAYS = 60
 
 
 def parse_utc(value: str) -> datetime:
@@ -92,7 +99,15 @@ def decode_bar(row: list[str]) -> Bar | None:
     if any(value is None for value in values):
         return None
     try:
-        return Bar(int(row[0]), *values)
+        timestamp = int(row[0])
+        bar = Bar(timestamp, *values)
+        if not all(math.isfinite(value) for value in (bar.open, bar.high, bar.low, bar.close, bar.volume, bar.quote_volume)):
+            return None
+        if timestamp <= 0 or bar.open <= 0 or bar.high <= 0 or bar.low <= 0 or bar.close <= 0 or bar.volume < 0 or bar.quote_volume < 0:
+            return None
+        if bar.high < max(bar.open, bar.close) or bar.low > min(bar.open, bar.close) or bar.high < bar.low:
+            return None
+        return bar
     except (TypeError, ValueError):
         return None
 
@@ -103,11 +118,12 @@ def load_bars(symbol: str, start_ms: int, end_ms: int, cache_dir: Path) -> list[
     if cache.exists():
         try:
             cached = json.loads(cache.read_text())
-        except ValueError:
+            cached_bars = sorted((Bar(**row) for row in cached if isinstance(row, dict)), key=lambda bar: bar.ts)
+            if _complete_bars(cached_bars, start_ms, end_ms):
+                return cached_bars
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
             cached = []
-        # 空缓存视为缺失：瞬时故障写下的 [] 不能永久变成"这个标的没有 K 线"。
-        if cached:
-            return [Bar(**row) for row in cached]
+        # 空、损坏或截断缓存视为缺失，不能永久变成"这个标的没有 K 线"。
     cursor = str(end_ms)
     result: dict[int, Bar] = {}
     while True:
@@ -117,7 +133,7 @@ def load_bars(symbol: str, start_ms: int, end_ms: int, cache_dir: Path) -> list[
         if not decoded:
             break
         for bar in decoded:
-            if start_ms <= bar.ts <= end_ms:
+            if start_ms <= bar.ts < end_ms:
                 result[bar.ts] = bar
         oldest = min(bar.ts for bar in decoded)
         if oldest <= start_ms or len(decoded) < 100:
@@ -125,18 +141,141 @@ def load_bars(symbol: str, start_ms: int, end_ms: int, cache_dir: Path) -> list[
         cursor = str(oldest)
         time.sleep(0.08)
     bars = sorted(result.values(), key=lambda bar: bar.ts)
-    # 只在确实取到覆盖请求区间的数据时写缓存，避免把空结果或半截结果持久化。
-    if bars and bars[0].ts <= start_ms + 86_400_000 and bars[-1].ts >= end_ms - 86_400_000:
+    # 只在确实取到完整连续请求区间时写缓存，避免把空结果或半截结果持久化。
+    if _complete_bars(bars, start_ms, end_ms):
         cache.write_text(json.dumps([asdict(bar) for bar in bars], separators=(",", ":")))
     return bars
 
 
-def candidate_symbols(limit: int) -> list[str]:
+def _complete_bars(bars: list[Bar], start_ms: int, end_ms: int) -> bool:
+    """Require a complete, ordered 15-minute ``[start_ms, end_ms)`` window."""
+    if not bars or start_ms < 0 or end_ms <= start_ms or start_ms % BAR_INTERVAL_MS or end_ms % BAR_INTERVAL_MS:
+        return False
+    expected_count = (end_ms - start_ms) // BAR_INTERVAL_MS
+    if len(bars) != expected_count or bars[0].ts != start_ms or bars[-1].ts != end_ms - BAR_INTERVAL_MS:
+        return False
+    return all(
+        current.ts == start_ms + index * BAR_INTERVAL_MS
+        and all(math.isfinite(value) for value in (current.open, current.high, current.low, current.close, current.volume, current.quote_volume))
+        and current.open > 0 and current.high > 0 and current.low > 0 and current.close > 0
+        and current.volume >= 0 and current.quote_volume >= 0
+        and current.high >= max(current.open, current.close)
+        and current.low <= min(current.open, current.close)
+        and current.high >= current.low
+        for index, current in enumerate(bars)
+    )
+
+
+def historical_candidate_symbols(data_dir: Path, start_ms: int, end_ms: int, limit: int) -> list[str]:
+    """Rank local caches by quote volume in a complete training slice.
+
+    The old selector ranked current 24-hour tickers.  That lets information
+    from the end of a historical run choose its symbols and creates a
+    selection look-ahead.  Local caches are the only source that can provide
+    historical volume without downloading every listed instrument again.  A
+    cache is ignored unless it contains the full 60-day slice, while missing
+    candles after that slice do not create survivorship bias in selection.
+    """
+    if limit < 1 or start_ms < 0 or end_ms < start_ms:
+        return []
+    # Caches are generated from 15-minute exchange candles.  Requiring both
+    # boundaries to be aligned makes the expected sequence unambiguous and
+    # prevents a partial first/last candle from entering the ranking window.
+    if start_ms % BAR_INTERVAL_MS or end_ms % BAR_INTERVAL_MS:
+        return []
+    suffix = f"_15m_{start_ms}_{end_ms}.json"
+    required = SELECTION_DAYS * 96
+    if start_ms + required * BAR_INTERVAL_MS > end_ms:
+        return []
+    ranked: list[tuple[float, str]] = []
+    for path in sorted(data_dir.glob(f"*_15m_{start_ms}_{end_ms}.json")):
+        if not path.name.endswith(suffix):
+            continue
+        symbol = path.name[:-len(suffix)].replace("_", "-")
+        if not symbol.endswith("-USDT-SWAP") or symbol.split("-", 1)[0] in EXCLUDED_BASES:
+            continue
+        try:
+            raw_rows = json.loads(path.read_text())
+            if not isinstance(raw_rows, list):
+                continue
+            parsed_rows: list[tuple[int, float]] = []
+            valid = True
+            for row in raw_rows:
+                if not isinstance(row, dict):
+                    valid = False
+                    break
+                timestamp = number(row.get("ts"), default=None)
+                quote_volume = number(row.get("quote_volume"), default=None)
+                if (
+                    timestamp is None
+                    or quote_volume is None
+                    or not math.isfinite(timestamp)
+                    or timestamp != int(timestamp)
+                    or timestamp < start_ms
+                    or timestamp >= end_ms
+                    or int(timestamp) % BAR_INTERVAL_MS
+                    or not math.isfinite(quote_volume)
+                    or quote_volume < 0
+                ):
+                    valid = False
+                    break
+                parsed_rows.append((int(timestamp), quote_volume))
+            if not valid or len(parsed_rows) < required:
+                continue
+            parsed_rows.sort(key=lambda row: row[0])
+            if any(current[0] == previous[0] for previous, current in zip(parsed_rows, parsed_rows[1:])):
+                continue
+            training_rows = parsed_rows[:required]
+            for index, (timestamp, _) in enumerate(training_rows):
+                if timestamp != start_ms + index * BAR_INTERVAL_MS:
+                    valid = False
+                    break
+            if not valid:
+                continue
+            quote_volume = sum(volume for _, volume in training_rows)
+            if not math.isfinite(quote_volume) or quote_volume <= 0:
+                continue
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        ranked.append((-quote_volume, symbol))
+    ranked.sort()
+    return [symbol for _, symbol in ranked[:limit]]
+
+
+def candidate_symbols(
+    limit: int,
+    *,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+    data_dir: Path | None = None,
+    allow_live_fallback: bool = False,
+) -> list[str]:
+    """Return a deterministic candidate universe.
+
+    When a complete historical cache exists, it is ranked first.  A current
+    ticker fallback is available only when explicitly enabled because current
+    volume is future information for a historical run.  Calls without a
+    historical window retain the old live-universe behavior for interactive
+    discovery.
+    """
+    historical: list[str] = []
+    if start_ms is not None and end_ms is not None and data_dir is not None:
+        historical = historical_candidate_symbols(data_dir, start_ms, end_ms, limit)
+        if len(historical) >= limit:
+            return historical[:limit]
+        if not allow_live_fallback:
+            return historical
+    else:
+        allow_live_fallback = True
+    if not allow_live_fallback:
+        return historical
     instruments = http_json("/public/instruments", {"instType": "SWAP"}).get("data", [])
     live = {item.get("instId"): item for item in instruments if item.get("state") == "live" and item.get("settleCcy") == "USDT" and item.get("ctType") == "linear" and item.get("instId", "").endswith("-USDT-SWAP") and item.get("baseCcy") not in EXCLUDED_BASES}
     tickers = http_json("/market/tickers", {"instType": "SWAP"}).get("data", [])
     volume = {item.get("instId"): number(item.get("volCcy24h")) for item in tickers}
-    return [item["instId"] for item in sorted(live.values(), key=lambda x: (-volume.get(x.get("instId"), 0), x.get("instId", "")))[:limit]]
+    current = [item["instId"] for item in sorted(live.values(), key=lambda x: (-volume.get(x.get("instId"), 0), x.get("instId", "")))[:limit]]
+    merged = historical + [symbol for symbol in current if symbol not in historical]
+    return merged[:limit]
 
 
 def ema(values: list[float], period: int) -> list[float]:
@@ -251,9 +390,34 @@ def empty_result(params: Params) -> Result:
     return Result(params.as_dict(), 0, 0, 0, 0.0, beta_interval(0, 0), 0.0, 0.0, 0.0, 0.0, 0.0, 0, {"positive_mean_probability": 0.0, "mean_lower_95": 0.0, "mean_upper_95": 0.0})
 
 
+def partial_exit_plan(target_r: float) -> tuple[tuple[float, float, str], ...]:
+    """Return one fill per target level with a bounded total allocation.
+
+    A target at 1R or 2R is valid input for an ad-hoc ``Params`` instance,
+    even though the production grid uses 3R, 4R and 6R.  Merge coincident
+    levels so the same price cannot be filled repeatedly on later candles.
+    """
+    if not math.isfinite(target_r) or target_r <= 0:
+        raise ValueError("target_r must be a positive finite number")
+    raw = ((1.0, 0.30, "1R"), (2.0, 0.30, "2R"), (target_r, 0.40, f"{target_r:g}R"))
+    merged: list[list[float | str]] = []
+    positions: dict[float, int] = {}
+    for level, fraction, name in raw:
+        if level in positions:
+            merged[positions[level]][1] = float(merged[positions[level]][1]) + fraction
+            continue
+        positions[level] = len(merged)
+        merged.append([level, fraction, name])
+    total = sum(float(item[1]) for item in merged)
+    if total > 1.0 + 1e-9:
+        raise ValueError("partial target fractions allocate more than the position")
+    return tuple((float(level), float(fraction), str(name)) for level, fraction, name in merged)
+
+
 def backtest(symbol: str, bars: list[Bar], btc: list[Bar], params: Params, fee_rate: float, slippage: float, funding_rate: float, risk_fraction: float = 0.005) -> tuple[Result, list[Trade]]:
     if len(bars) < 150 or len(btc) < 150:
         return empty_result(params), []
+    partial_plan = partial_exit_plan(params.target_r)
     closes, highs, lows, quotes = ([bar.close for bar in bars], [bar.high for bar in bars], [bar.low for bar in bars], [bar.quote_volume for bar in bars])
     short_ema, rel_atr = ema(closes, 16), atr(bars)
     trades: list[Trade] = []
@@ -294,6 +458,7 @@ def backtest(symbol: str, bars: list[Bar], btc: list[Bar], params: Params, fee_r
             continue
         target, stop, remaining, net_r = entry - risk * params.target_r, initial_stop, 1.0, 0.0
         partials, reached_one, reached_two, outcome, exit_ts = [], False, False, "open", bars[-1].ts
+        hit_targets: set[int] = set()
         for future_index in range(index + 1, len(bars)):
             future = bars[future_index]
             if future.open >= stop:
@@ -307,10 +472,13 @@ def backtest(symbol: str, bars: list[Bar], btc: list[Bar], params: Params, fee_r
                 net_r += (entry - stop) / risk * remaining
                 outcome, exit_ts, remaining = "loss", future.ts, 0
                 break
-            for level, fraction, name in ((1.0, 0.30, "1R"), (2.0, 0.30, "2R"), (params.target_r, 0.40, f"{params.target_r:g}R")):
+            for target_index, (level, fraction, name) in enumerate(partial_plan):
+                if target_index in hit_targets:
+                    continue
                 if remaining + 1e-9 >= fraction and future.low <= entry - risk * level:
                     net_r += level * fraction
                     remaining = max(0.0, remaining - fraction)
+                    hit_targets.add(target_index)
                     partials.append(name)
                     if level == 1.0:
                         reached_one, stop = True, min(stop, entry)
@@ -396,6 +564,11 @@ def main() -> None:
     parser.add_argument("--fee-rate", type=float, default=0.0006)
     parser.add_argument("--slippage", type=float, default=0.0002)
     parser.add_argument("--funding-rate", type=float, default=0.0)
+    parser.add_argument(
+        "--allow-live-selection-fallback",
+        action="store_true",
+        help="允许在历史缓存不足时用当前 live 24h 成交额补齐标的（会引入选择前视）",
+    )
     parser.add_argument("--end", help="固定结束时间，ISO-8601，例如 2026-09-26T19:00:00+00:00")
     args = parser.parse_args()
     if args.symbols < 1:
@@ -409,7 +582,27 @@ def main() -> None:
     start = end - timedelta(days=args.days)
     start_ms, end_ms = int(start.timestamp() * 1000), int(end.timestamp() * 1000)
     data_dir, output_dir = args.data_dir, args.output_dir
-    symbols = candidate_symbols(args.symbols)
+    historical_symbols = historical_candidate_symbols(data_dir, start_ms, end_ms, args.symbols)
+    symbols = candidate_symbols(
+        args.symbols,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        data_dir=data_dir,
+        allow_live_fallback=args.allow_live_selection_fallback,
+    )
+    if len(historical_symbols) >= args.symbols:
+        selection_method = "historical_cache_first_60_training_days"
+    elif args.allow_live_selection_fallback and historical_symbols:
+        selection_method = "historical_cache_first_60_training_days_plus_current_live_volume_fallback"
+    elif args.allow_live_selection_fallback:
+        selection_method = "current_live_24h_volume_fallback"
+    else:
+        selection_method = "historical_cache_only_incomplete"
+    if not symbols:
+        parser.error(
+            "no candidate symbols found in the historical cache; add complete training caches "
+            "or pass --allow-live-selection-fallback to opt into current-volume selection"
+        )
     print(f"window={start.isoformat()}..{end.isoformat()} interval=15m symbols={len(symbols)}")
     btc = load_bars("BTC-USDT-SWAP", start_ms, end_ms, data_dir)
     data, skips = {}, {}
@@ -452,7 +645,15 @@ def main() -> None:
     oos_trades, oos_r = sum(item["trades"] for item in test_results), sum(item["total_r"] for item in test_results)
     oos_wins = sum(item["wins"] for item in test_results)
     passed = all(item["win_rate"] >= 0.50 and item["avg_net_r"] > 0 and item["positive_probability"]["positive_mean_probability"] > 0.50 for item in test_results) and all(fold["minimum_train_trades_met"] for fold in folds)
-    report = {"window": {"start": start.isoformat(), "end": end.isoformat()}, "interval": "15m", "leverage": 2.0, "symbols": list(data), "skips": skips, "screening_stats": {symbol: screening_stats(bars) for symbol, bars in data.items()}, "survivorship_bias": "current live USDT swaps are used when historical listing data is unavailable", "assumptions": {"gain_window_bars": 96, "min_gain": 0.40, "min_quote_volume_24h": 30_000_000, "fee_rate_one_way": args.fee_rate, "slippage_one_way": args.slippage, "funding_rate_per_trade": args.funding_rate, "same_bar_priority": "stop_first", "risk_fraction": 0.005}, "selected_params": chosen.as_dict(), "final_all_period": asdict(final), "folds": folds, "sample_out_of_sample_trades": oos_trades, "sample_out_of_sample_win_rate": oos_wins / max(oos_trades, 1), "sample_out_of_sample_total_r": oos_r, "passed": passed}
+    expected_bars = max(0, (end_ms - start_ms) // BAR_INTERVAL_MS)
+    data_quality = {
+        "BTC-USDT-SWAP": {"bars": len(btc), "expected_bars": expected_bars, "complete": _complete_bars(btc, start_ms, end_ms)},
+        **{
+            symbol: {"bars": len(bars), "expected_bars": expected_bars, "complete": _complete_bars(bars, start_ms, end_ms)}
+            for symbol, bars in data.items()
+        },
+    }
+    report = {"window": {"start": start.isoformat(), "end": end.isoformat()}, "interval": "15m", "leverage": 2.0, "symbols": list(data), "skips": skips, "screening_stats": {symbol: screening_stats(bars) for symbol, bars in data.items()}, "data_quality": data_quality, "selection_method": selection_method, "selection_training_days": SELECTION_DAYS, "survivorship_bias": "the instrument universe is still limited to contracts currently reported as live because historical listing metadata is unavailable", "assumptions": {"gain_window_bars": 96, "min_gain": 0.40, "min_quote_volume_24h": 30_000_000, "fee_rate_one_way": args.fee_rate, "slippage_one_way": args.slippage, "funding_rate_per_trade": args.funding_rate, "same_bar_priority": "stop_first", "risk_fraction": 0.005}, "selected_params": chosen.as_dict(), "final_all_period": asdict(final), "folds": folds, "sample_out_of_sample_trades": oos_trades, "sample_out_of_sample_win_rate": oos_wins / max(oos_trades, 1), "sample_out_of_sample_total_r": oos_r, "passed": passed}
     (output_dir / f"{prefix}_optimization_report.json").write_text(json.dumps(report, indent=2))
     with (output_dir / f"{prefix}_trades_test.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(Trade.__dataclass_fields__), lineterminator="\n")

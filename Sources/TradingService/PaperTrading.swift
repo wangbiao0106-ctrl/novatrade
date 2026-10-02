@@ -10,6 +10,12 @@ public actor CandleStore {
     public func ingest(_ candle: Candle, instrumentID: String, interval: KlineInterval) {
         let key = "\(instrumentID):\(interval.rawValue)"
         var values = candlesByKey[key, default: []]
+        // A stale REST snapshot or delayed WSS frame must not turn a confirmed
+        // bar back into an open one. An unconfirmed bar inside the history
+        // makes HLSR refuse to evaluate until it scrolls out of the window.
+        if let existing = values.first(where: { $0.timestamp == candle.timestamp }), existing.confirmed, !candle.confirmed {
+            return
+        }
         values.upsert(candle)
         if values.count > capacity { values.removeFirst(values.count - capacity) }
         candlesByKey[key] = values
@@ -27,6 +33,12 @@ public actor CandleStore {
 }
 
 public actor RiskEngine {
+    private static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }()
+
     private struct PoolState {
         var allocationPercent: Decimal
         var initialCapital: Decimal
@@ -66,16 +78,20 @@ public actor RiskEngine {
     private var equityPeak: Decimal
     private var dayStartEquity: Decimal
     private var hasSynchronizedEquity = false
-    /// Calendar day that `dayStartEquity` was captured for. Advances only when
-    /// a later calendar day is observed, so live trading rolls the daily
-    /// baseline at midnight and historical candle ingestion rolls it in
+    /// An authenticated zero-equity account is a valid, fail-closed state.
+    /// Keep it separate from the initial paper-broker fallback so callers can
+    /// distinguish a real empty account from an account that has not synced.
+    private var authenticatedZeroEquity = false
+    /// UTC calendar day that `dayStartEquity` was captured for. Advances only
+    /// when a later UTC day is observed, so live trading rolls the daily
+    /// baseline at 00:00 UTC and historical candle ingestion rolls it in
     /// candle-time order.
     private var dayStartBoundary: Date?
-    /// A persisted kill switch may be restored after midnight. Keep this bit
+    /// A persisted kill switch may be restored after UTC midnight. Keep this bit
     /// so the next manual reset is allowed even though `refresh` has already
     /// advanced the in-memory boundary to the current day.
     private var resetEligibleAfterDayChange = false
-    /// When restoring after midnight, the first authenticated account read is
+    /// When restoring after UTC midnight, the first authenticated account read is
     /// the authoritative equity for today's baseline.
     private var needsDayStartEquitySync = false
     private var realizedPnL: Decimal = 0
@@ -84,6 +100,10 @@ public actor RiskEngine {
     private var killSwitch = false
     private var reason: String?
     private var pools: [UUID: PoolState] = [:]
+    /// Authenticated USDT balance used for strategy pool sizing.  It is kept
+    /// independent from `equity`, which is the all-asset account value used
+    /// by global risk limits and the daily-loss circuit breaker.
+    private var strategyCapitalBase: Decimal?
 
     public init(limits: RiskLimits = RiskLimits(), initialEquity: Decimal = 100_000) {
         self.limits = limits
@@ -94,14 +114,43 @@ public actor RiskEngine {
 
     public func registerStrategy(_ strategyID: UUID, allocationPercent: Decimal = 100, now: Date = .now) -> StrategyCapitalSnapshot {
         if let existing = pools[strategyID] { return existing.snapshot(strategyID: strategyID) }
-        let allocation = min(max(allocationPercent, 0), 100)
-        let usedAllocation = pools.values.reduce(0) { $0 + $1.allocationPercent }
-        let remaining = max(0, 100 - usedAllocation)
-        let effectiveAllocation = min(allocation, remaining)
-        let capital = equity * effectiveAllocation / 100
+        let allocation = strategyCapitalAllocation()
+        let effectiveAllocation = allocation.effectiveAllocationPercent(for: allocationPercent)
+        let capital = allocation.capital(for: effectiveAllocation)
         let state = PoolState(allocationPercent: effectiveAllocation, initialCapital: capital, equity: capital, reservedCapital: 0, realizedPnL: 0, unrealizedPnL: 0, rolloverCount: 0, updatedAt: now)
         pools[strategyID] = state
         return state.snapshot(strategyID: strategyID)
+    }
+
+    /// Updates an existing strategy's configured allocation without relying on
+    /// `registerStrategy`'s idempotent behavior. The requested percentage is
+    /// evaluated against all other pools, just as it is for a new strategy.
+    /// Existing realized results and reservations are retained, but the pool's
+    /// equity is capped at the newly allocated USDT capital so a resize cannot
+    /// create spendable balance beyond the account's current allocation.
+    public func updateStrategyAllocation(_ strategyID: UUID, allocationPercent: Decimal, now: Date = .now) -> StrategyCapitalSnapshot {
+        guard var pool = pools[strategyID] else {
+            return registerStrategy(strategyID, allocationPercent: allocationPercent, now: now)
+        }
+        let otherPools = pools
+            .filter { $0.key != strategyID }
+            .map { $0.value.snapshot(strategyID: $0.key) }
+        let allocation = StrategyCapitalAllocation(totalCapital: strategyCapitalBase ?? equity, strategyCapitals: otherPools)
+        let effective = allocation.effectiveAllocationPercent(for: allocationPercent)
+        let capital = allocation.capital(for: effective)
+        pool.allocationPercent = effective
+        pool.initialCapital = capital
+        // The authenticated USDT balance is authoritative for an idle pool;
+        // a remote credit already reflected in that balance must not compound
+        // again during an allocation resize.
+        if pool.reservedCapital == 0 {
+            pool.equity = capital
+        } else {
+            pool.equity = min(max(0, pool.equity), capital)
+        }
+        pool.updatedAt = now
+        pools[strategyID] = pool
+        return pool.snapshot(strategyID: strategyID)
     }
 
     public func removeStrategy(_ strategyID: UUID) {
@@ -123,11 +172,18 @@ public actor RiskEngine {
     /// `maxOpenRiskPercent` / `maxConcurrentPositions` 执行策略实验室的组合上限。
     public func authorize(instrumentID: String, notional: Decimal, margin: Decimal, reduceOnly: Bool = false, now: Date = .now, strategyID: UUID? = nil, poolAllocationPercent: Decimal = 100, riskAmount: Decimal = 0, maxOpenRiskPercent: Decimal? = nil, maxConcurrentPositions: Int? = nil) -> RiskDecision {
         refresh(now: now)
-        if notional <= 0 { return RiskDecision(allowed: false, reason: "名义价值必须大于 0") }
-        if margin < 0 { return RiskDecision(allowed: false, reason: "保证金不能为负") }
+        if instrumentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return RiskDecision(allowed: false, reason: "合约不能为空") }
+        if !notional.isFinite || notional <= 0 { return RiskDecision(allowed: false, reason: "名义价值必须是有限的正数") }
+        if !margin.isFinite || margin < 0 { return RiskDecision(allowed: false, reason: "保证金必须是有限的非负数") }
+        if !riskAmount.isFinite || riskAmount < 0 { return RiskDecision(allowed: false, reason: "止损风险必须是有限的非负数") }
+        if let cap = maxOpenRiskPercent, !cap.isFinite || cap <= 0 { return RiskDecision(allowed: false, reason: "开放风险上限无效") }
+        if let maxConcurrent = maxConcurrentPositions, maxConcurrent <= 0 { return RiskDecision(allowed: false, reason: "并发持仓上限无效") }
         // Exits remain available after a kill switch, but malformed orders
         // must never bypass the input checks above.
         if reduceOnly { return RiskDecision(allowed: true) }
+        if authenticatedZeroEquity || equity <= 0 {
+            return RiskDecision(allowed: false, reason: "账户权益为零")
+        }
         if killSwitch { return RiskDecision(allowed: false, reason: reason ?? "风险熔断") }
         if notionals[instrumentID, default: 0] + notional > limits.maxInstrumentNotional {
             return RiskDecision(allowed: false, reason: "单标的名义价值超过上限")
@@ -143,14 +199,14 @@ public actor RiskEngine {
             guard margin <= pool.availableCapital else {
                 return RiskDecision(allowed: false, reason: "策略资金池可用余额不足")
             }
-            // 开放止损风险上限：按池权益的百分比计算，累计已开仓风险 + 本单风险。
-            if let cap = maxOpenRiskPercent, cap > 0 {
-                let limit = pool.equity * cap / 100
+            // 开放止损风险上限：按账户权益的百分比计算，累计已开仓风险 + 本单风险。
+            if let cap = maxOpenRiskPercent {
+                let limit = equity * cap / 100
                 if pool.openRisk + riskAmount > limit {
                     return RiskDecision(allowed: false, reason: "策略开放止损风险超过上限")
                 }
             }
-            if let maxConcurrent = maxConcurrentPositions, maxConcurrent > 0,
+            if let maxConcurrent = maxConcurrentPositions,
                pool.openPositions + 1 > maxConcurrent {
                 return RiskDecision(allowed: false, reason: "策略并发持仓超过上限")
             }
@@ -175,6 +231,10 @@ public actor RiskEngine {
 
     /// 释放一笔授权。`closedPosition` 为真时同时释放一个并发名额（平仓 / 入场单失败）。
     public func release(instrumentID: String, notional: Decimal, strategyID: UUID? = nil, margin: Decimal? = nil, riskAmount: Decimal = 0, closedPosition: Bool = false) {
+        guard !instrumentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              notional.isFinite, notional >= 0,
+              riskAmount.isFinite, riskAmount >= 0,
+              margin.map({ $0.isFinite && $0 >= 0 }) ?? true else { return }
         notionals[instrumentID] = max(0, notionals[instrumentID, default: 0] - notional)
         if let strategyID, var pool = pools[strategyID] {
             pool.reservedCapital = max(0, pool.reservedCapital - (margin ?? notional))
@@ -190,9 +250,22 @@ public actor RiskEngine {
     /// for standalone paper-broker use; live and demo orders must use the
     /// account's current equity instead.
     public func synchronizeEquity(_ value: Decimal, now: Date = .now) {
-        guard value > 0 else { return }
-        let calendar = Calendar(identifier: .gregorian)
-        let dayStart = calendar.startOfDay(for: now)
+        guard value.isFinite, value >= 0 else { return }
+        let dayStart = Self.utcCalendar.startOfDay(for: now)
+        if value == 0 {
+            equity = 0
+            unrealizedPnL = 0
+            authenticatedZeroEquity = true
+            hasSynchronizedEquity = true
+            equityPeak = 0
+            dayStartEquity = 0
+            dayStartBoundary = dayStart
+            killSwitch = true
+            reason = "账户权益为零"
+            refresh(now: now)
+            return
+        }
+        authenticatedZeroEquity = false
         if !hasSynchronizedEquity {
             // The default equity is only a standalone-paper fallback. On the
             // first authenticated read, establish all baselines from the real
@@ -206,7 +279,10 @@ public actor RiskEngine {
             dayStartEquity = value
             dayStartBoundary = dayStart
             hasSynchronizedEquity = true
-            rebaseUnreservedPools(to: value, now: now)
+            // Strategy pools use their authenticated USDT base. Until the
+            // first USDT read arrives, size them from account equity;
+            // synchronizeStrategyCapital then establishes the real base.
+            if strategyCapitalBase == nil { rebaseUnreservedPools(to: value, now: now) }
             refresh(now: now)
             return
         }
@@ -223,6 +299,22 @@ public actor RiskEngine {
             if killSwitch { resetEligibleAfterDayChange = true }
         }
         refresh(now: now)
+    }
+
+    /// Reconciles the strategy allocation ledger with the account's USDT
+    /// asset.  Zero is a valid balance and must not fall back to all-asset
+    /// account equity.  The first call allocates every pool from that base;
+    /// later calls only resize empty pools so realized PnL and open
+    /// reservations remain intact.
+    public func synchronizeStrategyCapital(_ value: Decimal, now: Date = .now) {
+        guard value.isFinite, value >= 0 else { return }
+        let isFirstSync = strategyCapitalBase == nil
+        strategyCapitalBase = value
+        if isFirstSync {
+            allocatePools(fromFirstBase: value, now: now)
+        } else {
+            rebaseUnreservedStrategyPools(to: value, now: now)
+        }
     }
 
     /// Records a realized result. `settledUnrealizedPnL` is the portion of the
@@ -287,17 +379,20 @@ public actor RiskEngine {
         let drawdown = equityPeak == 0 ? 0 : (equityPeak - equity) / equityPeak * 100
         let capitalSnapshots = pools.map { $0.value.snapshot(strategyID: $0.key) }
             .sorted { $0.strategyID.uuidString < $1.strategyID.uuidString }
-        return RiskSnapshot(equity: equity, equityPeak: equityPeak, dayStartEquity: dayStartEquity, dayStartAt: dayStartBoundary, dailyPnLPercent: daily, drawdownPercent: drawdown, killSwitch: killSwitch, reason: reason, strategyCapitals: capitalSnapshots)
+        return RiskSnapshot(equity: equity, equityPeak: equityPeak, dayStartEquity: dayStartEquity, dayStartAt: dayStartBoundary, dailyPnLPercent: daily, drawdownPercent: drawdown, killSwitch: killSwitch, reason: reason, strategyCapitals: capitalSnapshots, globalNotionals: notionals, strategyCapitalBase: strategyCapitalBase)
     }
 
     public func restore(_ snapshot: RiskSnapshot, now: Date = .now) {
-        guard snapshot.equity > 0 else { return }
-        let calendar = Calendar(identifier: .gregorian)
-        let currentDay = calendar.startOfDay(for: now)
+        // Zero is a valid authenticated account state and must survive a
+        // restart as a fail-closed circuit-breaker state. Reject only corrupt
+        // negative/non-finite snapshots; silently ignoring zero would restore
+        // the constructor's paper-equity fallback and permit new entries.
+        guard snapshot.equity.isFinite, snapshot.equity >= 0 else { return }
+        let currentDay = Self.utcCalendar.startOfDay(for: now)
         equity = snapshot.equity
         equityPeak = max(snapshot.equityPeak, snapshot.equity)
         dayStartEquity = snapshot.dayStartEquity > 0 ? snapshot.dayStartEquity : snapshot.equity
-        let persistedDay = snapshot.dayStartAt.map(calendar.startOfDay(for:))
+        let persistedDay = snapshot.dayStartAt.map(Self.utcCalendar.startOfDay(for:))
         let restoredFromPriorDay = persistedDay.map { currentDay > $0 } ?? false
         dayStartBoundary = persistedDay ?? currentDay
         if restoredFromPriorDay {
@@ -308,6 +403,7 @@ public actor RiskEngine {
             dayStartBoundary = currentDay
         }
         unrealizedPnL = 0
+        authenticatedZeroEquity = false
         killSwitch = snapshot.killSwitch
         reason = snapshot.reason
         resetEligibleAfterDayChange = restoredFromPriorDay && snapshot.killSwitch
@@ -317,25 +413,49 @@ public actor RiskEngine {
                 allocationPercent: capital.allocationPercent,
                 initialCapital: capital.initialCapital,
                 equity: capital.equity,
-                // Pending orders and positions are runtime-only and are not
-                // restored with this ledger. Keeping their old reservation
-                // would permanently strand pool capital after a restart.
-                reservedCapital: 0,
+                // Keep reservations and open risk from the persisted ledger.
+                // The authenticated reconciliation will release completed
+                // exposure, while clearing it here could oversubscribe a pool
+                // immediately after a restart.
+                reservedCapital: max(0, capital.reservedCapital),
                 realizedPnL: capital.realizedPnL,
-                // PaperBroker positions are runtime-only and are not restored
-                // alongside the risk snapshot. Do not expose an old mark as
-                // current floating PnL after a service restart; the next
-                // position mark will repopulate this field.
                 unrealizedPnL: 0,
                 rolloverCount: capital.rolloverCount,
-                updatedAt: capital.updatedAt
+                updatedAt: capital.updatedAt,
+                openRisk: max(0, capital.openRisk),
+                openPositions: max(0, capital.openPositions)
             ))
         })
+        notionals = snapshot.globalNotionals.reduce(into: [:]) { result, item in
+            let key = item.key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, item.value.isFinite, item.value > 0 else { return }
+            result[key] = item.value
+        }
         hasSynchronizedEquity = true
+        authenticatedZeroEquity = snapshot.equity == 0
+        strategyCapitalBase = snapshot.strategyCapitalBase.flatMap { value in
+            value.isFinite && value >= 0 ? value : nil
+        }
+        // A hand-written zero-equity snapshot may not carry the
+        // kill-switch bit. Recompute the invariant before returning so callers
+        // cannot observe an open-entry state between restore and the next
+        // account refresh.
+        refresh(now: now)
+    }
+
+    /// Replaces the global exposure baseline with an authenticated exchange
+    /// view.  This closes the restart gap where an in-memory reservation would
+    /// otherwise disappear (or remain forever) after a service relaunch.
+    public func reconcileGlobalNotionals(_ exposures: [String: Decimal]) {
+        notionals = exposures.reduce(into: [:]) { result, item in
+            let key = item.key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, item.value.isFinite, item.value > 0 else { return }
+            result[key] = item.value
+        }
     }
 
     public func resetKillSwitch(now: Date = .now) -> RiskSnapshot {
-        let dayStart = Calendar(identifier: .gregorian).startOfDay(for: now)
+        let dayStart = Self.utcCalendar.startOfDay(for: now)
         guard resetEligibleAfterDayChange || dayStartBoundary.map({ dayStart > $0 }) == true else { return snapshot(now: now) }
         dayStartEquity = equity
         dayStartBoundary = dayStart
@@ -347,8 +467,7 @@ public actor RiskEngine {
     }
 
     private func refresh(now: Date) {
-        let calendar = Calendar(identifier: .gregorian)
-        let dayStart = calendar.startOfDay(for: now)
+        let dayStart = Self.utcCalendar.startOfDay(for: now)
         if let boundary = dayStartBoundary {
             if dayStart > boundary {
                 let wasKillSwitch = killSwitch
@@ -360,13 +479,17 @@ public actor RiskEngine {
             dayStartBoundary = dayStart
         }
         let daily = dayStartEquity == 0 ? 0 : (equity - dayStartEquity) / dayStartEquity * 100
-        _ = equityPeak == 0 ? 0 : (equityPeak - equity) / equityPeak * 100
-        // The account-level hard stop is deliberately limited to the
-        // calendar-day loss rule. Strategy-specific stops (including its
-        // ATR stop, take-profit and time exit) own all other exits. Keep the
-        // historical drawdown value in RiskSnapshot for display and
-        // compatibility, but never let it silently stop every strategy.
-        if daily <= -limits.maxDailyLossPercent { killSwitch = true; reason = "单日亏损熔断" }
+        let drawdown = equityPeak == 0 ? 0 : (equityPeak - equity) / equityPeak * 100
+        if authenticatedZeroEquity || equity <= 0 {
+            killSwitch = true
+            reason = "账户权益为零"
+        } else if daily <= -limits.maxDailyLossPercent {
+            killSwitch = true
+            reason = "单日亏损熔断"
+        } else if drawdown >= limits.maxDrawdownPercent, limits.maxDrawdownPercent > 0 {
+            killSwitch = true
+            reason = "累计回撤熔断"
+        }
     }
 
     private func rebaseUnreservedPools(to accountEquity: Decimal, now: Date) {
@@ -375,6 +498,58 @@ public actor RiskEngine {
             let capital = accountEquity * pool.allocationPercent / 100
             pool.initialCapital = capital
             pool.equity = capital
+            pool.updatedAt = now
+            pools[strategyID] = pool
+        }
+    }
+
+    private func strategyCapitalAllocation() -> StrategyCapitalAllocation {
+        StrategyCapitalAllocation(
+            totalCapital: strategyCapitalBase ?? equity,
+            strategyCapitals: pools.map { $0.value.snapshot(strategyID: $0.key) }
+        )
+    }
+
+    private func allocatePools(fromFirstBase totalCapital: Decimal, now: Date) {
+        var usedAllocation: Decimal = 0
+        for strategyID in pools.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+            guard var pool = pools[strategyID] else { continue }
+            let requested = pool.allocationPercent.isFinite ? max(0, pool.allocationPercent) : 0
+            let effective = min(requested, max(0, 100 - usedAllocation))
+            let initial = totalCapital * effective / 100
+            pool.allocationPercent = effective
+            pool.initialCapital = initial
+            // A positive historical result must not make the pool exceed its
+            // newly authenticated USDT allocation after a balance decrease.
+            pool.equity = min(max(0, initial + pool.realizedPnL), initial)
+            pool.updatedAt = now
+            pools[strategyID] = pool
+            usedAllocation += effective
+        }
+    }
+
+    private func rebaseUnreservedStrategyPools(to totalCapital: Decimal, now: Date) {
+        for strategyID in pools.keys {
+            guard var pool = pools[strategyID] else { continue }
+            // Existing pools retain their configured share when the USDT
+            // balance changes. Clamping against aggregate occupancy here would
+            // incorrectly shrink every idle pool when their percentages sum to
+            // 100%; a lower account balance is still a hard upper bound for
+            // every pool, including pools with open reservations.
+            let percent = pool.allocationPercent.isFinite ? min(max(0, pool.allocationPercent), 100) : 0
+            let capital = totalCapital * percent / 100
+            pool.allocationPercent = percent
+            // The authenticated USDT balance is authoritative. A transient
+            // remote realized credit can be visible between two account reads,
+            // but must not be applied a second time after that balance already
+            // includes the fill.
+            if pool.reservedCapital == 0 {
+                pool.initialCapital = capital
+                pool.equity = capital
+            } else if capital < pool.equity {
+                pool.initialCapital = min(pool.initialCapital, capital)
+                pool.equity = capital
+            }
             pool.updatedAt = now
             pools[strategyID] = pool
         }
@@ -390,13 +565,18 @@ public actor PaperBroker {
     private var fills: [PaperFill] = []
     private var positions: [String: PaperPosition] = [:]
     private var positionStrategyIDs: [String: UUID] = [:]
-    // PaperOrder predates reduceOnly and is persisted without that field. Keep
-    // the execution-only flag separately so the public ledger stays compatible.
+    // reduceOnly only matters while an order is pending, so it stays out of
+    // the persisted PaperOrder ledger record.
     private var reduceOnlyOrderIDs: Set<UUID> = []
     // Risk reservations are based on the submitted reference price. Retain
     // that amount per pending order so a normal closing/reversing order can
     // release only the portion that actually closed the existing position.
     private var reservedNotionals: [UUID: Decimal] = [:]
+    // Keep the matching stop-risk reservation.  PaperPosition intentionally
+    // remains a small public ledger type, so this execution-only map tracks
+    // the risk budget without changing its persisted schema.
+    private var reservedRiskAmounts: [UUID: Decimal] = [:]
+    private var positionRiskAmounts: [String: Decimal] = [:]
 
     public init(risk: RiskEngine = RiskEngine(), feeRate: Decimal = 0.0005, slippageBps: Decimal = 2) {
         self.risk = risk
@@ -404,7 +584,7 @@ public actor PaperBroker {
         self.slippageBps = slippageBps
     }
 
-    public func submit(strategyID: UUID, instrumentID: String, side: String, quantity: Decimal, referencePrice: Decimal, requestedAt: Date = .now, reduceOnly: Bool = false) async -> Result<PaperOrder, Error> {
+    public func submit(strategyID: UUID, instrumentID: String, side: String, quantity: Decimal, referencePrice: Decimal, requestedAt: Date = .now, reduceOnly: Bool = false, poolAllocationPercent: Decimal = 100, riskAmount: Decimal = 0, maxOpenRiskPercent: Decimal? = nil, maxConcurrentPositions: Int? = nil) async -> Result<PaperOrder, Error> {
         let normalizedSide = side.lowercased()
         guard ["long", "short"].contains(normalizedSide) else {
             return .failure(BrokerError.invalidOrder("方向必须是 long 或 short"))
@@ -413,14 +593,28 @@ public actor PaperBroker {
             return .failure(BrokerError.invalidOrder("数量和参考价格必须大于 0"))
         }
         let notional = abs(quantity * referencePrice)
-        let poolStrategyID = await risk.hasStrategyPool(strategyID) ? strategyID : nil
-        let decision = await risk.authorize(instrumentID: instrumentID, notional: notional, margin: notional, reduceOnly: reduceOnly, now: requestedAt, strategyID: poolStrategyID)
+        // A caller that supplies strategy-level controls must get a pool even
+        // if this is its first paper order. Standalone paper orders use the
+        // account-only paper budget.
+        let hasPool = await risk.hasStrategyPool(strategyID)
+        let usesStrategyControls = riskAmount != 0 || maxOpenRiskPercent != nil || maxConcurrentPositions != nil || poolAllocationPercent != 100
+        let poolStrategyID = hasPool || usesStrategyControls ? strategyID : nil
+        let decision = await risk.authorize(
+            instrumentID: instrumentID, notional: notional, margin: notional,
+            reduceOnly: reduceOnly, now: requestedAt, strategyID: poolStrategyID,
+            poolAllocationPercent: poolAllocationPercent, riskAmount: riskAmount,
+            maxOpenRiskPercent: maxOpenRiskPercent,
+            maxConcurrentPositions: maxConcurrentPositions
+        )
         guard decision.allowed else { return .failure(BrokerError.riskRejected(decision.reason ?? "风险拒绝")) }
         let order = PaperOrder(strategyID: strategyID, instrumentID: instrumentID, side: normalizedSide, quantity: quantity, requestedAt: requestedAt)
         pending.append(order)
         orders.append(order)
         if reduceOnly { reduceOnlyOrderIDs.insert(order.id) }
-        else { reservedNotionals[order.id] = notional }
+        else {
+            reservedNotionals[order.id] = notional
+            reservedRiskAmounts[order.id] = riskAmount
+        }
         return .success(order)
     }
 
@@ -464,6 +658,7 @@ public actor PaperBroker {
     private func fill(_ order: PaperOrder, at open: Decimal, timestamp: Date) async {
         let reduceOnly = reduceOnlyOrderIDs.remove(order.id) != nil
         let reservedOrderNotional = reservedNotionals.removeValue(forKey: order.id)
+        let reservedOrderRisk = reservedRiskAmounts.removeValue(forKey: order.id) ?? 0
         let sign: Decimal = order.side == "short" ? -1 : 1
         let slip = open * slippageBps / 10_000 * sign
         let price = open + slip
@@ -479,6 +674,7 @@ public actor PaperBroker {
             fills.append(PaperFill(orderID: order.id, price: price, quantity: order.quantity, fee: fee, timestamp: timestamp))
             positions[order.instrumentID] = PaperPosition(instrumentID: order.instrumentID, side: order.side, quantity: order.quantity, entryPrice: price, markPrice: price, updatedAt: timestamp)
             positionStrategyIDs[order.instrumentID] = order.strategyID
+            positionRiskAmounts[order.instrumentID] = reservedOrderRisk
             // Entry fees reduce account/pool equity immediately. They are a
             // realized cost, but opening a position is not a rollover event.
             if fee > 0 {
@@ -506,30 +702,57 @@ public actor PaperBroker {
             let strategyID = positionStrategyIDs[order.instrumentID] ?? order.strategyID
             let realized = (price - existing.entryPrice) * closeQuantity * direction - fee
             let remaining = existing.quantity - closeQuantity
+            let existingRisk = positionRiskAmounts[order.instrumentID] ?? 0
+            let closedPositionRisk = existing.quantity > 0 ? existingRisk * closeQuantity / existing.quantity : 0
+            // A normal order is authorized as a new position before we know
+            // whether it will close, partially close, or reverse an existing
+            // position. Keep that reservation only for a reversal residual;
+            // otherwise release the synthetic position slot while retaining
+            // the old position slot when it still has quantity left.
+            let leavesReversal = !reduceOnly && order.quantity > closeQuantity
             // A normal order reserves risk for its full requested quantity.
             // Release the fraction used to close the old position; any
             // residual reversal remains reserved for the new position.
             if !reduceOnly, let reservedOrderNotional {
                 let closedReservation = reservedOrderNotional * closeQuantity / order.quantity
-                await risk.release(instrumentID: order.instrumentID, notional: closedReservation, strategyID: order.strategyID, margin: closedReservation)
+                let closedOrderRisk = order.quantity > 0 ? reservedOrderRisk * closeQuantity / order.quantity : 0
+                await risk.release(
+                    instrumentID: order.instrumentID,
+                    notional: closedReservation,
+                    strategyID: order.strategyID,
+                    margin: closedReservation,
+                    riskAmount: closedOrderRisk,
+                    closedPosition: !leavesReversal
+                )
             }
             if remaining > 0 {
                 let remainingPnL = (price - existing.entryPrice) * remaining * direction
                 positions[order.instrumentID] = PaperPosition(id: existing.id, instrumentID: order.instrumentID, side: existing.side, quantity: remaining, entryPrice: existing.entryPrice, markPrice: price, unrealizedPnL: remainingPnL, updatedAt: timestamp)
+                positionRiskAmounts[order.instrumentID] = max(0, existingRisk - closedPositionRisk)
             } else if !reduceOnly, order.quantity > closeQuantity {
                 // A normal order that exceeds the current position reverses
                 // the residual quantity instead of silently losing it.
                 positions[order.instrumentID] = PaperPosition(id: existing.id, instrumentID: order.instrumentID, side: order.side, quantity: order.quantity - closeQuantity, entryPrice: price, markPrice: price, updatedAt: timestamp)
                 positionStrategyIDs[order.instrumentID] = order.strategyID
+                let residualOrderRisk = max(0, reservedOrderRisk - (order.quantity > 0 ? reservedOrderRisk * closeQuantity / order.quantity : 0))
+                positionRiskAmounts[order.instrumentID] = residualOrderRisk
             } else {
                 positions.removeValue(forKey: order.instrumentID)
                 positionStrategyIDs.removeValue(forKey: order.instrumentID)
+                positionRiskAmounts.removeValue(forKey: order.instrumentID)
             }
             // Reconcile the remaining positions before crystallizing the
             // closing result so the old mark is removed exactly once.
             await synchronizeRiskUnrealized(at: timestamp)
             await risk.record(realizedPnL: realized, now: timestamp, strategyID: strategyID)
-            await risk.release(instrumentID: order.instrumentID, notional: closeQuantity * existing.entryPrice, strategyID: strategyID, margin: closeQuantity * existing.entryPrice)
+            await risk.release(
+                instrumentID: order.instrumentID,
+                notional: closeQuantity * existing.entryPrice,
+                strategyID: strategyID,
+                margin: closeQuantity * existing.entryPrice,
+                riskAmount: closedPositionRisk,
+                closedPosition: remaining <= 0
+            )
         } else {
             // Adding to an existing position merges the average entry price.
             let fee = abs(price * order.quantity) * feeRate
@@ -538,7 +761,12 @@ public actor PaperBroker {
             let blendedEntry = (existing.entryPrice * existing.quantity + price * order.quantity) / totalQuantity
             positions[order.instrumentID] = PaperPosition(id: existing.id, instrumentID: order.instrumentID, side: existing.side, quantity: totalQuantity, entryPrice: blendedEntry, markPrice: price, unrealizedPnL: (price - blendedEntry) * totalQuantity * sign, updatedAt: timestamp)
             positionStrategyIDs[order.instrumentID] = positionStrategyIDs[order.instrumentID] ?? order.strategyID
+            positionRiskAmounts[order.instrumentID] = max(0, positionRiskAmounts[order.instrumentID, default: 0] + reservedOrderRisk)
             await synchronizeRiskUnrealized(at: timestamp)
+            // Adding to a position does not create a second concurrent
+            // position. The order authorization reserved margin/notional for
+            // the added quantity, so only release its synthetic slot.
+            await risk.release(instrumentID: order.instrumentID, notional: 0, strategyID: order.strategyID, margin: 0, closedPosition: true)
             // Every fill pays a fee, including an addition to an existing
             // position. Charge it immediately so account equity and the
             // strategy pool cannot overstate available capital.
@@ -549,16 +777,28 @@ public actor PaperBroker {
     }
 
     public func cancelPendingOrders() async {
-        for order in pending {
+        await cancelPendingOrders(where: { _ in true })
+    }
+
+    /// Cancels only one strategy's pending entries. Package removal uses this
+    /// scoped form so another installed strategy's order is never touched.
+    public func cancelPendingOrders(strategyID: UUID) async {
+        await cancelPendingOrders(where: { $0.strategyID == strategyID })
+    }
+
+    private func cancelPendingOrders(where predicate: (PaperOrder) -> Bool) async {
+        let cancelled = pending.filter(predicate)
+        for order in cancelled {
             if let reserved = reservedNotionals.removeValue(forKey: order.id) {
-                await risk.release(instrumentID: order.instrumentID, notional: reserved, strategyID: order.strategyID, margin: reserved)
+                await risk.release(instrumentID: order.instrumentID, notional: reserved, strategyID: order.strategyID, margin: reserved, riskAmount: reservedRiskAmounts.removeValue(forKey: order.id) ?? 0, closedPosition: true)
             }
+            reservedRiskAmounts.removeValue(forKey: order.id)
             reduceOnlyOrderIDs.remove(order.id)
             if let index = orders.firstIndex(where: { $0.id == order.id }) {
                 orders[index] = PaperOrder(id: order.id, strategyID: order.strategyID, instrumentID: order.instrumentID, side: order.side, quantity: order.quantity, requestedAt: order.requestedAt, status: "cancelled", remoteOrderID: order.remoteOrderID)
             }
         }
-        pending.removeAll()
+        pending.removeAll(where: predicate)
     }
 
     @discardableResult
@@ -571,9 +811,10 @@ public actor PaperBroker {
             let realized = (price - position.entryPrice) * position.quantity * direction - abs(price * position.quantity) * feeRate
             positions.removeValue(forKey: position.instrumentID)
             positionStrategyIDs.removeValue(forKey: position.instrumentID)
+            let positionRisk = positionRiskAmounts.removeValue(forKey: position.instrumentID) ?? 0
             await synchronizeRiskUnrealized(at: timestamp)
             await risk.record(realizedPnL: realized, now: timestamp, strategyID: strategyID)
-            await risk.release(instrumentID: position.instrumentID, notional: position.entryPrice * position.quantity, strategyID: strategyID, margin: position.entryPrice * position.quantity)
+            await risk.release(instrumentID: position.instrumentID, notional: position.entryPrice * position.quantity, strategyID: strategyID, margin: position.entryPrice * position.quantity, riskAmount: positionRisk, closedPosition: true)
         }
         await risk.recordStrategyUnrealized([:], now: timestamp)
         return closed
