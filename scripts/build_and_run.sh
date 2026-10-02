@@ -20,8 +20,15 @@ ICONSET_DIR="$ROOT_DIR/Sources/MacTraderApp/Resources/NovaTrade.iconset"
 ICON_FILE="$APP_RESOURCES/NovaTrade.icns"
 DMG_FILE="$DIST_DIR/NovaTrade.dmg"
 
-pkill -x "$APP_EXECUTABLE" >/dev/null 2>&1 || true
-pkill -x "okx-locald" >/dev/null 2>&1 || true
+# Builds must not stop a running client or daemon: `package` may run while
+# strategies are live, and another checkout can own a same-named process.
+# Only the modes that launch the app or attach to it below stop anything, and
+# each kill is matched on the full executable path so it cannot reach a
+# different checkout's binaries.
+stop_running() {
+  pkill -f "^$APP_BINARY( |$)" >/dev/null 2>&1 || true
+  pkill -f "^$SERVICE_BINARY( |$)" >/dev/null 2>&1 || true
+}
 
 cd "$ROOT_DIR"
 swift build --product "$APP_EXECUTABLE"
@@ -78,6 +85,7 @@ open_app() {
 
 case "$MODE" in
   run)
+    stop_running
     open_app
     ;;
   package|--package)
@@ -89,16 +97,19 @@ case "$MODE" in
     printf 'Created %s\n' "$DMG_FILE"
     ;;
   --debug|debug)
+    stop_running
     lldb -- "$APP_BINARY"
     ;;
   --logs|logs)
+    stop_running
     open_app
     /usr/bin/log stream --info --style compact --predicate "process == \"$APP_EXECUTABLE\""
     ;;
   --verify|verify)
+    stop_running
     open_app
     sleep 1
-    pgrep -x "$APP_EXECUTABLE" >/dev/null
+    pgrep -f "^$APP_BINARY( |$)" >/dev/null
     ;;
   *)
     echo "usage: $0 [run|package|--debug|--logs|--verify]" >&2

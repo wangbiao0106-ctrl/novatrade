@@ -1,8 +1,8 @@
 # 日内翻倍动能衰竭确认做空
 
-版本：1.0.0（正式规则；已接入纸面/模拟运行时）  
-稳定标识：`double_pump_exhaustion_short`  
-英文名：Double Pump Exhaustion Short（DME Short）  
+版本：1.0.0（正式规则；已接入纸面/模拟运行时）\
+稳定标识：`double_pump_exhaustion_short`\
+英文名：Double Pump Exhaustion Short（DME Short）\
 市场：USDT 线性永续合约；统一信号周期为已确认的 15 分钟 K 线。
 
 本策略适合短时间内出现极端上涨、流动性足够、容易出现冲高回落的中小市值山寨币永续合约。它不适合 BTC、ETH、主流大市值币、稳定币、低波动品种、指数类合约或盘口深度不足的合约。策略只做空，不在没有衰竭信号时猜顶。

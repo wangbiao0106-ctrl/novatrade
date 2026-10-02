@@ -94,7 +94,7 @@ struct ChartPanel: View {
     private func candleStatus(stale: Bool) -> some View {
         HStack(spacing: 8) {
             Label(stale ? "OKX WSS · 行情暂未更新" : model.candleDataSource.label, systemImage: model.candleDataSource.icon)
-                .foregroundStyle(model.candleDataSource == .websocket && !stale ? .mint : .orange)
+                .foregroundStyle(model.candleDataSource.isLive && !stale ? .mint : .orange)
                 .help("历史 K 线首次通过 API 加载；实时 K 柱仅由 OKX WSS candle 频道更新")
             if let updated = model.candleLastUpdatedAt {
                 Text(updated.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute().second()))
@@ -116,7 +116,7 @@ struct MarketInsightStrip: View {
             insight("最新收盘", value: latest.map { formatPrice($0.close) } ?? "--", detail: latest?.confirmed == true ? "已收盘" : "当前 K 线")
             insight("区间高低", value: rangeText, detail: "最近 \(candles.count) 根")
             insight("成交量", value: volumeText, detail: "K 线累计")
-            insight("K 线状态", value: latest == nil ? "等待数据" : latest?.confirmed == true ? "已确认" : model.candleDataSource == .websocket ? "实时更新" : "等待推送", detail: model.candleDataSource.label)
+            insight("K 线状态", value: latest == nil ? "等待数据" : latest?.confirmed == true ? "已确认" : model.candleDataSource.isLive ? "实时更新" : "等待推送", detail: model.candleDataSource.label)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)

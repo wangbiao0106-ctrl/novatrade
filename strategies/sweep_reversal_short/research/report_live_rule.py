@@ -138,8 +138,11 @@ def collect(pool: str, data1: dict, data15: dict, btc, fee: float = FEE,
 def rolling_quote_volume_24h(data1: dict, symbols) -> pd.DataFrame:
     """按小时网格的滚动 24h 报价成交额（USDT），列为标的、索引为 1h K 线开盘时间。
 
-    某一行包含该 1h K 线本身及之前 24 小时内的 K 线，在这根 K 线收盘时刻即可
-    得到，不使用未来数据；对应运行时在结构 bar 收盘时读取的 24h 成交额。
+    某一行求和的是该 1h K 线本身及之前 24 小时内的 K 线，因此读取它的最早时刻
+    是这根 K 线的收盘，不使用未来数据（`live_universe_rank` 只在结构 bar 收盘
+    之后取用）。它对齐的是"截至结构 bar 开盘"的 24 小时窗口，而运行时在扫描时
+    刻读到的是 OKX ticker 的 `volCcy24h × last`，即"截至结构 bar 之后"的 24 小时
+    窗口；两者相差最多一个 1h bar。这是研究口径对运行时口径的近似，不是前视。
     """
     columns = {}
     for sym in symbols:
@@ -380,6 +383,11 @@ def main() -> None:
     if live:
         slot = single_slot(df)
         summary["universe_rule"] = {
+            # The ranking window ends at the structure bar's open (the last 1h
+            # bar it can include is the closed structure bar itself), while the
+            # runtime reads OKX's trailing 24h ticker volume at scan time, at
+            # most one 1h bar later. The choice is causal either way.
+            "ranking_window": "24h ending at the structure bar open (runtime uses the trailing 24h at scan time)",
             "ranking": "rolling 24h quote volume (USDT) at structure bar close among runtime-eligible altcoins",
             "eligible_symbols": len(live_symbols),
             "limit": limit, "min_quote_volume_24h_usdt": floor, "causal": True,

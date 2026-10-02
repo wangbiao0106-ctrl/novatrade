@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import math
 import os
 import threading
 import time
@@ -174,16 +175,18 @@ def existing_result(symbol: str, filename: str, destination: Path,
 
     A syntactically valid but truncated gzip file used to be treated as
     complete because only its row count was inspected.  That silently removed
-    the missing history from every subsequent backtest.  Check boundaries and
-    continuity before allowing the skip path.
+    the missing history from every subsequent backtest.  Check boundaries,
+    continuity and values before allowing the skip path: the last bar of a
+    fresh export is still open (`confirmed` false, historically stored as the
+    string "0"), and research loaders drop unconfirmed bars, so treating such
+    a file as complete would silently lose that bar forever.
     """
     try:
         candles = read_candles(destination)
         timestamps = sorted(candles)
         interval = BAR_MILLISECONDS[bar]
         expected = list(range(timestamps[0], timestamps[-1] + interval, interval)) if timestamps else []
-        required = {"timestamp", "timestamp_ms", "open", "high", "low", "close", "quote_volume", "confirmed"}
-        structurally_valid = all(required.issubset(candle) for candle in candles.values())
+        structurally_valid = all(is_complete_candle(candles[timestamp]) for timestamp in timestamps)
         if (not timestamps or timestamps[0] > start_ms or
                 timestamps[-1] < end_ms - interval or timestamps != expected or
                 not structurally_valid):
@@ -200,6 +203,57 @@ def existing_result(symbol: str, filename: str, destination: Path,
         # A corrupt or truncated prior file is never treated as complete; the
         # caller will fetch into a temporary file and replace it atomically.
         return None
+
+
+# A candle is usable only when it is closed and carries finite positive
+# prices.  OKX writes `confirmed` as the string "1"/"0" and trims trailing
+# zeros, so a text field can hold "0.0" or "" where a number is expected.
+_STATUS_WORDS = {"": 0.0, "0": 0.0, "false": 0.0, "no": 0.0, "n": 0.0,
+                 "1": 1.0, "true": 1.0, "yes": 1.0, "y": 1.0}
+_REQUIRED_FIELDS = ("timestamp", "open", "high", "low", "close", "quote_volume")
+
+
+def _finite(value: Any) -> float | None:
+    """Return a finite float for an OKX numeric field, else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if text in _STATUS_WORDS:
+            return _STATUS_WORDS[text]
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+    else:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def is_complete_candle(candle: dict[str, Any]) -> bool:
+    """True when a stored candle is closed and internally valid."""
+    if not isinstance(candle, dict):
+        return False
+    for field in _REQUIRED_FIELDS:
+        if field not in candle:
+            return False
+    if _finite(candle.get("timestamp_ms")) is None:
+        return False
+    confirmed = candle.get("confirmed")
+    closed = confirmed if isinstance(confirmed, bool) else _finite(confirmed) == 1.0
+    if not closed:
+        return False
+    prices = {field: _finite(candle.get(field)) for field in ("open", "high", "low", "close", "quote_volume")}
+    if any(value is None for value in prices.values()):
+        return False
+    open_, high, low, close = (prices[field] for field in ("open", "high", "low", "close"))
+    if min(open_, high, low, close) <= 0:
+        return False
+    # An inverted range cannot come from OKX; refuse to treat such a file as
+    # a valid backtest input instead of silently trading on it.
+    return high >= max(open_, close, low) and low <= min(open_, close, high)
 
 
 def read_candles(path: Path) -> dict[int, dict[str, Any]]:
@@ -242,6 +296,12 @@ def export_symbol(
         merged = previous
         merged.update({candle["timestamp_ms"]: candle for candle in fetched})
         candles = [merged[key] for key in sorted(merged) if start_ms <= key <= end_ms]
+        # Extending an earlier export re-fetches its last bar, but a run that
+        # ends while that bar is still forming must not persist the open bar:
+        # the next run would skip the file and the bar would stay unconfirmed
+        # forever. Dropping it makes the boundary check re-fetch it.
+        if candles and not is_complete_candle(candles[-1]):
+            candles.pop()
         with gzip.open(temporary, "wt", encoding="utf-8", newline="\n") as stream:
             for candle in candles:
                 stream.write(json.dumps(candle, ensure_ascii=False, separators=(",", ":")))

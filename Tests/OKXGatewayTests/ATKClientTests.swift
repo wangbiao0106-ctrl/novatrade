@@ -385,3 +385,21 @@ func rejectsEmptyOrFailedInstrumentSpecificationEnvelope() async throws {
         try await ATKClient(runner: failed).marketInstrumentSpec(instrumentID: "BTC-USDT-SWAP")
     }
 }
+
+@Test
+func positionCarriesMarginModeAndCloseRepeatsIt() async throws {
+    let runner = StubATKRunner(outputs: [
+        "swap positions --json": ATKCommandResult(stdout: #"[{"posId":"p1","instId":"BTC-USDT-SWAP","pos":"2","avgPx":"100","posSide":"net","mgnMode":"isolated"},{"posId":"p2","instId":"ETH-USDT-SWAP","pos":"1","avgPx":"10","posSide":"net","mgnMode":"weird"}]"#),
+        "config show --json": ATKCommandResult(stdout: #"{"default_profile":"live","profiles":{"live":{"site":"global","api_key":"key","demo":false}}}"#),
+        "--live swap close --instId BTC-USDT-SWAP --mgnMode isolated --autoCxl --json": ATKCommandResult(stdout: #"{"code":"0","data":[{"instId":"BTC-USDT-SWAP"}]}"#)
+    ])
+    let client = ATKClient(runner: runner)
+    let positions = try await client.swapPositions()
+    #expect(positions.first(where: { $0.id == "p1" })?.marginMode == "isolated")
+    // An unrecognized mode keeps the position visible and falls back to cross.
+    #expect(positions.first(where: { $0.id == "p2" })?.marginMode == nil)
+    try await client.closeLiveSwapPosition(instrumentID: "BTC-USDT-SWAP", positionSide: "net", marginMode: "isolated")
+    await #expect(throws: ATKError.invalidOrder("保证金模式必须是 cross 或 isolated")) {
+        try await client.closeLiveSwapPosition(instrumentID: "BTC-USDT-SWAP", marginMode: "portfolio")
+    }
+}

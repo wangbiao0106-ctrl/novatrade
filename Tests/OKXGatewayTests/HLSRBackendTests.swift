@@ -16,6 +16,9 @@ private actor HLSRBackendRunner: ATKCommandRunning {
     private var rejectNextPlace: Bool
     private var nextOrderNumber = 1
     private var placeCommands: [[String]] = []
+    /// Simulates a lost submit response and a failing clOrdId lookup.
+    private var placeResponseLost = false
+    private var clientOrderLookupFails = false
 
     init(positions: [PositionSnapshot] = [], rejectNextPlace: Bool = false) {
         self.positions = positions
@@ -26,12 +29,15 @@ private actor HLSRBackendRunner: ATKCommandRunning {
     func setRemoteOrders(_ value: [OrderSnapshot]) { remoteOrders = value }
     func setClientOrder(_ clientOrderID: String, order: OrderSnapshot) { clientOrders[clientOrderID] = order }
     func setRejectNextPlace(_ value: Bool) { rejectNextPlace = value }
+    func setPlaceResponseLost(_ value: Bool) { placeResponseLost = value }
+    func setClientOrderLookupFails(_ value: Bool) { clientOrderLookupFails = value }
     func commandsContainingPlace() -> [[String]] { placeCommands }
 
     func run(arguments: [String]) async throws -> ATKCommandResult {
         let command = arguments.joined(separator: " ")
         if command.contains("swap place") {
             placeCommands.append(arguments)
+            if placeResponseLost { throw ATKError.unavailable("ATK 命令超时") }
             if rejectNextPlace {
                 rejectNextPlace = false
                 return ATKCommandResult(stdout: #"{"code":"51000","msg":"rejected"}"#)
@@ -55,6 +61,7 @@ private actor HLSRBackendRunner: ATKCommandRunning {
             return ATKCommandResult(stdout: encodeOrders())
         }
         if command.contains("swap get ") {
+            if clientOrderLookupFails { throw ATKError.unavailable("ATK 查询超时") }
             if let index = arguments.firstIndex(of: "--clOrdId"), index + 1 < arguments.count,
                let order = clientOrders[arguments[index + 1]] {
                 return ATKCommandResult(stdout: "[{\"instId\":\"\(order.instrumentID)\",\"ordId\":\"\(order.id)\",\"clOrdId\":\"\(arguments[index + 1])\",\"side\":\"buy\",\"state\":\"\(order.status)\",\"sz\":\"\(order.quantity)\",\"cTime\":\"1700000000000\"}]")
@@ -388,6 +395,76 @@ func ordinaryStrategyPendingExitDoesNotResubmitAfterRestart() async throws {
     let data = try Data(contentsOf: directory.appendingPathComponent("pending-remote-exits.json"))
     let pending = try JSONDecoder().decode([String: HLSRBackendPendingExitFixture].self, from: data)
     #expect(pending["ordinary-position:ALT-USDT-SWAP"]?.positionID == "ordinary-position")
+}
+
+/// Drives the HLSR entry fixture with a lost submit response and a failing
+/// clOrdId lookup, returning the backend, strategy and entry clOrdId.
+private func submitHLSREntryWithUnknownOutcome(runner: HLSRBackendRunner, directory: URL) async throws -> (TradingBackend, StrategyConfig, String) {
+    await runner.setPlaceResponseLost(true)
+    await runner.setClientOrderLookupFails(true)
+    let backend = makeBackend(runner: runner, directory: directory)
+    let config = try await backend.createStrategy(hlsrBackendConfig(enabled: true))
+    _ = try await backend.startStrategy(config.id)
+    _ = try await backend.contracts(forceRefresh: true)
+    let fixtures = hlsrBackendFixtures()
+    await backend.paper.prewarm(MarketSnapshot(instrumentID: "ALT-USDT-SWAP", interval: .fourHours, candles: fixtures.fourHour))
+    for candle in fixtures.lower {
+        _ = await backend.ingestRealtimeCandle(candle, instrumentID: "ALT-USDT-SWAP", interval: .fifteenMinutes)
+    }
+    let places = await runner.commandsContainingPlace()
+    #expect(places.count == 1)
+    let place = try #require(places.first)
+    let index = try #require(place.firstIndex(of: "--clOrdId"))
+    return (backend, config, place[index + 1])
+}
+
+@Test("A strategy entry with an unknown outcome keeps its pool slot and ownership until OKX confirms it")
+func strategyEntryWithUnknownOutcomeKeepsPoolSlotUntilAccepted() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, config, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+
+    let entries = (await backend.paper.allOrders()).filter { $0.strategyID == config.id }
+    #expect(entries.count == 1)
+    #expect(entries.first?.remoteOrderID == nil)
+    #expect(entries.first?.status == "submitted")
+    let pool = await backend.riskEngine.strategyCapital(config.id)
+    #expect(pool.openPositions == 1)
+    #expect(pool.reservedCapital > 0)
+
+    await runner.setClientOrderLookupFails(false)
+    await runner.setClientOrder(clientOrderID, order: OrderSnapshot(id: "late-entry", instrumentID: "ALT-USDT-SWAP", side: "sell", status: "filled", quantity: 1))
+    _ = try await backend.account()
+    #expect((await backend.paper.allOrders()).first(where: { $0.strategyID == config.id })?.remoteOrderID == "late-entry")
+    let confirmed = await backend.riskEngine.strategyCapital(config.id)
+    #expect(confirmed.openPositions == 1)
+    #expect(confirmed.reservedCapital == pool.reservedCapital)
+    let reservations = try JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("remote-reservations.json"))) as? [String: Any]
+    #expect(reservations.map { Set($0.keys) } == ["late-entry"])
+}
+
+@Test("A strategy entry that OKX never received releases its pool slot after the lookup answers")
+func strategyEntryWithUnknownOutcomeReleasesPoolWhenAbsent() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, config, _) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+    #expect((await backend.riskEngine.strategyCapital(config.id)).openPositions == 1)
+
+    // Deleting the strategy must wait for the outcome.
+    _ = try await backend.pauseStrategy(config.id)
+    await #expect(throws: ATKError.unavailable("策略仍有结果未知的下单，请等待后台按 clOrdId 核对完成后再删除")) {
+        _ = try await backend.deleteStrategy(config.id)
+    }
+
+    await runner.setClientOrderLookupFails(false) // lookup now returns 51603
+    _ = try await backend.account()
+    let pool = await backend.riskEngine.strategyCapital(config.id)
+    #expect(pool.openPositions == 0)
+    #expect(pool.reservedCapital == 0)
+    #expect(pool.openRisk == 0)
+    #expect((await backend.paper.allOrders()).first(where: { $0.strategyID == config.id })?.status == "rejected")
 }
 
 private func hlsrBackendFixtures() -> (lower: [Candle], fourHour: [Candle]) {

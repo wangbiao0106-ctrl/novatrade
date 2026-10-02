@@ -262,10 +262,13 @@ public struct PositionSnapshot: Codable, Equatable, Sendable, Identifiable {
     public let entryPrice: Decimal
     public let markPrice: Decimal?
     public let unrealizedPnL: Decimal?
+    /// OKX `mgnMode` (`cross` or `isolated`). Closing a position must repeat
+    /// its own margin mode; nil means the exchange row did not report one.
+    public let marginMode: String?
 
-    public init(id: String = UUID().uuidString, instrumentID: String, side: String, quantity: Decimal, entryPrice: Decimal, markPrice: Decimal? = nil, unrealizedPnL: Decimal? = nil) {
+    public init(id: String = UUID().uuidString, instrumentID: String, side: String, quantity: Decimal, entryPrice: Decimal, markPrice: Decimal? = nil, unrealizedPnL: Decimal? = nil, marginMode: String? = nil) {
         self.id = id; self.instrumentID = instrumentID; self.side = side; self.quantity = quantity; self.entryPrice = entryPrice
-        self.markPrice = markPrice; self.unrealizedPnL = unrealizedPnL
+        self.markPrice = markPrice; self.unrealizedPnL = unrealizedPnL; self.marginMode = marginMode
     }
 }
 
@@ -898,12 +901,16 @@ public struct PaperOrderRequest: Codable, Equatable, Sendable {
     public let side: String
     public let quantity: Decimal
     public let reduceOnly: Bool
+    /// Trade mode sent to OKX. A reduce-only close must match the margin
+    /// mode of the position it reduces; nil keeps the cross default.
+    public let marginMode: String?
 
-    public init(instrumentID: String, side: String, quantity: Decimal, reduceOnly: Bool = false) {
+    public init(instrumentID: String, side: String, quantity: Decimal, reduceOnly: Bool = false, marginMode: String? = nil) {
         self.instrumentID = instrumentID
         self.side = side
         self.quantity = quantity
         self.reduceOnly = reduceOnly
+        self.marginMode = marginMode
     }
 }
 

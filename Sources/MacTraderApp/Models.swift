@@ -68,6 +68,9 @@ enum BackendServiceState {
 
 enum CandleDataSource: Equatable {
     case connecting
+    /// The socket is subscribed but no candle has arrived on this
+    /// subscription yet, which is the normal state on a quiet market.
+    case subscribed
     case websocket
     case reconnecting
     case stopped
@@ -76,6 +79,7 @@ enum CandleDataSource: Equatable {
     var label: String {
         switch self {
         case .connecting: return "正在连接 OKX WSS"
+        case .subscribed: return "OKX WSS 已订阅 · 等待推送"
         case .websocket: return "OKX WSS 长连接 · 实时推送"
         case .reconnecting: return "WSS 已断开 · 自动重连中"
         case .stopped: return "后台服务已停止"
@@ -86,10 +90,15 @@ enum CandleDataSource: Equatable {
     var icon: String {
         switch self {
         case .connecting: return "antenna.radiowaves.left.and.right"
+        case .subscribed: return "dot.radiowaves.left.and.right"
         case .websocket: return "bolt.horizontal.circle.fill"
         case .reconnecting: return "arrow.triangle.2.circlepath"
         case .stopped: return "pause.circle"
         case .unavailable: return "clock.arrow.circlepath"
         }
     }
+
+    /// True while the WSS subscription is up. Both states mean the connection
+    /// is established; they differ only in whether a bar has arrived yet.
+    var isLive: Bool { self == .websocket || self == .subscribed }
 }

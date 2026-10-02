@@ -380,6 +380,35 @@ public actor PaperTradingStore {
         if changed { save() }
     }
 
+    /// Gives an entry recorded during an unknown submit outcome the exchange
+    /// order id its clOrdId lookup later returned.
+    public func attachRemoteOrderID(_ remoteOrderID: String, toLocalOrder localOrderID: UUID) {
+        guard !orders.contains(where: { $0.remoteOrderID == remoteOrderID }),
+              let index = orders.firstIndex(where: { $0.id == localOrderID && $0.remoteOrderID == nil }) else { return }
+        let order = orders[index]
+        orders[index] = PaperOrder(id: order.id, strategyID: order.strategyID,
+                                   instrumentID: order.instrumentID, side: order.side,
+                                   quantity: order.quantity, requestedAt: order.requestedAt,
+                                   fillPrice: order.fillPrice, status: order.status,
+                                   remoteOrderID: remoteOrderID, signal: order.signal)
+        save()
+    }
+
+    /// Closes an entry that never received an exchange order id, so it no
+    /// longer claims ownership of later positions on its instrument.
+    public func markLocalOrderTerminal(_ localOrderID: UUID, status: String) {
+        guard ["closed", "cancelled", "canceled", "rejected", "expired", "failed"].contains(status.lowercased()),
+              let index = orders.firstIndex(where: { $0.id == localOrderID }),
+              orders[index].status.lowercased() != status.lowercased() else { return }
+        let order = orders[index]
+        orders[index] = PaperOrder(id: order.id, strategyID: order.strategyID,
+                                   instrumentID: order.instrumentID, side: order.side,
+                                   quantity: order.quantity, requestedAt: order.requestedAt,
+                                   fillPrice: order.fillPrice, status: status.lowercased(),
+                                   remoteOrderID: order.remoteOrderID, signal: order.signal)
+        save()
+    }
+
     /// Coalesces the recompute path: a burst of bar closes (or several REST
     /// chart loads) triggers at most one disk write after the burst settles.
     private func scheduleSave() {
@@ -782,8 +811,8 @@ public actor MarketDataService {
     }
     public func cancelLiveOrder(instrumentID: String, orderID: String) async throws { try await client.cancelLiveSwapOrder(instrumentID: instrumentID, orderID: orderID); invalidateAccountState() }
     public func cancelDemoOrder(instrumentID: String, orderID: String) async throws { try await client.cancelDemoSwapOrder(instrumentID: instrumentID, orderID: orderID); invalidateAccountState() }
-    public func closeLivePosition(instrumentID: String, positionSide: String?) async throws { try await client.closeLiveSwapPosition(instrumentID: instrumentID, positionSide: positionSide); invalidateAccountState() }
-    public func closeDemoPosition(instrumentID: String, positionSide: String?) async throws { try await client.closeDemoSwapPosition(instrumentID: instrumentID, positionSide: positionSide); invalidateAccountState() }
+    public func closeLivePosition(instrumentID: String, positionSide: String?, marginMode: String? = nil) async throws { try await client.closeLiveSwapPosition(instrumentID: instrumentID, positionSide: positionSide, marginMode: marginMode); invalidateAccountState() }
+    public func closeDemoPosition(instrumentID: String, positionSide: String?, marginMode: String? = nil) async throws { try await client.closeDemoSwapPosition(instrumentID: instrumentID, positionSide: positionSide, marginMode: marginMode); invalidateAccountState() }
 
     public func privatePositions() async throws -> [PositionSnapshot] {
         if let cached = positionsCache, cached.isValid(ttl: ttl.positions) { return cached.value }
@@ -972,11 +1001,23 @@ public actor TradingBackend {
         /// carry this amount forward even when the exchange has not published
         /// the newly submitted order yet.
         let inFlight: Bool
+        /// Client order id of a submission whose outcome OKX could not
+        /// confirm. Only these reservations are keyed `unresolved-<clOrdId>`;
+        /// a later lookup either re-keys them to the order id or releases
+        /// them.
+        let clientOrderID: String?
+        /// Whether the unresolved order was sent with `--demo`.
+        let demo: Bool?
+        /// Ledger entry that carries strategy ownership until the exchange
+        /// order id of an unresolved submission is known.
+        let localOrderID: UUID?
 
         init(instrumentID: String, notional: Decimal, createdAt: Date = .now,
              strategyID: UUID? = nil, margin: Decimal? = nil,
              riskAmount: Decimal = 0, closedPosition: Bool = false,
-             inFlight: Bool = false, positionID: String? = nil) {
+             inFlight: Bool = false, positionID: String? = nil,
+             clientOrderID: String? = nil, demo: Bool? = nil,
+             localOrderID: UUID? = nil) {
             self.instrumentID = instrumentID
             self.notional = notional
             self.createdAt = createdAt
@@ -986,7 +1027,14 @@ public actor TradingBackend {
             self.closedPosition = closedPosition
             self.inFlight = inFlight
             self.positionID = positionID
+            self.clientOrderID = clientOrderID
+            self.demo = demo
+            self.localOrderID = localOrderID
         }
+    }
+    private static let unresolvedReservationPrefix = "unresolved-"
+    private static func isUnresolvedReservation(_ key: String) -> Bool {
+        key.hasPrefix(unresolvedReservationPrefix)
     }
     private var remoteReservations: [String: RemoteReservation] = [:]
     private let remoteReservationURL: URL
@@ -1098,6 +1146,98 @@ public actor TradingBackend {
                 positionID: reservation.positionID
             )
             saveRemoteReservations()
+        }
+    }
+
+    /// Both the submit response and the clOrdId lookup failed, so OKX may
+    /// hold the order. Releasing the reservation here would let the global
+    /// caps and the strategy pool admit new exposure beside a position that
+    /// nothing tracks. Keep it under a durable key instead; reconciliation
+    /// settles it once a lookup answers.
+    private func deferRemoteSubmission(_ token: String?, clientOrderID: String, demo: Bool, localOrderID: UUID? = nil) async {
+        guard let token else { return }
+        await withRiskReservationMutation {
+            guard let reservation = remoteReservations.removeValue(forKey: token) else { return }
+            remoteReservations[Self.unresolvedReservationPrefix + clientOrderID] = RemoteReservation(
+                instrumentID: reservation.instrumentID,
+                notional: reservation.notional,
+                createdAt: reservation.createdAt,
+                strategyID: reservation.strategyID,
+                margin: reservation.margin,
+                riskAmount: reservation.riskAmount,
+                closedPosition: reservation.closedPosition,
+                inFlight: false,
+                clientOrderID: clientOrderID,
+                demo: demo,
+                localOrderID: localOrderID
+            )
+            saveRemoteReservations()
+        }
+    }
+
+    /// Settles deferred submissions by their client order id. An accepted
+    /// order takes over the reservation (and the strategy ledger entry gets
+    /// its order id, so native SL/TP settlement can find it); an order OKX
+    /// confirms absent releases it; another failure keeps it reserved.
+    private func resolveUnconfirmedSubmissions() async {
+        let unresolved = remoteReservations.compactMap { key, reservation -> (String, RemoteReservation, String)? in
+            guard Self.isUnresolvedReservation(key), let clientOrderID = reservation.clientOrderID else { return nil }
+            return (key, reservation, clientOrderID)
+        }
+        guard !unresolved.isEmpty else { return }
+        var outcomes: [(key: String, clientOrderID: String, outcome: FailedSubmissionOutcome)] = []
+        for (key, reservation, clientOrderID) in unresolved {
+            let outcome = await resolveFailedSubmission(instrumentID: reservation.instrumentID,
+                                                        clientOrderID: clientOrderID,
+                                                        demo: reservation.demo ?? true)
+            outcomes.append((key, clientOrderID, outcome))
+        }
+        await withRiskReservationMutation {
+            var releases: [RemoteReservation] = []
+            for (key, clientOrderID, outcome) in outcomes {
+                // A strategy exit may have settled the entry meanwhile.
+                guard let reservation = remoteReservations[key] else { continue }
+                switch outcome {
+                case let .accepted(orderID):
+                    remoteReservations.removeValue(forKey: key)
+                    if remoteReservations[orderID] == nil {
+                        remoteReservations[orderID] = RemoteReservation(
+                            instrumentID: reservation.instrumentID,
+                            notional: reservation.notional,
+                            createdAt: reservation.createdAt,
+                            strategyID: reservation.strategyID,
+                            margin: reservation.margin,
+                            riskAmount: reservation.riskAmount,
+                            closedPosition: reservation.closedPosition
+                        )
+                    } else {
+                        // The order id is already reserved; keep one claim.
+                        releases.append(reservation)
+                    }
+                    if let localOrderID = reservation.localOrderID {
+                        await paper.attachRemoteOrderID(orderID, toLocalOrder: localOrderID)
+                    }
+                    appendLog("下单结果已核实：OKX 已接受 \(reservation.instrumentID) 订单 \(orderID)（clOrdId \(clientOrderID)）", level: "warning")
+                case .notPlaced:
+                    remoteReservations.removeValue(forKey: key)
+                    if let localOrderID = reservation.localOrderID {
+                        await paper.markLocalOrderTerminal(localOrderID, status: "rejected")
+                    }
+                    releases.append(reservation)
+                    appendLog("下单结果已核实：OKX 没有 clOrdId \(clientOrderID) 的订单，已释放 \(reservation.instrumentID) 的风控占用", level: "warning")
+                case .unknown:
+                    continue
+                }
+                saveRemoteReservations()
+            }
+            for reservation in releases {
+                await riskEngine.release(
+                    instrumentID: reservation.instrumentID, notional: reservation.notional,
+                    strategyID: reservation.strategyID, margin: reservation.margin,
+                    riskAmount: reservation.riskAmount,
+                    closedPosition: reservation.closedPosition
+                )
+            }
         }
     }
 
@@ -1307,7 +1447,8 @@ public actor TradingBackend {
             .filter { $0.strategyID == strategyID }
             .compactMap(\.remoteOrderID))
         ids.formUnion(remoteReservations.compactMap { key, reservation in
-            reservation.strategyID == strategyID && !key.hasPrefix("pending-") ? key : nil
+            reservation.strategyID == strategyID && !key.hasPrefix("pending-") &&
+                !Self.isUnresolvedReservation(key) ? key : nil
         })
         return ids
     }
@@ -1457,6 +1598,12 @@ public actor TradingBackend {
         // position remains. Deletion is refused while exposure exists so the
         // service cannot lose ownership of a live position.
         try await cancelRemoteEntryOrders(for: id)
+        // An entry whose submit outcome is still unknown may own a position
+        // that has not been reported yet.
+        await resolveUnconfirmedSubmissions()
+        guard !remoteReservations.contains(where: { Self.isUnresolvedReservation($0.key) && $0.value.strategyID == id }) else {
+            throw ATKError.unavailable("策略仍有结果未知的下单，请等待后台按 clOrdId 核对完成后再删除")
+        }
         let positions = try await strategyRemotePositions(id)
         guard positions.isEmpty else {
             throw ATKError.unavailable("策略仍有远端持仓，请先平仓并确认持仓归零后再删除")
@@ -1591,9 +1738,9 @@ public actor TradingBackend {
             for position in positions where abs(position.quantity) > 0 {
                 do {
                     if account.mode == .paper {
-                        try await market.closeDemoPosition(instrumentID: position.instrumentID, positionSide: position.side)
+                        try await market.closeDemoPosition(instrumentID: position.instrumentID, positionSide: position.side, marginMode: position.marginMode)
                     } else {
-                        try await market.closeLivePosition(instrumentID: position.instrumentID, positionSide: position.side)
+                        try await market.closeLivePosition(instrumentID: position.instrumentID, positionSide: position.side, marginMode: position.marginMode)
                     }
                     appendLog("账户日损熔断：已提交平仓 \(position.instrumentID) \(position.side)", level: "risk")
                 } catch {
@@ -1721,7 +1868,7 @@ public actor TradingBackend {
             }
             guard submittedExitPositionIDs.insert(positionKey).inserted else { continue }
             let side = isShort ? "buy" : "sell"
-            let request = LiveOrderRequest(instrumentID: position.instrumentID, side: side, orderType: "market", quantity: abs(position.quantity), marginMode: "cross", reduceOnly: true)
+            let request = LiveOrderRequest(instrumentID: position.instrumentID, side: side, orderType: "market", quantity: abs(position.quantity), marginMode: position.marginMode ?? "cross", reduceOnly: true)
             do {
                 let spec = try await market.instrumentSpec(instrumentID: position.instrumentID)
                 guard spec.isLiveUSDTLinearSwap,
@@ -1978,7 +2125,7 @@ public actor TradingBackend {
             side: "buy",
             orderType: "market",
             quantity: leg.quantity,
-            marginMode: "cross",
+            marginMode: position.marginMode ?? "cross",
             reduceOnly: true,
             clientOrderID: clientOrderID
         )
@@ -2094,11 +2241,17 @@ public actor TradingBackend {
                         (pending.entryOrderID == nil || reservationKey == pending.entryOrderID) &&
                         !reservation.inFlight ? reservationKey : nil
                 }
+                // An entry whose order id never resolved is closed through
+                // its local ledger id instead.
+                let unresolvedEntryIDs = reservationKeys.compactMap { remoteReservations[$0]?.localOrderID }
                 for reservationKey in reservationKeys { remoteReservations.removeValue(forKey: reservationKey) }
                 if !reservationKeys.isEmpty { saveRemoteReservations() }
                 let completedEntryIDs = Set(reservationKeys + [pending.entryOrderID].compactMap { $0 })
                 for entryID in completedEntryIDs {
                     await paper.markRemoteOrderTerminal(entryID)
+                }
+                for localOrderID in unresolvedEntryIDs {
+                    await paper.markLocalOrderTerminal(localOrderID, status: "closed")
                 }
                 completed.append((key, pending,
                                   reservedNotional > 0 ? reservedNotional : pending.reservedNotional,
@@ -2136,6 +2289,9 @@ public actor TradingBackend {
     /// its instrument, the reservation is safe to release; otherwise it is
     /// retained conservatively until the position disappears.
     private func reconcileRemoteReservations() async throws {
+        // Settle deferred submissions first so the steps below see them under
+        // their exchange order id (or not at all).
+        await resolveUnconfirmedSubmissions()
         // Serialize the complete read/merge transaction logically. Actor
         // reentrancy still permits the network reads to overlap, so a slower,
         // older snapshot is discarded using this generation token.
@@ -2297,7 +2453,8 @@ public actor TradingBackend {
             }
             var releases: [(RemoteReservation, Decimal?)] = []
             for (orderID, reservation) in remoteReservations {
-                guard !reservation.inFlight else { continue }
+                // Only a clOrdId lookup may settle an unresolved submission.
+                guard !reservation.inFlight, !Self.isUnresolvedReservation(orderID) else { continue }
                 if let strategyID = reservation.strategyID,
                    pendingRemoteExits.values.contains(where: { $0.strategyID == strategyID && $0.instrumentID == reservation.instrumentID }) {
                     continue
@@ -2388,7 +2545,8 @@ public actor TradingBackend {
             // never be reset below that in-flight authorization.
             for (orderID, reservation) in remoteReservations {
                 if reservation.inFlight || orders.allSatisfy({ $0.id != orderID }) {
-                    guard reservation.inFlight || Date().timeIntervalSince(reservation.createdAt) < 30 else { continue }
+                    guard reservation.inFlight || Self.isUnresolvedReservation(orderID) ||
+                            Date().timeIntervalSince(reservation.createdAt) < 30 else { continue }
                     exposures[reservation.instrumentID, default: 0] += reservation.notional
                 }
             }
@@ -2491,6 +2649,9 @@ public actor TradingBackend {
         guard spec.accepts(contractQuantity: request.quantity) else {
             throw ATKError.invalidOrder("数量必须按合约 lotSz 对齐且不小于 minSz（当前数量为合约张数）")
         }
+        guard ["cross", "isolated"].contains(request.marginMode.lowercased()) else {
+            throw ATKError.invalidOrder("保证金模式必须是 cross 或 isolated")
+        }
         for price in [request.price, request.takeProfitTriggerPrice, request.stopLossTriggerPrice].compactMap({ $0 }) {
             guard spec.accepts(price: price) else {
                 throw ATKError.invalidOrder("价格必须按合约 tickSz 对齐")
@@ -2549,10 +2710,12 @@ public actor TradingBackend {
             await paper.setRisk(await riskEngine.snapshot())
             return nil
         case let .unknown(lookupError):
-            await failRemoteSubmission(token)
+            // The order may exist: keep its reservation until a later
+            // clOrdId lookup settles the outcome.
+            await deferRemoteSubmission(token, clientOrderID: clientOrderID, demo: demo)
             await market.invalidateAccountState()
             await paper.setRisk(await riskEngine.snapshot())
-            let message = "下单结果未知（clOrdId \(clientOrderID)），请先在 OKX 核对 \(instrumentID) 再重试：\(error.localizedDescription)；查询失败：\(lookupError.localizedDescription)"
+            let message = "下单结果未知（clOrdId \(clientOrderID)），风控占用已保留并将在后台按 clOrdId 核对；请先在 OKX 核对 \(instrumentID) 再重试：\(error.localizedDescription)；查询失败：\(lookupError.localizedDescription)"
             appendLog(message, level: "warning")
             throw ATKError.unavailable(message)
         }
@@ -2563,7 +2726,7 @@ public actor TradingBackend {
         guard account.mode == .paper else { throw ATKError.unavailable("当前不是 OKX 模拟账户") }
         let ticker = try await market.ticker(instrumentID: request.instrumentID)
         let clientOrderID = Self.hlsrClientOrderID(UUID())
-        let liveRequest = LiveOrderRequest(instrumentID: request.instrumentID, side: request.side, orderType: "market", quantity: request.quantity, marginMode: "cross", reduceOnly: request.reduceOnly, clientOrderID: clientOrderID)
+        let liveRequest = LiveOrderRequest(instrumentID: request.instrumentID, side: request.side, orderType: "market", quantity: request.quantity, marginMode: request.marginMode ?? "cross", reduceOnly: request.reduceOnly, clientOrderID: clientOrderID)
         let (_, notional) = try await validatedRemoteOrder(liveRequest, ticker: ticker)
         let (decision, submissionToken) = await authorizeRemoteSubmission(instrumentID: request.instrumentID, notional: notional, reduceOnly: request.reduceOnly)
         guard decision.allowed else { throw ATKError.unavailable(decision.reason ?? "风控拒绝模拟订单") }
@@ -2824,14 +2987,17 @@ public actor TradingBackend {
                 appendLog("策略 \(config.name) OKX 模拟下单失败：\(error.localizedDescription)", level: "warning")
                 return false
             case let .unknown(lookupError):
-                // The order may exist. Release the local reservation (the
-                // next reconciliation rebuilds exposure from remote
-                // positions) but report the signal as consumed so it is
-                // never sent a second time.
-                await failRemoteSubmission(submissionToken)
+                // The order may exist. Record the strategy entry without an
+                // order id so exits, the single-slot check and pool
+                // accounting still own a position that may appear, and keep
+                // the reservation until a later clOrdId lookup settles it.
+                // The signal is reported as consumed so it is never resent.
+                let order = PaperOrder(strategyID: config.id, instrumentID: instrumentID, side: side == "sell" ? "short" : "long", quantity: quantity, requestedAt: signal.timestamp, status: "submitted", signal: signal)
+                await paper.record(order)
+                await deferRemoteSubmission(submissionToken, clientOrderID: clientOrderID, demo: true, localOrderID: order.id)
                 await market.invalidateAccountState()
                 await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
-                appendLog("策略 \(config.name) 下单结果未知，已停止重发该信号，请人工核对 \(instrumentID)：\(error.localizedDescription)；查询失败：\(lookupError.localizedDescription)", level: "warning")
+                appendLog("策略 \(config.name) 下单结果未知，已停止重发该信号并保留风控占用，后台将按 clOrdId \(clientOrderID) 核对 \(instrumentID)：\(error.localizedDescription)；查询失败：\(lookupError.localizedDescription)", level: "warning")
                 return true
             }
         }

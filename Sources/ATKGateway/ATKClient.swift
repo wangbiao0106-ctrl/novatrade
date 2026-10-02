@@ -311,20 +311,25 @@ public struct ATKClient: Sendable {
         try await mutateSwap(["--live", "swap", "cancel", instrumentID, "--ordId", orderID])
     }
 
-    public func closeDemoSwapPosition(instrumentID: String, positionSide: String? = nil) async throws {
-        try await closeSwapPosition(instrumentID: instrumentID, positionSide: positionSide, demo: true)
+    public func closeDemoSwapPosition(instrumentID: String, positionSide: String? = nil, marginMode: String? = nil) async throws {
+        try await closeSwapPosition(instrumentID: instrumentID, positionSide: positionSide, marginMode: marginMode, demo: true)
     }
 
-    public func closeLiveSwapPosition(instrumentID: String, positionSide: String? = nil) async throws {
-        try await closeSwapPosition(instrumentID: instrumentID, positionSide: positionSide, demo: false)
+    public func closeLiveSwapPosition(instrumentID: String, positionSide: String? = nil, marginMode: String? = nil) async throws {
+        try await closeSwapPosition(instrumentID: instrumentID, positionSide: positionSide, marginMode: marginMode, demo: false)
     }
 
-    private func closeSwapPosition(instrumentID: String, positionSide: String?, demo: Bool) async throws {
+    /// OKX only closes the position whose `mgnMode` matches the request, so
+    /// callers pass the mode reported with the position. Nil keeps the cross
+    /// default used by every order this service opens.
+    private func closeSwapPosition(instrumentID: String, positionSide: String?, marginMode: String?, demo: Bool) async throws {
         try Self.validateInstrumentID(instrumentID)
         if let positionSide, !positionSide.isEmpty, !["net", "long", "short"].contains(positionSide.lowercased()) {
             throw ATKError.invalidOrder("持仓方向必须是 net、long 或 short")
         }
-        var arguments = [demo ? "--demo" : "--live", "swap", "close", "--instId", instrumentID, "--mgnMode", "cross", "--autoCxl"]
+        let mode = marginMode?.lowercased() ?? "cross"
+        guard ["cross", "isolated"].contains(mode) else { throw ATKError.invalidOrder("保证金模式必须是 cross 或 isolated") }
+        var arguments = [demo ? "--demo" : "--live", "swap", "close", "--instId", instrumentID, "--mgnMode", mode, "--autoCxl"]
         if let positionSide, !positionSide.isEmpty, positionSide.lowercased() != "net" { arguments += ["--posSide", positionSide.lowercased()] }
         _ = try await mutateSwap(arguments)
     }
@@ -560,7 +565,11 @@ public struct ATKClient: Sendable {
             }
             unrealizedPnL = value
         } else { unrealizedPnL = nil }
-        return PositionSnapshot(id: positionID, instrumentID: instrument, side: side.lowercased(), quantity: quantity, entryPrice: entryPrice, markPrice: markPrice, unrealizedPnL: unrealizedPnL)
+        // An unrecognized mode must not hide the position from risk checks;
+        // it is dropped and the close falls back to the cross default.
+        let marginMode = (row["mgnMode"] as? String)?.lowercased()
+        return PositionSnapshot(id: positionID, instrumentID: instrument, side: side.lowercased(), quantity: quantity, entryPrice: entryPrice, markPrice: markPrice, unrealizedPnL: unrealizedPnL,
+                                marginMode: marginMode.flatMap { ["cross", "isolated"].contains($0) ? $0 : nil })
     }
 
     private static func decodeOrder(_ row: [String: Any]) throws -> OrderSnapshot? {

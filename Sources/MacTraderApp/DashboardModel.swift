@@ -163,7 +163,11 @@ final class DashboardModel: ObservableObject {
         switch event.type {
         case "connection":
             let state = event.payload ?? ""
-            if ["local_connecting", "okx_wss_connecting", "okx_wss_subscribed"].contains(state) {
+            if state == "okx_wss_subscribed" {
+                // The subscription is live; a candle may not arrive for
+                // minutes, which must not read as "still connecting".
+                if candleDataSource != .websocket { candleDataSource = .subscribed }
+            } else if ["local_connecting", "okx_wss_connecting"].contains(state) {
                 candleDataSource = .connecting
             } else if state == "local_reconnecting" || state.hasPrefix("okx_wss_reconnecting") {
                 candleDataSource = .reconnecting
@@ -403,10 +407,12 @@ final class DashboardModel: ObservableObject {
         for position in positions {
             let quantity = abs(position.quantity)
             guard quantity > 0 else { continue }
+            // A reduce-only order only reduces the position of its own margin mode.
+            let marginMode = position.marginMode ?? "cross"
             if accountOverview.mode == .live {
-                _ = try await client.placeLiveOrder(LiveOrderRequest(instrumentID: position.instrumentID, side: closeSide(for: position), quantity: quantity, reduceOnly: true))
+                _ = try await client.placeLiveOrder(LiveOrderRequest(instrumentID: position.instrumentID, side: closeSide(for: position), quantity: quantity, marginMode: marginMode, reduceOnly: true))
             } else {
-                _ = try await client.placePaperOrder(PaperOrderRequest(instrumentID: position.instrumentID, side: closeSide(for: position), quantity: quantity, reduceOnly: true))
+                _ = try await client.placePaperOrder(PaperOrderRequest(instrumentID: position.instrumentID, side: closeSide(for: position), quantity: quantity, reduceOnly: true, marginMode: marginMode))
             }
         }
     }
