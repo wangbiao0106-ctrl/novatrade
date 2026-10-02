@@ -174,12 +174,33 @@ struct StrategyStatusModule: View {
     private var capital: StrategyCapitalSnapshot? { model.strategyCapital(for: config) }
     private var universe: StrategyUniverseSnapshot? { model.strategyUniverse(for: config) }
     private var maxConcurrentPositions: Int { Int(config.parameters["maxConcurrentPositions"] ?? 1) }
+    private var directionLabel: String {
+        if let direction = status?.direction, let label = directionText(direction) {
+            return label
+        }
+        if let signal = status?.lastSignal, let label = directionText(signal.type) {
+            return label
+        }
+        switch config.type {
+        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort:
+            return "做空"
+        case .external:
+            return "方向未知"
+        }
+    }
+    private var directionColor: Color {
+        switch directionLabel {
+        case "做多": return .orange
+        case "做空": return .mint
+        default: return .secondary
+        }
+    }
     /// A tripped account breaker stops every strategy; starting one again is
     /// refused by the service until the breaker is reset.
     private var startBlockedByKillSwitch: Bool { !isRunning && model.riskSnapshot.killSwitch }
 
-    /// One line of fixed facts: scope, signal cycle, leverage and the size of
-    /// the pool the scanner resolved. The full scope definition is the tooltip.
+    /// One line of fixed facts: scope, signal cycle and the size of the pool
+    /// the scanner resolved. The full rule definition is the tooltip.
     private var metaText: String {
         let scope: String
         if case .dynamicCategory = config.scope.mode {
@@ -187,13 +208,24 @@ struct StrategyStatusModule: View {
         } else {
             scope = config.scope.displayName
         }
-        var parts = [scope, config.type.signalCycleShortLabel, "\(formatLeverage(config.leverage)) 倍"]
+        var parts = [scope, config.type.signalCycleShortLabel]
         if let universe {
             // Zero is a normal outcome on a quiet day: no symbol clears the
             // rule's gain and turnover gates. Say so instead of "scanning 0".
             parts.append(universe.targetCount == 0 ? "暂无符合条件的币" : "扫描 \(universe.targetCount) 个币")
         }
         return parts.joined(separator: " · ")
+    }
+
+    private var ruleDetails: String {
+        [
+            "规则：\(config.type.displayName)",
+            "信号：\(config.type.signalCycleDescription)",
+            "止损：\(config.type.stopLossDescription)",
+            "止盈：\(config.type.takeProfitDescription)",
+            "冷却：\(config.type.cooldownDescription)",
+            "候选范围：\(config.scope.displayName)"
+        ].joined(separator: "\n")
     }
 
     var body: some View {
@@ -203,7 +235,7 @@ struct StrategyStatusModule: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .help(config.scope.displayName)
+                .help(ruleDetails)
             divider
             capitalMetrics
             pnlRow
@@ -235,33 +267,57 @@ struct StrategyStatusModule: View {
     private var divider: some View { Divider().overlay(Color.white.opacity(0.08)) }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Text(config.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-            Spacer(minLength: 4)
-            Circle().fill(stateColor).frame(width: 7, height: 7)
-            Text(isRunning ? "运行中" : "已暂停").font(.caption2).foregroundStyle(stateColor)
-            Menu {
-                Button(role: .destructive) { requestDelete() } label: {
-                    Label("删除策略实例", systemImage: "trash")
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(config.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 4)
+                HStack(spacing: 5) {
+                    Circle().fill(stateColor).frame(width: 7, height: 7)
+                    Text(isRunning ? "运行中" : "已暂停").font(.caption2).foregroundStyle(stateColor)
                 }
-                .disabled(isRunning)
-            } label: {
-                Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+                Menu {
+                    Button(role: .destructive) { requestDelete() } label: {
+                        Label("删除策略实例", systemImage: "trash")
+                    }
+                    .disabled(isRunning)
+                } label: {
+                    Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help(isRunning ? "运行中的策略不能删除，请先暂停" : "更多操作")
+                .accessibilityLabel("策略操作")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(isRunning ? "运行中的策略不能删除，请先暂停" : "更多操作")
-            .accessibilityLabel("策略操作")
+            HStack(spacing: 6) {
+                strategyTag(directionLabel, color: directionColor)
+                strategyTag("\(formatLeverage(config.leverage))x", color: .secondary)
+                Spacer(minLength: 0)
+            }
         }
     }
 
     private var capitalMetrics: some View {
         HStack(alignment: .top, spacing: 8) {
-            metric("资金池", value: capital.map { "\(formatUSD($0.equity)) (\(formatPercent($0.allocationPercent)))" } ?? "--")
-            metric("可用", value: capital.map { formatUSD($0.availableCapital) } ?? "--")
+            metric("资金池", value: capital.map { formatUSD($0.equity) } ?? "--")
+            metric("持仓占用", value: capital.map { formatUSD($0.reservedCapital) } ?? "--")
             metric("持仓", value: "\(openPositions.count) / \(maxConcurrentPositions)")
         }
+    }
+
+    private func strategyTag(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12), in: Capsule())
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private func metric(_ title: String, value: String) -> some View {
@@ -279,16 +335,28 @@ struct StrategyStatusModule: View {
         let realized = capital?.realizedPnL ?? 0
         let unrealized = capital?.unrealizedPnL ?? 0
         let total = realized + unrealized
-        let totalColor: Color = capital == nil ? .secondary : (total >= 0 ? .green : .red)
-        return HStack(spacing: 6) {
-            Text("收益 \(formatSigned(total)) USDT")
-                .font(.caption2.monospacedDigit().weight(.semibold))
-                .foregroundStyle(totalColor)
-            Spacer()
-            Text("已实现 \(formatSigned(realized)) · 浮动 \(formatSigned(unrealized))")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+        let totalColor: Color = {
+            guard capital != nil else { return .secondary }
+            if total > 0 { return .green }
+            if total < 0 { return .red }
+            return .secondary
+        }()
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text("收益 \(formatSigned(total)) USDT")
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(totalColor)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 12) {
+                Text("已实现 \(formatSigned(realized))")
+                Text("浮动 \(formatSigned(unrealized))")
+                Spacer(minLength: 0)
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
         }
     }
 
@@ -374,10 +442,14 @@ struct StrategyStatusModule: View {
     }
 
     private func signalDirectionText(_ type: String) -> String {
-        switch type {
-        case "entry_short": return "做空"
-        case "entry_long": return "做多"
-        default: return type
+        directionText(type) ?? type
+    }
+
+    private func directionText(_ rawValue: String) -> String? {
+        switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "long", "buy", "entry_long", "做多": return "做多"
+        case "short", "sell", "entry_short", "做空": return "做空"
+        default: return nil
         }
     }
 
