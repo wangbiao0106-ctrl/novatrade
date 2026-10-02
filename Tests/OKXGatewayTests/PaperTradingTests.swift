@@ -327,16 +327,18 @@ func deletingStrategyPersistsRemovalOfItsCapitalPool() async throws {
 }
 
 @Test
-func strategyStoreAcceptsOnePercentRiskAndRejectsAboveIt() async throws {
+func strategyStoreAcceptsTenPercentRiskAndRejectsAboveIt() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-risk-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = PaperTradingStore(directory: directory)
-    let accepted = StrategyConfig(name: "上限内", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 1.0)
-    _ = try await store.create(accepted)
-    let config = StrategyConfig(name: "超限", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 1.1)
+    let accepted = StrategyConfig(name: "上限内", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 10.0)
+    let created = try await store.create(accepted)
+    #expect(created.riskPercent == 10.0)
+    #expect(created.parameters["maxOpenRiskPercent"] == 10.0)
+    let config = StrategyConfig(name: "超限", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 10.1)
     do {
         _ = try await store.create(config)
-        Issue.record("expected risk above one percent to be rejected")
+        Issue.record("expected risk above ten percent of the pool to be rejected")
     } catch PaperTradingStore.StoreError.unsupported {
         // Expected.
     }

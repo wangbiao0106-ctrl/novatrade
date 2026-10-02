@@ -50,6 +50,9 @@ public actor TradingServiceClient {
     public func strategies() async throws -> [StrategyConfig] { try await get(path: "/api/v1/strategies") }
     public func strategyStatuses() async throws -> [StrategyStatus] { try await get(path: "/api/v1/strategies/status") }
     public func strategyCapital() async throws -> [StrategyCapitalSnapshot] { try await get(path: "/api/v1/strategies/capital") }
+    /// The concrete instrument set each strategy is scanning right now, as
+    /// resolved by the daemon's own universe cache.
+    public func strategyTargets() async throws -> [StrategyUniverseSnapshot] { try await get(path: "/api/v1/strategies/targets") }
     public func risk() async throws -> RiskSnapshot { try await get(path: "/api/v1/risk") }
     public func resetRisk() async throws -> RiskSnapshot { try await request(path: "/api/v1/risk/reset", method: "POST") }
     public func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig { try await post("/api/v1/strategies", body: config) }

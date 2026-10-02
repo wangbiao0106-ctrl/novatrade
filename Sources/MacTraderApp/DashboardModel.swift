@@ -21,6 +21,9 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var runtimeLogs: [RuntimeLog] = []
     @Published private(set) var strategyStatuses: [StrategyStatus] = []
     @Published private(set) var strategyCapitals: [StrategyCapitalSnapshot] = []
+    /// Resolved scan pools per strategy, refreshed with the other account
+    /// activity so the card can show how many symbols are actually scanned.
+    @Published private(set) var strategyUniverses: [StrategyUniverseSnapshot] = []
     /// Strategy instances are owned by the local service; this stays empty
     /// until its persisted state has been loaded.
     @Published private(set) var strategies: [StrategyConfig] = []
@@ -250,6 +253,7 @@ final class DashboardModel: ObservableObject {
             runtimeLogs = (try? await client.runtimeLogs()) ?? runtimeLogs
             strategyStatuses = (try? await client.strategyStatuses()) ?? strategyStatuses
             strategyCapitals = (try? await client.strategyCapital()) ?? strategyCapitals
+            strategyUniverses = (try? await client.strategyTargets()) ?? strategyUniverses
             strategies = (try? await client.strategies()) ?? strategies
         } catch {
             guard generation == lifecycleGeneration else { return }
@@ -265,6 +269,7 @@ final class DashboardModel: ObservableObject {
         liveOrders = (try? await client.privateOrders()) ?? liveOrders
         orders = (try? await client.paperOrders()) ?? orders
         fills = (try? await client.paperFills()) ?? fills
+        strategyUniverses = (try? await client.strategyTargets()) ?? strategyUniverses
     }
 
     /// The chart stream only covers the selected contract. The sidebar needs
@@ -337,6 +342,20 @@ final class DashboardModel: ObservableObject {
 
     func hasStrategyType(_ type: StrategyType) -> Bool {
         strategies.contains { $0.type == type }
+    }
+
+    func strategyCapital(for config: StrategyConfig) -> StrategyCapitalSnapshot? {
+        strategyCapitals.first { $0.strategyID == config.id }
+    }
+
+    func strategyUniverse(for config: StrategyConfig) -> StrategyUniverseSnapshot? {
+        strategyUniverses.first { $0.strategyID == config.id }
+    }
+
+    /// The entry order a signal produced, if it was submitted. Signals do not
+    /// carry an instrument; the order record is the only link to the symbol.
+    func strategyOrder(for signal: StrategySignal) -> PaperOrder? {
+        orders.first { $0.signal?.id == signal.id }
     }
 
     func createStrategy(_ config: StrategyConfig) async throws {

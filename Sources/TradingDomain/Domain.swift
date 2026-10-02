@@ -81,6 +81,45 @@ public enum KlineInterval: String, Codable, CaseIterable, Sendable {
     case oneHour = "1H"
     case fourHours = "4H"
     case oneDay = "1D"
+
+    /// Bar length in minutes, used to turn bar counts into wall-clock time.
+    public var minutes: Int {
+        switch self {
+        case .oneMinute: return 1
+        case .fiveMinutes: return 5
+        case .fifteenMinutes: return 15
+        case .oneHour: return 60
+        case .fourHours: return 240
+        case .oneDay: return 1_440
+        }
+    }
+
+    /// Chinese label used wherever the interval is shown to the operator.
+    public var displayName: String {
+        switch self {
+        case .oneMinute: return "1 分钟"
+        case .fiveMinutes: return "5 分钟"
+        case .fifteenMinutes: return "15 分钟"
+        case .oneHour: return "1 小时"
+        case .fourHours: return "4 小时"
+        case .oneDay: return "1 天"
+        }
+    }
+}
+
+/// Human-readable durations for bar counts ("约 4 天", "约 3 小时").
+public enum TradingDurationText {
+    public static func describe(minutes: Int) -> String {
+        guard minutes > 0 else { return "0 分钟" }
+        if minutes % 1_440 == 0 { return "\(minutes / 1_440) 天" }
+        if minutes >= 1_440 {
+            let days = minutes / 1_440, hours = (minutes % 1_440) / 60
+            return hours == 0 ? "\(days) 天" : "\(days) 天 \(hours) 小时"
+        }
+        if minutes % 60 == 0 { return "\(minutes / 60) 小时" }
+        if minutes >= 60 { return "\(minutes / 60) 小时 \(minutes % 60) 分钟" }
+        return "\(minutes) 分钟"
+    }
 }
 
 /// The exchange contract specification needed to translate OKX swap contract
@@ -469,7 +508,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "confirmationWindowMinutes": 60,
                 "leverage": 2,
                 "maxConcurrentPositions": 1,
-                "maxOpenRiskPercent": 1.0,
+                "maxOpenRiskPercent": 10.0,
             ]
         case .hlsr:
             // Values mirror strategies/hlsr/config/strategy.json.  Boolean
@@ -503,7 +542,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "slippage": 0.0002,
                 "fundingRate": 0,
                 "maxConcurrentPositions": 1,
-                "maxOpenRiskPercent": 1.0,
+                "maxOpenRiskPercent": 10.0,
             ]
         case .doublePumpExhaustionShort:
             return [
@@ -512,24 +551,34 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "rsiMin": 50.0, "volumeMultiple": 0.5, "stopATR": 0.45,
                 "targetR": 1.0, "minRiskATR": 0.5, "maxRiskATR": 3.0,
                 "minimumHistoryBars": 97, "leverage": 2,
-                "maxConcurrentPositions": 1, "maxOpenRiskPercent": 1.0,
+                "maxConcurrentPositions": 1, "maxOpenRiskPercent": 10.0,
             ]
         case .external: return [:]
         }
     }
 
-    /// 实验室给出的单笔风险上限（%），运行时会按此值收敛用户输入。
+    /// 单笔止损风险预算上限，按**本策略资金池权益**的百分比计算（不是账户
+    /// 总资产）。运行时会把用户输入收敛到这个上限。
     public var maxRiskPercent: Double {
         switch self {
-        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort: return 1.0
+        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort: return 10.0
         case .external: return 0
         }
     }
 
-    /// 实验室给出的单笔风险默认值（%）。
+    /// 单笔止损风险预算默认值，同样以本策略资金池权益为基数。
     public var defaultRiskPercent: Double {
         switch self {
-        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort: return 1.0
+        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort: return 10.0
+        case .external: return 0
+        }
+    }
+
+    /// 策略全部未平仓位的止损风险合计上限，按本策略资金池权益的百分比计算。
+    /// 每个实例同时只允许一个持仓，所以它与单笔预算相同。
+    public var maxOpenRiskPercent: Double {
+        switch self {
+        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort: return 10.0
         case .external: return 0
         }
     }
@@ -540,14 +589,67 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var stopLossDescription: String {
         switch self {
         case .sweepReversalShort:
-            return "动态：扫顶期间最高价 + 0.5 × ATR14（按信号计算止损比例）"
+            return "扫顶期间最高价 + 0.5 × ATR14，按每个信号计算"
         case .hlsr:
-            return "动态：扫顶高点 + 0.25 × ATR14；TP1 后保本，TP2 后跟踪最近 2 根 15 分钟高点"
+            return "扫顶高点 + 0.25 × ATR14；TP1 后移至开仓价，TP2 后跟踪最近 2 根 15 分钟高点"
         case .doublePumpExhaustionShort:
-            return "动态：确认 K 线高点 + 0.45 × ATR14，止盈 1R"
+            return "确认 K 线高点 + 0.45 × ATR14"
         case .external:
             return "运行时处理器不可用，策略已暂停"
         }
+    }
+
+    /// The exit plan on the profit side, worded from each strategy's spec.
+    public var takeProfitDescription: String {
+        switch self {
+        case .sweepReversalShort:
+            return "2.2R，按入场价与止损距离计算"
+        case .hlsr:
+            return "分三批 30% / 30% / 40%：最近支撑、4 小时区间中点（≥2R）、前主要低点（≥3R）"
+        case .doublePumpExhaustionShort:
+            return "1R，最长持有 24 根 15 分钟 K 线（6 小时）"
+        case .external:
+            return "不可用"
+        }
+    }
+
+    /// Which bars build the setup and which bar is allowed to trigger the
+    /// entry. The sweep rule arms on the 1h close but only enters on a
+    /// confirmed 15m close, so both timeframes are named.
+    public var signalCycleDescription: String {
+        switch self {
+        case .sweepReversalShort: return "1 小时结构 + 15 分钟收盘确认"
+        case .hlsr: return "15 分钟确认入场；4 小时判定市场状态"
+        case .doublePumpExhaustionShort: return "15 分钟收盘确认；滚动 24 小时翻倍后生效"
+        case .external: return "运行时处理器不可用"
+        }
+    }
+
+    /// Short form for the dashboard card ("1H+15m").
+    public var signalCycleShortLabel: String {
+        switch self {
+        case .sweepReversalShort: return "1H + 15m"
+        case .hlsr: return "15m + 4H"
+        case .doublePumpExhaustionShort: return "15m"
+        case .external: return "--"
+        }
+    }
+
+    /// The bar on which the runtime counts down `StrategyStatus.cooldown`.
+    /// All three rules execute on confirmed 15m bars, so the sweep rule's
+    /// 96 one-hour bars are tracked as 384 fifteen-minute steps.
+    public var cooldownBarInterval: KlineInterval {
+        switch self {
+        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort: return .fifteenMinutes
+        case .external: return entryInterval
+        }
+    }
+
+    /// Post-exit cooldown expressed in both bars and wall-clock time.
+    public var cooldownDescription: String {
+        guard defaultCooldownBars > 0 else { return "无" }
+        let minutes = defaultCooldownBars * entryInterval.minutes
+        return "出场后 \(defaultCooldownBars) 根 \(entryInterval.displayName) K 线，约 \(TradingDurationText.describe(minutes: minutes))"
     }
 
     /// Entry bars consumed by the runtime monitor.  HLSR evaluates its
@@ -590,6 +692,16 @@ public enum StrategyUniverseCategory: String, Codable, CaseIterable, Sendable {
         case .sweepCandidates: return "扫顶候选（24h 成交额前 100、≥300 万 USDT）"
         case .hlsrCandidates: return "高位扫顶候选（24h 涨幅 >40%、成交额 >3000 万）"
         case .doublePumpCandidates: return "翻倍衰竭候选（24h 涨幅 >100%、成交额 ≥1000 万）"
+        }
+    }
+
+    /// Card-sized name; `displayName` carries the full filter definition.
+    public var shortName: String {
+        switch self {
+        case .hotAltcoins: return "热门榜前 20"
+        case .sweepCandidates: return "扫顶候选"
+        case .hlsrCandidates: return "高位扫顶候选"
+        case .doublePumpCandidates: return "翻倍衰竭候选"
         }
     }
 }

@@ -23,6 +23,7 @@ ENGINE_PATH = ROOT / "Sources" / "TradingService" / "StrategyEngine.swift"
 STREAM_PATH = ROOT / "Sources" / "OKXLocalD" / "main.swift"
 UNIVERSE_RULES_PATH = ROOT / "Sources" / "TradingDomain" / "StrategyUniverseRules.swift"
 SIGNAL_PATH = LAB / "research" / "live_signal.py"
+RUNTIME_STRATEGY_DIRS = {"sweep_reversal_short", "hlsr", "double_pump_exhaustion_short"}
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -87,19 +88,19 @@ def main() -> int:
     position_management = config.get("position_management", {})
     if position_management.get("leverage") != 2.0:
         fail(errors, "扫顶策略实验室杠杆必须为 2 倍")
-    if position_management.get("risk_per_trade_pct") != 1.0:
-        fail(errors, "策略实验室单笔风险默认值必须为 1%")
-    if position_management.get("risk_per_trade_max_pct") != 1.0:
-        fail(errors, "策略实验室单笔风险硬上限必须为 1%")
+    if position_management.get("risk_per_trade_pct") != 10.0:
+        fail(errors, "策略实验室单笔风险默认值必须为资金池权益的 10%")
+    if position_management.get("risk_per_trade_max_pct") != 10.0:
+        fail(errors, "策略实验室单笔风险硬上限必须为资金池权益的 10%")
     if position_management.get("max_concurrent_positions") != 1:
         fail(errors, "策略实验室必须限制策略实例同时只持有一个币种")
-    if position_management.get("max_open_risk_percent") != 1.0:
-        fail(errors, "策略实验室单币种开放止损风险上限必须为 1%")
+    if position_management.get("max_open_risk_percent") != 10.0:
+        fail(errors, "策略实验室开放止损风险上限必须为资金池权益的 10%")
     if position_management.get("risk_per_trade_scope") != "each_entry_order":
         fail(errors, "策略实验室必须把单笔风险定义为每个入场订单")
-    if position_management.get("risk_per_trade_basis") != "account_equity_at_authorization":
+    if position_management.get("risk_per_trade_basis") != "strategy_pool_equity_at_authorization":
         fail(errors, "策略实验室单笔风险基准必须是授权时策略资金池权益")
-    expected_sizing = "min(available_capital, account_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))"
+    expected_sizing = "min(available_capital, pool_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))"
     if position_management.get("sizing_formula") != expected_sizing:
         fail(errors, "策略实验室 sizing 公式未明确按相对止损距离和可用余额封顶")
     if position_management.get("risk_budget_costs_included") is not False:
@@ -221,12 +222,14 @@ def main() -> int:
         fail(errors, "后台热门榜未使用统一资产类别过滤")
     if "config.type.maxRiskPercent" not in service_source:
         fail(errors, "后端未按策略类型收敛单笔风险上限")
-    if "maxRiskPercent" not in domain or "1.0" not in domain[domain.index("public var maxRiskPercent"):domain.index("public var defaultRiskPercent")]:
-        fail(errors, "领域层策略风险上限未同步为 1%")
+    if "maxRiskPercent" not in domain or "10.0" not in domain[domain.index("public var maxRiskPercent"):domain.index("public var defaultRiskPercent")]:
+        fail(errors, "领域层策略风险上限未同步为资金池权益的 10%")
     if "capitalPoolPercent" not in service_source or "strategyCapital" not in service_source:
         fail(errors, "后端未接入策略资金池")
-    if "let riskBudget = accountEquity * Decimal(config.riskPercent) / 100" not in service_source:
-        fail(errors, "后端未以授权时账户权益计算单笔风险预算")
+    if "let riskBudget = pool.equity * Decimal(config.riskPercent) / 100" not in service_source:
+        fail(errors, "后端未以授权时策略资金池权益计算单笔风险预算")
+    if "let limit = pool.equity * cap / 100" not in (ROOT / "Sources" / "TradingService" / "PaperTrading.swift").read_text():
+        fail(errors, "风控引擎的开放止损风险上限未按策略资金池权益计算")
     if "targetNotional = min(pool.availableCapital, riskBudget * entry / riskDistance)" not in service_source:
         fail(errors, "后端未按止损距离 sizing 并受资金池可用余额封顶")
     if "enforceGlobalRiskIfNeeded" not in service_source or "closeDemoPosition" not in service_source:
@@ -241,8 +244,10 @@ def main() -> int:
         fail(errors, "新建策略表单未使用领域层的规则默认参数")
     if "stopLossDescription" not in domain or "stopLossDescription" not in main_source:
         fail(errors, "策略自带止损规则未在领域层和前台展示")
-    if '"maxConcurrentPositions": 1' not in domain or '"maxOpenRiskPercent": 1.0' not in domain:
+    if '"maxConcurrentPositions": 1' not in domain or '"maxOpenRiskPercent": 10.0' not in domain:
         fail(errors, "运行时默认参数未同步策略级单币种并发和开放风险上限")
+    if "pool.equity * Decimal(config.riskPercent)" not in service_source:
+        fail(errors, "后端单笔风险预算未按策略资金池权益计算")
 
     # 运行时默认参数必须与实验室 config 的 signal_parameters 逐项一致。
     def swift_default_parameters(case_label: str) -> dict[str, float]:
@@ -474,16 +479,18 @@ def main() -> int:
         except Exception as exc:
             fail(errors, f"无法读取 {config_path.relative_to(ROOT)}：{exc}")
             continue
+        # 运行时接入的策略共用一份风险契约：单笔与开放止损风险都是本策略
+        # 资金池权益的 10%。纯研究目录保留各自回测时声明的口径。
         risk_blocks = [strategy_config.get("position_management", {}),
                        strategy_config.get("portfolio", {})]
-        for block in risk_blocks:
-            if "risk_per_trade_pct" in block and block.get("risk_per_trade_pct") != 1.0:
-                fail(errors, f"{strategy_dir.name} 单笔风险必须为账户权益 1%")
+        for block in risk_blocks if strategy_dir.name in RUNTIME_STRATEGY_DIRS else []:
+            if "risk_per_trade_pct" in block and block.get("risk_per_trade_pct") != 10.0:
+                fail(errors, f"{strategy_dir.name} 单笔风险必须为资金池权益的 10%")
             for key in ("risk_per_trade_max_pct", "max_open_risk_pct", "max_open_risk_percent"):
-                if key in block and block.get(key) != 1.0:
-                    fail(errors, f"{strategy_dir.name} 的 {key} 必须为 1%")
-            if "risk_per_trade_basis" in block and block.get("risk_per_trade_basis") != "account_equity_at_authorization":
-                fail(errors, f"{strategy_dir.name} 单笔风险基准必须是授权时账户权益")
+                if key in block and block.get(key) != 10.0:
+                    fail(errors, f"{strategy_dir.name} 的 {key} 必须为资金池权益的 10%")
+            if "risk_per_trade_basis" in block and block.get("risk_per_trade_basis") != "strategy_pool_equity_at_authorization":
+                fail(errors, f"{strategy_dir.name} 单笔风险基准必须是授权时策略资金池权益")
         if strategy_dir.name != "ema_3line_pullback" and not any(key in strategy_config for key in ("universe", "runtime_universe", "market")):
             fail(errors, f"{strategy_dir.name} 未声明适合标的范围")
         document = doc_path.read_text()
@@ -503,7 +510,7 @@ def main() -> int:
             "live_order_mode": "paper_only",
             "auto_submit_live_orders": False,
             "enabled_by_default": False,
-            "max_open_risk_pct": 1.0,
+            "max_open_risk_pct": 10.0,
         }.items():
             if dme_runtime.get(key) != want:
                 fail(errors, f"DME runtime.{key} 未同步为 {want!r}")
@@ -572,10 +579,10 @@ def main() -> int:
             "partial_targets": [0.3, 0.3, 0.4],
             "move_stop_to_entry_after_tp1": True,
             "cooldown_bars": 16,
-            "risk_per_trade_pct": 1.0,
-            "risk_per_trade_max_pct": 1.0,
+            "risk_per_trade_pct": 10.0,
+            "risk_per_trade_max_pct": 10.0,
             "max_concurrent_positions": 1,
-            "max_open_risk_percent": 1.0,
+            "max_open_risk_percent": 10.0,
         }.items():
             if hlsr_position.get(key) != want:
                 fail(errors, f"HLSR position_management.{key} 未同步规则真源")
@@ -678,7 +685,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("策略实验室与运行时代码同步检查通过（全策略 1% 风险契约 + sweep v1.4 + HLSR 1.0 + DME 1.0）")
+    print("策略实验室与运行时代码同步检查通过（运行时策略 10% 资金池风险契约 + sweep v1.4 + HLSR 1.0 + DME 1.0）")
     return 0
 
 

@@ -15,8 +15,11 @@ func hlsrDefaults() {
     let type = StrategyType.hlsr
     #expect(type.entryInterval == .fifteenMinutes)
     #expect(type.defaultCooldownBars == 16)
-    #expect(type.defaultRiskPercent == 1.0)
-    #expect(type.maxRiskPercent == 1.0)
+    // Risk is a share of the strategy's own pool equity, not of the account.
+    #expect(type.defaultRiskPercent == 10.0)
+    #expect(type.maxRiskPercent == 10.0)
+    #expect(type.maxOpenRiskPercent == 10.0)
+    #expect(type.defaultParameters["maxOpenRiskPercent"] == 10.0)
     #expect(type.defaultParameters["structureTimeframeMinutes"] == 240)
     #expect(type.defaultParameters["gain24hGt"] == 0.4)
     #expect(type.defaultParameters["quoteVolume24hGt"] == 30_000_000)

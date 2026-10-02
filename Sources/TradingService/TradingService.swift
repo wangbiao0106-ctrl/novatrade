@@ -99,9 +99,11 @@ public actor PaperTradingStore {
             normalized.enabled = false
         }
         // A strategy may scan many symbols, but its instance-level execution
-        // policy allows only one active symbol at a time.
+        // policy allows only one active symbol at a time. The open-risk cap is
+        // a percentage of the strategy's own pool equity, like the per-trade
+        // budget, so a strategy cannot be sized off the whole account.
         normalized.parameters["maxConcurrentPositions"] = 1
-        normalized.parameters["maxOpenRiskPercent"] = 1.0
+        normalized.parameters["maxOpenRiskPercent"] = config.type.maxOpenRiskPercent
         normalized.capitalPoolPercent = min(max(normalized.capitalPoolPercent, 0.1), 100.0)
         return normalized
     }
@@ -164,7 +166,30 @@ public actor PaperTradingStore {
     public func allStrategies() -> [StrategyConfig] { strategies }
     public func allOrders() -> [PaperOrder] { orders }
     public func allFills() -> [PaperFill] { fills }
-    public func allStatuses() -> [StrategyStatus] { strategies.compactMap { statuses[$0.id] } }
+    /// Dashboard view of every strategy. `statuses[id]` only mirrors the most
+    /// recently evaluated instrument, so on a multi-symbol scan it flips back
+    /// to "no signal, no cooldown" as soon as any other symbol ticks. The
+    /// merged status keeps the newest signal across symbols and the longest
+    /// remaining cooldown among the symbols still being scanned; per-symbol
+    /// records are reset on every pause, start, update and delete, so nothing
+    /// stale survives a restart of the strategy.
+    public func allStatuses() -> [StrategyStatus] { strategies.compactMap { dashboardStatus(for: $0) } }
+
+    private func dashboardStatus(for config: StrategyConfig) -> StrategyStatus? {
+        guard let base = statuses[config.id] else { return nil }
+        let perInstrument = statusesByInstrument[config.id] ?? [:]
+        guard !perInstrument.isEmpty else { return base }
+        let scanned = resolvedTargetsByStrategy[config.id] ?? []
+        let newestSignal = (perInstrument.values.compactMap(\.lastSignal) + [base.lastSignal].compactMap { $0 })
+            .max { $0.timestamp < $1.timestamp }
+        let cooldown = perInstrument
+            .filter { scanned.isEmpty || scanned.contains($0.key) }
+            .map(\.value.cooldown)
+            .reduce(base.cooldown, max)
+        return StrategyStatus(id: base.id, state: base.state, direction: base.direction,
+                              cooldown: cooldown, pnl: base.pnl, lastSignal: newestSignal,
+                              indicators: base.indicators, lastEvaluatedBar: base.lastEvaluatedBar)
+    }
 
     /// Rebuilds every strategy's concrete scan pool from one contract snapshot.
     /// StreamHub, REST diagnostics, and candle evaluation all consume this same
@@ -609,7 +634,7 @@ public actor PaperTradingStore {
             case .conflict: return "每种策略规则只允许创建一个实例"
             case .notFound: return "策略实例不存在"
             case .running: return "策略运行中，请先停止策略后再删除"
-            case .unsupported: return "当前支持确认的 1 小时或 15 分钟山寨币策略；运行时扫描动态合规币种池，每次只允许一个币种下单或持仓，单笔风险固定为账户权益的 1%"
+            case .unsupported: return "当前支持确认的 1 小时或 15 分钟山寨币策略；运行时扫描动态合规币种池，每次只允许一个币种下单或持仓，单笔风险固定为策略资金池权益的 10%"
         }
         }
     }
@@ -3179,12 +3204,11 @@ public actor TradingBackend {
             }
         }
         let riskDistance = stopPrice.map { abs($0 - entry) } ?? 0
-        // The strategy rule expresses risk as a percentage of the authenticated
-        // account equity. Capital pools still cap the cash/margin that a
-        // strategy may reserve, but they must not silently shrink or enlarge
-        // the stop-loss budget used for position sizing.
-        let accountEquity = (await riskEngine.snapshot(now: signal.timestamp)).equity
-        let riskBudget = accountEquity * Decimal(config.riskPercent) / 100
+        // The stop-loss budget is a percentage of this strategy's own pool
+        // equity at authorization (realized results compound into it,
+        // unrealized ones do not). Sizing off the whole account would let a
+        // 1% pool carry a position sized for the full balance.
+        let riskBudget = pool.equity * Decimal(config.riskPercent) / 100
         let targetNotional: Decimal
         if riskDistance > 0, entry > 0 {
             targetNotional = min(pool.availableCapital, riskBudget * entry / riskDistance)

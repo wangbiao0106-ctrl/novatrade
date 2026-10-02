@@ -64,9 +64,9 @@ struct NewStrategySheet: View {
                 .overlay(Color.white.opacity(0.08))
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Label("仅提交至当前 OKX 模拟账户", systemImage: "shield.checkered")
+                    Label(submissionTarget.text, systemImage: submissionTarget.icon)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(submissionTarget.color)
                     if step == .configure, model.riskSnapshot.killSwitch {
                         Label("账户风控已熔断，保存后仍不能启动；请在新日复位后启动", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption2)
@@ -95,7 +95,7 @@ struct NewStrategySheet: View {
             }
         }
         .padding(22)
-        .frame(width: 760, height: step == .choose ? 500 : 650)
+        .frame(width: 760, height: step == .choose ? 500 : 720)
         .preferredColorScheme(.dark)
         .onAppear {
             // Every tap on 添加 starts at the catalog, even if SwiftUI keeps
@@ -178,11 +178,11 @@ struct NewStrategySheet: View {
             HStack {
                 Label(orderTypeDescription(strategyType), systemImage: orderTypeIcon(strategyType))
                 Spacer()
-                Text("默认 \(formattedLeverage(strategyType.defaultLeverage)) 倍")
+                Text("默认 \(formatLeverage(strategyType.defaultLeverage)) 倍")
             }
             .font(.caption2.weight(.medium))
             .foregroundStyle(.secondary)
-            Text("资金池：USDT · \(signalIntervalDescription(for: strategyType))")
+            Text("资金池：USDT · \(strategyType.signalCycleDescription)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
@@ -218,12 +218,14 @@ struct NewStrategySheet: View {
                     Divider().overlay(Color.white.opacity(0.08))
                     VStack(alignment: .leading, spacing: 8) {
                         infoRow("扫描范围", value: selectedRule.defaultScope.displayName)
-                        infoRow("信号周期", value: signalIntervalDescription(for: selectedRule))
-                        infoRow("保护规则", value: selectedRule.stopLossDescription)
+                        infoRow("信号周期", value: selectedRule.signalCycleDescription)
+                        infoRow("止损", value: selectedRule.stopLossDescription)
+                        infoRow("止盈", value: selectedRule.takeProfitDescription)
+                        infoRow("冷却", value: selectedRule.cooldownDescription)
                     }
                 }
 
-                configurationSection("下单") {
+                configurationSection("资金与风控", subtitle: "资金池和杠杆可调；风控参数由策略固定，按资金池计算") {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(alignment: .firstTextBaseline) {
                             VStack(alignment: .leading, spacing: 3) {
@@ -234,9 +236,14 @@ struct NewStrategySheet: View {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text("\(String(format: "%.0f", capitalPoolPercent))%")
-                                .font(.title3.monospacedDigit().weight(.semibold))
-                                .foregroundStyle(.mint)
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("\(String(format: "%.0f", capitalPoolPercent))%")
+                                    .font(.title3.monospacedDigit().weight(.semibold))
+                                    .foregroundStyle(.mint)
+                                Text("可分配上限 \(String(format: "%.0f", maxCapitalPoolPercent))%")
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         HStack(spacing: 12) {
                             Slider(value: $capitalPoolPercent, in: capitalPoolRange, step: 1)
@@ -255,28 +262,42 @@ struct NewStrategySheet: View {
                         Divider().overlay(Color.white.opacity(0.08))
                         VStack(alignment: .leading, spacing: 8) {
                             infoRow("USDT 总资产", value: formatted(usdtTotalAssets), valueColor: .primary)
-                            infoRow("其他策略占用", value: formatted(otherStrategyCapital))
-                            infoRow("当前策略占用", value: formatted(currentStrategyCapital), valueColor: .mint)
+                            infoRow("已分配给其他策略", value: formatted(otherStrategyCapital))
+                            infoRow("剩余可分配", value: formatted(remainingAllocatableCapital))
+                            infoRow("本策略资金池", value: formatted(currentStrategyCapital), valueColor: .mint)
                         }
                         Divider().overlay(Color.white.opacity(0.08))
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("杠杆")
                                     .font(.body.weight(.medium))
-                                Text("默认 \(formattedLeverage(selectedRule.defaultLeverage)) 倍")
+                                Text("默认 \(formatLeverage(selectedRule.defaultLeverage)) 倍，只影响保证金占用")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 0)
                             Stepper(value: $leverage, in: selectedRule.leverageRange, step: 0.5) {
-                                Text("\(formattedLeverage(leverage)) 倍")
+                                Text("\(formatLeverage(leverage)) 倍")
                                     .font(.body.monospacedDigit().weight(.semibold))
                                     .frame(minWidth: 58, alignment: .trailing)
                             }
                             .controlSize(.small)
                             .accessibilityLabel("杠杆倍数")
-                            .accessibilityValue("\(formattedLeverage(leverage)) 倍")
+                            .accessibilityValue("\(formatLeverage(leverage)) 倍")
                             .accessibilityHint("使用加号或减号调整杠杆")
+                        }
+                        Divider().overlay(Color.white.opacity(0.08))
+                        VStack(alignment: .leading, spacing: 8) {
+                            infoRow("单笔风险", value: riskRowText(percent: effectiveRisk, amount: perTradeRiskAmount), valueColor: .primary)
+                            infoRow("最多同时持仓", value: "\(maxConcurrentPositions) 个")
+                            infoRow("开放风险上限", value: riskRowText(percent: selectedRule.maxOpenRiskPercent, amount: maxOpenRiskAmount))
+                            infoRow("单笔最大名义", value: "不超过资金池可用余额，与杠杆无关")
+                        }
+                        if let perTradeRiskAmount, perTradeRiskAmount < Self.minimumUsefulRiskAmount {
+                            Label("单笔风险额不足 \(formatUSD(Self.minimumUsefulRiskAmount))，多数合约会因最小张数无法下单，建议提高资金池比例", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -373,24 +394,46 @@ struct NewStrategySheet: View {
         }
     }
 
-    private func signalIntervalDescription(for strategyType: StrategyType) -> String {
-        switch strategyType {
-        case .hlsr: return "15 分钟入场；4 小时市场状态"
-        case .doublePumpExhaustionShort: return "15 分钟收盘确认；翻倍后衰竭做空"
-        case .sweepReversalShort: return "1 小时收盘确认"
-        case .external: return "运行时处理器不可用"
-        }
-    }
-
     /// Risk is supplied by the selected strategy's laboratory defaults. It is
     /// shown in the risk summary but is intentionally not editable here.
     private var effectiveRisk: Double { min(selectedRule.defaultRiskPercent, selectedRule.maxRiskPercent) }
 
-    private func formattedLeverage(_ value: Double) -> String {
-        value.rounded() == value ? String(format: "%.0f", value) : String(format: "%.1f", value)
+    private var usdtTotalAssets: Decimal? { model.accountOverview.usdtEquity }
+
+    /// Below this the sized order is smaller than one contract on most
+    /// instruments, so every signal would be refused at the lot-size check.
+    private static let minimumUsefulRiskAmount: Decimal = 5
+
+    private var maxConcurrentPositions: Int { Int(selectedRule.defaultParameters["maxConcurrentPositions"] ?? 1) }
+
+    /// Stop-loss budget of one entry: a share of this strategy's own pool.
+    private var perTradeRiskAmount: Decimal? {
+        currentStrategyCapital.map { $0 * Decimal(effectiveRisk) / 100 }
     }
 
-    private var usdtTotalAssets: Decimal? { model.accountOverview.usdtEquity }
+    private var maxOpenRiskAmount: Decimal? {
+        currentStrategyCapital.map { $0 * Decimal(selectedRule.maxOpenRiskPercent) / 100 }
+    }
+
+    /// What the slider can still hand out, in USDT, after the other pools.
+    private var remainingAllocatableCapital: Decimal? {
+        guard usdtTotalAssets != nil else { return nil }
+        return capitalAllocation.capital(for: capitalAllocation.availableAllocationPercent)
+    }
+
+    private func riskRowText(percent: Double, amount: Decimal?) -> String {
+        "\(formatPercent(Decimal(percent))) 资金池 ≈ \(formatted(amount))"
+    }
+
+    /// Strategy entries are only ever sent to the OKX demo account; the
+    /// footer says so in terms of the account that is actually connected.
+    private var submissionTarget: (text: String, icon: String, color: Color) {
+        switch model.accountOverview.mode {
+        case .paper: return ("仅提交至当前 OKX 模拟账户", "shield.checkered", .secondary)
+        case .live: return ("策略只向 OKX 模拟账户下单；当前连接的是实盘账户，策略不会提交订单", "exclamationmark.shield.fill", .orange)
+        case .readOnly: return ("当前账户只读，策略不会提交订单", "lock.shield", .orange)
+        }
+    }
 
     private var capitalAllocation: StrategyCapitalAllocation {
         StrategyCapitalAllocation(totalCapital: usdtTotalAssets ?? 0, strategyCapitals: model.strategyCapitals)

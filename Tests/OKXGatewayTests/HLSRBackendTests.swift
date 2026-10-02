@@ -34,6 +34,9 @@ private actor HLSRBackendRunner: ATKCommandRunning {
     private var releaseHeldClientLookup = false
     /// Suspends `swap place` to model a process that exits mid-submission.
     private var holdPlace = false
+    /// Lifts OTHER's 24h gain above the HLSR gate so the strategy scans two
+    /// symbols at once.
+    private var otherIsCandidate = false
 
     init(positions: [PositionSnapshot] = [], rejectNextPlace: Bool = false) {
         self.positions = positions
@@ -60,6 +63,7 @@ private actor HLSRBackendRunner: ATKCommandRunning {
     func heldClientLookupDidCapture() -> Bool { heldClientLookupCaptured }
     func releaseHeldClientLookupNow() { releaseHeldClientLookup = true }
     func setHoldPlace(_ value: Bool) { holdPlace = value }
+    func setOtherIsCandidate(_ value: Bool) { otherIsCandidate = value }
 
     func run(arguments: [String]) async throws -> ATKCommandResult {
         let command = arguments.joined(separator: " ")
@@ -142,7 +146,8 @@ private actor HLSRBackendRunner: ATKCommandRunning {
         if command.hasPrefix("market tickers SWAP") {
             // ALT is an eligible hot altcoin: it is non-mainstream, has a
             // positive 24h move, and exceeds the strategy's liquidity gate.
-            return ATKCommandResult(stdout: #"[{"instId":"ALT-USDT-SWAP","last":"97","open24h":"60","volCcy24h":"40000000"},{"instId":"OTHER-USDT-SWAP","last":"120","open24h":"100","volCcy24h":"39000000"}]"#)
+            let otherOpen = otherIsCandidate ? "60" : "100"
+            return ATKCommandResult(stdout: "[{\"instId\":\"ALT-USDT-SWAP\",\"last\":\"97\",\"open24h\":\"60\",\"volCcy24h\":\"40000000\"},{\"instId\":\"OTHER-USDT-SWAP\",\"last\":\"120\",\"open24h\":\"\(otherOpen)\",\"volCcy24h\":\"39000000\"}]")
         }
         if command.hasPrefix("market instruments --instType SWAP") {
             let id = command.contains(otherInstrumentID) ? otherInstrumentID : instrumentID
@@ -983,4 +988,87 @@ func filledStrategyEntryCountsExposureOnce() async throws {
     _ = try await restarted.account()
     #expect((await restarted.riskEngine.snapshot()).globalNotionals["ALT-USDT-SWAP"] == quantity * 100)
     #expect(try persistedReservationKeys(directory) == ["late-entry"])
+}
+
+@Test("A strategy entry is sized from its own pool equity, not the account balance")
+func strategyEntrySizesRiskFromPoolEquity() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let backend = makeBackend(runner: runner, directory: directory)
+    var requested = hlsrBackendConfig(enabled: true)
+    requested.capitalPoolPercent = 20
+    requested.riskPercent = StrategyType.hlsr.defaultRiskPercent
+    let config = try await backend.createStrategy(requested)
+    _ = try await backend.startStrategy(config.id)
+    _ = try await backend.contracts(forceRefresh: true)
+    let fixtures = hlsrBackendFixtures()
+    await backend.paper.prewarm(MarketSnapshot(instrumentID: "ALT-USDT-SWAP", interval: .fourHours, candles: fixtures.fourHour))
+    for candle in fixtures.lower {
+        _ = await backend.ingestRealtimeCandle(candle, instrumentID: "ALT-USDT-SWAP", interval: .fifteenMinutes)
+    }
+
+    let place = try #require((await runner.commandsContainingPlace()).first)
+    let sizeIndex = try #require(place.firstIndex(of: "--sz"))
+    let quantity = try #require(Decimal(string: place[sizeIndex + 1]))
+    let stopIndex = try #require(place.firstIndex(of: "--slTriggerPx"))
+    let stop = try #require(Decimal(string: place[stopIndex + 1]))
+
+    let pool = await backend.riskEngine.strategyCapital(config.id)
+    let accountEquity = (await backend.riskEngine.snapshot()).equity
+    #expect(pool.initialCapital == 20_000)
+    #expect(accountEquity == 100_000)
+    // Entry is the ALT ticker (97); the contract is 1 coin per lot, so the
+    // contract count is the budget divided by the stop distance, rounded down.
+    let entry: Decimal = 97
+    let riskDistance = abs(stop - entry)
+    func contracts(forBudget budget: Decimal) -> Decimal {
+        var raw = budget / riskDistance
+        var whole = Decimal()
+        NSDecimalRound(&whole, &raw, 0, .down)
+        return whole
+    }
+    let poolBudget = pool.initialCapital * Decimal(config.riskPercent) / 100
+    #expect(config.riskPercent == 10)
+    #expect(quantity == contracts(forBudget: poolBudget))
+    // The previous rule took 1% of the whole account, which is a different
+    // size for every pool that is not exactly 10% of the balance.
+    #expect(quantity != contracts(forBudget: accountEquity / 100))
+    // The order's stop risk stays inside the pool-based open-risk cap.
+    #expect(pool.openRisk <= pool.initialCapital * Decimal(config.parameters["maxOpenRiskPercent"] ?? 0) / 100)
+    #expect(pool.openRisk > 0)
+}
+
+@Test("The dashboard status keeps the newest signal and longest cooldown across scanned symbols")
+func dashboardStatusMergesAcrossScannedSymbols() async throws {
+    let runner = HLSRBackendRunner()
+    await runner.setOtherIsCandidate(true)
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let backend = makeBackend(runner: runner, directory: directory)
+    let config = try await backend.createStrategy(hlsrBackendConfig(enabled: true))
+    _ = try await backend.startStrategy(config.id)
+    _ = try await backend.contracts(forceRefresh: true)
+    let scanned = try await backend.strategyUniverseTargets().first { $0.strategyID == config.id }
+    #expect(scanned?.instrumentIDs.sorted() == ["ALT-USDT-SWAP", "OTHER-USDT-SWAP"])
+
+    let fixtures = hlsrBackendFixtures()
+    await backend.paper.prewarm(MarketSnapshot(instrumentID: "ALT-USDT-SWAP", interval: .fourHours, candles: fixtures.fourHour))
+    for candle in fixtures.lower {
+        _ = await backend.ingestRealtimeCandle(candle, instrumentID: "ALT-USDT-SWAP", interval: .fifteenMinutes)
+    }
+    let signalID = try #require((await backend.statuses()).first { $0.id == config.id }?.lastSignal?.id)
+
+    // The other scanned symbol ticks without a signal of its own. The
+    // per-strategy status used to follow whichever symbol evaluated last,
+    // which blanked the signal on the dashboard.
+    let last = try #require(fixtures.lower.last)
+    let tick = backendCandle(last.timestamp.timeIntervalSince1970 + 900, open: 120, high: 121, low: 119, close: 120)
+    _ = await backend.ingestRealtimeCandle(tick, instrumentID: "OTHER-USDT-SWAP", interval: .fifteenMinutes)
+    #expect((await backend.statuses()).first { $0.id == config.id }?.lastSignal?.id == signalID)
+
+    // Cooldown shows the longest wait among the symbols still being scanned.
+    await backend.paper.setCooldown(strategyID: config.id, instrumentID: "OTHER-USDT-SWAP", bars: 9)
+    await backend.paper.setCooldown(strategyID: config.id, instrumentID: "ALT-USDT-SWAP", bars: 3)
+    #expect((await backend.statuses()).first { $0.id == config.id }?.cooldown == 9)
 }

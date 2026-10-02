@@ -171,7 +171,7 @@ python3 strategies/hlsr/src/hlsr_signal_generator.py \
 
 HLSR 的稳定代码标识为 `hlsr`，领域层类型为 `StrategyType.hlsr`，界面显示为“高位扫顶反转做空”。运行时实现位于 `Sources/TradingDomain/`、`Sources/TradingService/`、`Sources/TradingService/HLSRPositionManager.swift`、`Sources/OKXLocalD/` 和 `Sources/MacTraderApp/`，不会读取本目录文件；规则和默认机器参数分别由本文件与 [`config/strategy.json`](config/strategy.json) 维护。
 
-- 运行范围是每 30 秒刷新、筛选 24 小时涨幅严格大于 40% 且报价成交额严格大于 3,000 万 USDT 的动态候选山寨币池；它不是通用热门榜前 20。每个策略实例最多一个活动币种，默认每笔风险为账户权益的 1%，开放止损风险上限为 1%。
+- 运行范围是每 30 秒刷新、筛选 24 小时涨幅严格大于 40% 且报价成交额严格大于 3,000 万 USDT 的动态候选山寨币池；它不是通用热门榜前 20。每个策略实例最多一个活动币种，默认每笔风险为本策略资金池权益的 10%，开放止损风险上限为资金池权益的 10%。
 - 15 分钟确认 K 线和已完成的 4 小时 K 线都必须连续、已确认且不重复；4 小时状态至少需要 55 根历史 K 线。成交额硬筛选只接受 OKX `volCcyQuote`，缺字段或历史不足时关闭信号，不以合约张数成交量替代。
 - 确认后只在下一根 15 分钟 K 线开盘估算市价入场；止损、TP1/TP2/TP3、TP1 后保本、TP2 后两根 K 线高点跟踪、收盘失效和 16 根 K 线冷却均由持仓管理状态机执行。止损优先，分批数量按合约 lot 规格向下取整，重启前持仓腿、目标和冷却状态必须持久化。
 - OKX 模拟盘可由人工启用，真实交易仍需额外手动开关；研究样本外结果目前为 **FAIL**（8 笔、37.5% 胜率、平均净 R +0.455），不能把该结果描述为已证明盈利。

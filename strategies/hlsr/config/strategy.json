@@ -26,7 +26,7 @@
     "stop_loss": "sweep_high + stop_atr * ATR14(15m)",
     "time_exit": "none_before_window_end; mark_last_close_at_data_end",
     "max_concurrent_positions": 1,
-    "max_open_risk_pct": 1.0,
+    "max_open_risk_pct": 10.0,
     "one_position_per_symbol": true,
     "one_active_symbol_per_strategy": true,
     "live_order_mode": "okx_demo_only",
@@ -59,14 +59,14 @@
     ],
     "move_stop_to_entry_after_tp1": true,
     "cooldown_bars": 16,
-    "risk_per_trade_pct": 1.0,
-    "risk_per_trade_max_pct": 1.0,
+    "risk_per_trade_pct": 10.0,
+    "risk_per_trade_max_pct": 10.0,
     "risk_per_trade_scope": "each_entry_order",
-    "risk_per_trade_basis": "account_equity_at_authorization",
-    "sizing_formula": "min(available_capital, account_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))",
+    "risk_per_trade_basis": "strategy_pool_equity_at_authorization",
+    "sizing_formula": "min(available_capital, pool_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))",
     "risk_budget_costs_included": false,
     "max_concurrent_positions": 1,
-    "max_open_risk_percent": 1.0
+    "max_open_risk_percent": 10.0
   },
   "execution": {
     "signal_confirmed_at": "15m candle close",

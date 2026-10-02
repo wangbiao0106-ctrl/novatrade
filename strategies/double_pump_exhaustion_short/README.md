@@ -1,6 +1,6 @@
 # Double Pump Exhaustion Short
 
-正式规则：`double_pump_exhaustion_short`（日内翻倍动能衰竭确认做空）。策略针对高波动、流动性足够的 USDT 线性永续山寨币，只做确认后的动能衰竭空单，默认 2 倍杠杆和每笔账户权益 1% 风险预算。
+正式规则：`double_pump_exhaustion_short`（日内翻倍动能衰竭确认做空）。策略针对高波动、流动性足够的 USDT 线性永续山寨币，只做确认后的动能衰竭空单，默认 2 倍杠杆和每笔本策略资金池权益 10% 的风险预算。
 
 - 规则真源：[STRATEGY.md](STRATEGY.md)
 - 机器配置：[config/strategy.json](config/strategy.json)

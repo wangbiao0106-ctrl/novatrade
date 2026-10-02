@@ -199,9 +199,9 @@ public actor RiskEngine {
             guard margin <= pool.availableCapital else {
                 return RiskDecision(allowed: false, reason: "策略资金池可用余额不足")
             }
-            // 开放止损风险上限：按账户权益的百分比计算，累计已开仓风险 + 本单风险。
+            // 开放止损风险上限：按本策略资金池权益的百分比计算，累计已开仓风险 + 本单风险。
             if let cap = maxOpenRiskPercent {
-                let limit = equity * cap / 100
+                let limit = pool.equity * cap / 100
                 if pool.openRisk + riskAmount > limit {
                     return RiskDecision(allowed: false, reason: "策略开放止损风险超过上限")
                 }

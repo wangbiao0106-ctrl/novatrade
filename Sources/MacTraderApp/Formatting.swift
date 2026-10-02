@@ -68,3 +68,30 @@ func formatQuantity(_ value: Decimal) -> String { String(format: "%.4f", value.d
 func formatSigned(_ value: Decimal) -> String { String(format: "%+.2f", value.doubleValue) }
 
 func formatSignedPercent(_ value: Double) -> String { String(format: "%+.2f%%", value) }
+
+private let shortTimestampFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "MM-dd HH:mm"
+    return formatter
+}()
+
+/// Compact local time for rail rows ("10-02 12:30").
+func formatShortTimestamp(_ date: Date) -> String { shortTimestampFormatter.string(from: date) }
+
+/// OKX contract counts are whole numbers for most instruments; keep the
+/// fraction only when the lot size actually produces one.
+func formatContracts(_ value: Decimal) -> String {
+    let number = value.doubleValue
+    return number.rounded() == number ? String(format: "%.0f", number) : String(format: "%.4f", number)
+}
+
+/// "1%" for whole percentages, "12.5%" otherwise.
+func formatPercent(_ value: Decimal) -> String {
+    let number = value.doubleValue
+    return number.rounded() == number ? String(format: "%.0f%%", number) : String(format: "%.1f%%", number)
+}
+
+func formatLeverage(_ value: Double) -> String {
+    value.rounded() == value ? String(format: "%.0f", value) : String(format: "%.1f", value)
+}

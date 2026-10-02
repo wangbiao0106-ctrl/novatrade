@@ -337,7 +337,12 @@ private final class StreamHub: @unchecked Sendable {
                     await backend.appendLog("OKX WSS \(instrumentID) \(interval.rawValue) 断开：\(reason)，\(retryInSeconds) 秒后重连", level: "warning")
                     self.send(hubKey: hubKey, type: "log", value: await backend.logs(), instrumentID: instrumentID) { _ in true }
                 case let .candle(candle):
-                    let statuses = await backend.ingestRealtimeCandle(candle, instrumentID: instrumentID, interval: interval)
+                    _ = await backend.ingestRealtimeCandle(candle, instrumentID: instrumentID, interval: interval)
+                    // Publish the merged per-strategy view, not the statuses of
+                    // the one instrument that just ticked: the dashboard shows
+                    // one card per strategy, and a multi-symbol scan would
+                    // otherwise flip its signal and cooldown on every bar.
+                    let statuses = await backend.statuses()
                     for subscriber in self.subscribers(of: hubKey) {
                         if subscriber.channels.contains("candle") { subscriber.writer.send("candle", candle, instrumentID: instrumentID) }
                         if subscriber.channels.contains("strategy") { subscriber.writer.send("strategy", statuses, instrumentID: instrumentID) }

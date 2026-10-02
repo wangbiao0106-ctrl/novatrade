@@ -64,13 +64,13 @@
   },
   "position_management": {
     "leverage": 2.0,
-    "risk_per_trade_pct": 1.0,
+    "risk_per_trade_pct": 10.0,
     "max_concurrent_positions": 1,
     "one_position_per_symbol": true,
     "daily_realized_loss_limit_pct": 5.0,
-    "risk_per_trade_basis": "account_equity_at_authorization",
-    "max_open_risk_percent": 1.0,
-    "sizing_formula": "min(available_capital, account_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))"
+    "risk_per_trade_basis": "strategy_pool_equity_at_authorization",
+    "max_open_risk_percent": 10.0,
+    "sizing_formula": "min(available_capital, pool_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))"
   },
   "costs": {
     "fee_rate_one_way": 0.0006,
@@ -95,7 +95,7 @@
     "entry_order": "market_after_confirmed_signal_close",
     "protective_orders": "attached_stop_loss_and_take_profit_reduce_only",
     "max_concurrent_positions": 1,
-    "max_open_risk_pct": 1.0,
+    "max_open_risk_pct": 10.0,
     "one_position_per_symbol": true,
     "one_active_symbol_per_strategy": true,
     "live_order_mode": "paper_only",

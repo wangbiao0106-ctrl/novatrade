@@ -171,46 +171,45 @@ struct StrategyStatusModule: View {
     private var isRunning: Bool { config.enabled }
     private var stateColor: Color { isRunning ? .green : .orange }
     private var openPositions: [PositionSnapshot] { model.strategyOpenPositions(for: config) }
+    private var capital: StrategyCapitalSnapshot? { model.strategyCapital(for: config) }
+    private var universe: StrategyUniverseSnapshot? { model.strategyUniverse(for: config) }
+    private var maxConcurrentPositions: Int { Int(config.parameters["maxConcurrentPositions"] ?? 1) }
+    /// A tripped account breaker stops every strategy; starting one again is
+    /// refused by the service until the breaker is reset.
+    private var startBlockedByKillSwitch: Bool { !isRunning && model.riskSnapshot.killSwitch }
 
-    private var stopLossText: String {
-        guard let signal = status?.lastSignal, let stop = signal.stopPrice, signal.price != 0 else {
-            return "策略止损：\(config.type.stopLossDescription)"
+    /// One line of fixed facts: scope, signal cycle, leverage and the size of
+    /// the pool the scanner resolved. The full scope definition is the tooltip.
+    private var metaText: String {
+        let scope: String
+        if case .dynamicCategory = config.scope.mode {
+            scope = config.scope.category?.shortName ?? "未分类"
+        } else {
+            scope = config.scope.displayName
         }
-        let distance = abs(stop.doubleValue - signal.price.doubleValue)
-        return String(format: "策略止损 %.2f%%（动态）", distance / abs(signal.price.doubleValue) * 100)
+        var parts = [scope, config.type.signalCycleShortLabel, "\(formatLeverage(config.leverage)) 倍"]
+        if let universe { parts.append("扫描 \(universe.targetCount) 个币") }
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
-        let pnl = status?.pnl ?? 0
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
-                Text(config.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Spacer()
-                Button { requestDelete() } label: { Image(systemName: "trash") }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .opacity(isRunning ? 0.45 : 1)
-                    .disabled(isRunning)
-                    .help(isRunning ? "请先停止策略" : "删除策略实例")
-                Text(status?.direction?.uppercased() ?? "空仓").font(.caption2.weight(.semibold)).padding(.horizontal, 7).padding(.vertical, 4).background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            Text(metaText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .help(config.scope.displayName)
+            divider
+            capitalMetrics
+            pnlRow
+            divider
+            signalRows
+            if !openPositions.isEmpty {
+                divider
+                positionRows
             }
-            HStack(spacing: 6) {
-                Text(config.scope.displayName).font(.caption.monospaced()).foregroundStyle(.secondary)
-                Spacer()
-                Circle().fill(stateColor).frame(width: 7, height: 7)
-                Text(isRunning ? "运行中" : "已暂停").font(.caption2).foregroundStyle(stateColor)
-            }
-            if let signal = status?.lastSignal {
-                Text("最近信号 \(signal.type) @ \(formatPrice(signal.price))").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            } else {
-                Text("暂无最近信号").font(.caption2).foregroundStyle(.secondary)
-            }
-            Text(stopLossText).font(.caption2).foregroundStyle(.secondary)
-            HStack {
-                Text("收益 \(formatSigned(pnl)) USDT").font(.caption2.monospacedDigit()).foregroundStyle(pnl >= 0 ? .green : .red)
-                Spacer()
-                Button(isRunning ? "暂停" : "启动") { model.toggleStrategy(config.id) }.buttonStyle(.bordered).controlSize(.mini)
-            }
+            footer
         }
         .padding(12)
         .background(Color.panelBackground, in: RoundedRectangle(cornerRadius: 8))
@@ -226,6 +225,155 @@ struct StrategyStatusModule: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("检测到 \(openPositions.count) 个未平仓位。必须先平仓并确认远端持仓归零后才能删除策略。")
+        }
+    }
+
+    private var divider: some View { Divider().overlay(Color.white.opacity(0.08)) }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text(config.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+            Spacer(minLength: 4)
+            Circle().fill(stateColor).frame(width: 7, height: 7)
+            Text(isRunning ? "运行中" : "已暂停").font(.caption2).foregroundStyle(stateColor)
+            Menu {
+                Button(role: .destructive) { requestDelete() } label: {
+                    Label("删除策略实例", systemImage: "trash")
+                }
+                .disabled(isRunning)
+            } label: {
+                Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(isRunning ? "运行中的策略不能删除，请先暂停" : "更多操作")
+            .accessibilityLabel("策略操作")
+        }
+    }
+
+    private var capitalMetrics: some View {
+        HStack(alignment: .top, spacing: 8) {
+            metric("资金池", value: capital.map { "\(formatUSD($0.equity)) (\(formatPercent($0.allocationPercent)))" } ?? "--")
+            metric("可用", value: capital.map { formatUSD($0.availableCapital) } ?? "--")
+            metric("持仓", value: "\(openPositions.count) / \(maxConcurrentPositions)")
+        }
+    }
+
+    private func metric(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.caption2.monospacedDigit().weight(.semibold)).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Strategy results live in the capital pool, which the service settles
+    /// from exchange history. `StrategyStatus.pnl` is never written on the
+    /// exchange path and would always read zero here.
+    private var pnlRow: some View {
+        let realized = capital?.realizedPnL ?? 0
+        let unrealized = capital?.unrealizedPnL ?? 0
+        let total = realized + unrealized
+        let totalColor: Color = capital == nil ? .secondary : (total >= 0 ? .green : .red)
+        return HStack(spacing: 6) {
+            Text("收益 \(formatSigned(total)) USDT")
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(totalColor)
+            Spacer()
+            Text("已实现 \(formatSigned(realized)) · 浮动 \(formatSigned(unrealized))")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var signalRows: some View {
+        if let signal = status?.lastSignal {
+            // A signal carries no instrument; the entry it produced does.
+            let order = model.strategyOrder(for: signal)
+            HStack(spacing: 4) {
+                Text("最近信号").foregroundStyle(.secondary)
+                Text(signalDirectionText(signal.type)).fontWeight(.semibold)
+                if let order { Text(order.instrumentID).monospaced() }
+                Text("· \(formatShortTimestamp(signal.timestamp)) · @ \(formatPrice(signal.price))").foregroundStyle(.secondary)
+                if order == nil { Text("未下单").foregroundStyle(.orange) }
+            }
+            .font(.caption2)
+            .lineLimit(1)
+            .help(signal.reason)
+        } else {
+            Text("最近信号 暂无").font(.caption2).foregroundStyle(.secondary)
+        }
+        if let status, status.cooldown > 0 {
+            let interval = config.type.cooldownBarInterval
+            let minutes = status.cooldown * interval.minutes
+            Label("冷却中 · 剩余 \(status.cooldown) 根 \(interval.displayName) K 线 · 约 \(TradingDurationText.describe(minutes: minutes))", systemImage: "hourglass")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+                .lineLimit(1)
+        }
+    }
+
+    private var positionRows: some View {
+        ForEach(openPositions) { position in
+            let pnl = position.unrealizedPnL ?? 0
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(position.instrumentID).font(.caption.monospaced())
+                    Text(position.side.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    Text("\(formatContracts(abs(position.quantity))) 张").font(.caption2.monospacedDigit())
+                    Spacer()
+                    Text(formatSigned(pnl)).font(.caption2.monospacedDigit()).foregroundStyle(pnl >= 0 ? .green : .red)
+                }
+                if let protection = protectionText(for: position) {
+                    Text(protection).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 8) {
+            if startBlockedByKillSwitch {
+                Text("账户风控已熔断，复位后才能启动").font(.caption2).foregroundStyle(.orange).lineLimit(1)
+            }
+            Spacer()
+            Button(isRunning ? "暂停" : "启动") { model.toggleStrategy(config.id) }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .disabled(startBlockedByKillSwitch)
+        }
+    }
+
+    /// Stop and take-profit of the entry that opened this position, relative
+    /// to the exchange's average entry price.
+    private func protectionText(for position: PositionSnapshot) -> String? {
+        let order = model.orders.first {
+            $0.strategyID == config.id && $0.instrumentID == position.instrumentID && !OrderLifecycle.isTerminal($0.status)
+        }
+        guard let signal = order?.signal, position.entryPrice > 0 else { return nil }
+        var parts: [String] = []
+        if let stop = signal.stopPrice {
+            parts.append("止损 \(formatPrice(stop)) (\(formatSignedPercent(percentDelta(stop, from: position.entryPrice))))")
+        }
+        if let take = signal.takePrice {
+            let label = (signal.takePrices?.count ?? 0) > 1 ? "止盈 TP1" : "止盈"
+            parts.append("\(label) \(formatPrice(take)) (\(formatSignedPercent(percentDelta(take, from: position.entryPrice))))")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func percentDelta(_ price: Decimal, from entry: Decimal) -> Double {
+        ((price - entry) / entry * 100).doubleValue
+    }
+
+    private func signalDirectionText(_ type: String) -> String {
+        switch type {
+        case "entry_short": return "做空"
+        case "entry_long": return "做多"
+        default: return type
         }
     }
 
