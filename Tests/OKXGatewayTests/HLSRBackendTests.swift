@@ -19,6 +19,10 @@ private actor HLSRBackendRunner: ATKCommandRunning {
     /// Simulates a lost submit response and a failing clOrdId lookup.
     private var placeResponseLost = false
     private var clientOrderLookupFails = false
+    private var cancelCommands: [[String]] = []
+    private var rejectCancel = false
+    /// Suspends `swap place` to model a process that exits mid-submission.
+    private var holdPlace = false
 
     init(positions: [PositionSnapshot] = [], rejectNextPlace: Bool = false) {
         self.positions = positions
@@ -32,11 +36,15 @@ private actor HLSRBackendRunner: ATKCommandRunning {
     func setPlaceResponseLost(_ value: Bool) { placeResponseLost = value }
     func setClientOrderLookupFails(_ value: Bool) { clientOrderLookupFails = value }
     func commandsContainingPlace() -> [[String]] { placeCommands }
+    func commandsContainingCancel() -> [[String]] { cancelCommands }
+    func setRejectCancel(_ value: Bool) { rejectCancel = value }
+    func setHoldPlace(_ value: Bool) { holdPlace = value }
 
     func run(arguments: [String]) async throws -> ATKCommandResult {
         let command = arguments.joined(separator: " ")
         if command.contains("swap place") {
             placeCommands.append(arguments)
+            while holdPlace { try await Task.sleep(for: .milliseconds(5)) }
             if placeResponseLost { throw ATKError.unavailable("ATK 命令超时") }
             if rejectNextPlace {
                 rejectNextPlace = false
@@ -45,6 +53,28 @@ private actor HLSRBackendRunner: ATKCommandRunning {
             let orderID = "hlsr-order-\(nextOrderNumber)"
             nextOrderNumber += 1
             return ATKCommandResult(stdout: #"{"data":[{"ordId":"ORDER_ID"}]}"#.replacingOccurrences(of: "ORDER_ID", with: orderID))
+        }
+        if command.contains("swap cancel") {
+            cancelCommands.append(arguments)
+            if rejectCancel { return ATKCommandResult(stdout: #"{"code":"51000","msg":"cancel rejected"}"#) }
+            // A cancelled order keeps its client-order lookup, now terminal
+            // with whatever had filled before the cancel.
+            for (clientOrderID, order) in clientOrders where arguments.contains(order.id) {
+                clientOrders[clientOrderID] = OrderSnapshot(id: order.id, instrumentID: order.instrumentID, side: order.side,
+                                                            status: "canceled", quantity: order.quantity, price: order.price,
+                                                            createdAt: order.createdAt, filledQuantity: order.filledQuantity ?? 0)
+            }
+            var cancelled: [OrderSnapshot] = []
+            for var order in remoteOrders {
+                if arguments.contains(order.id) {
+                    order = OrderSnapshot(id: order.id, instrumentID: order.instrumentID, side: order.side,
+                                          status: "canceled", quantity: order.quantity, price: order.price,
+                                          createdAt: order.createdAt)
+                }
+                cancelled.append(order)
+            }
+            remoteOrders = cancelled
+            return ATKCommandResult(stdout: #"{"code":"0","data":[{"instId":"ALT-USDT-SWAP"}]}"#)
         }
         if command == "config show --json" {
             return ATKCommandResult(stdout: #"{"default_profile":"demo","profiles":{"demo":{"site":"global","api_key":"key","demo":true}}}"#)
@@ -64,7 +94,8 @@ private actor HLSRBackendRunner: ATKCommandRunning {
             if clientOrderLookupFails { throw ATKError.unavailable("ATK 查询超时") }
             if let index = arguments.firstIndex(of: "--clOrdId"), index + 1 < arguments.count,
                let order = clientOrders[arguments[index + 1]] {
-                return ATKCommandResult(stdout: "[{\"instId\":\"\(order.instrumentID)\",\"ordId\":\"\(order.id)\",\"clOrdId\":\"\(arguments[index + 1])\",\"side\":\"buy\",\"state\":\"\(order.status)\",\"sz\":\"\(order.quantity)\",\"cTime\":\"1700000000000\"}]")
+                let filled = order.filledQuantity.map { ",\"accFillSz\":\"\($0)\"" } ?? ""
+                return ATKCommandResult(stdout: "[{\"instId\":\"\(order.instrumentID)\",\"ordId\":\"\(order.id)\",\"clOrdId\":\"\(arguments[index + 1])\",\"side\":\"buy\",\"state\":\"\(order.status)\",\"sz\":\"\(order.quantity)\",\"cTime\":\"1700000000000\"\(filled)}]")
             }
             return ATKCommandResult(stdout: #"{"code":"51603","msg":"Order does not exist"}"#)
         }
@@ -454,7 +485,7 @@ func strategyEntryWithUnknownOutcomeReleasesPoolWhenAbsent() async throws {
 
     // Deleting the strategy must wait for the outcome.
     _ = try await backend.pauseStrategy(config.id)
-    await #expect(throws: ATKError.unavailable("策略仍有结果未知的下单，请等待后台按 clOrdId 核对完成后再删除")) {
+    await #expect(throws: ATKError.unavailable("策略仍有结果未知或待撤销的下单，请等待后台按 clOrdId 核对完成后再删除")) {
         _ = try await backend.deleteStrategy(config.id)
     }
 
@@ -465,6 +496,228 @@ func strategyEntryWithUnknownOutcomeReleasesPoolWhenAbsent() async throws {
     #expect(pool.reservedCapital == 0)
     #expect(pool.openRisk == 0)
     #expect((await backend.paper.allOrders()).first(where: { $0.strategyID == config.id })?.status == "rejected")
+}
+
+private func persistedReservationKeys(_ directory: URL) throws -> Set<String> {
+    let url = directory.appendingPathComponent("remote-reservations.json")
+    let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any] ?? [:]
+    return Set(object.keys)
+}
+
+private func lateEntry(_ id: String, status: String, filled: Decimal?) -> OrderSnapshot {
+    OrderSnapshot(id: id, instrumentID: "ALT-USDT-SWAP", side: "sell", status: status, quantity: 1, filledQuantity: filled)
+}
+
+@Test("Deleting a strategy cancels an entry that OKX accepted after the cancel pass")
+func deleteCancelsLateAcceptedRestingEntry() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, config, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+    // Paused while OKX is unreachable: the entry stays unresolved.
+    _ = try await backend.pauseStrategy(config.id)
+
+    // OKX turns out to hold the entry as a resting order.
+    let resting = lateEntry("late-live", status: "live", filled: 0)
+    await runner.setClientOrderLookupFails(false)
+    await runner.setClientOrder(clientOrderID, order: resting)
+    await runner.setRemoteOrders([resting])
+
+    _ = try await backend.deleteStrategy(config.id)
+    #expect((await runner.commandsContainingCancel()).contains { $0.contains("late-live") })
+    #expect((await backend.strategies()).isEmpty)
+    #expect((await backend.paper.allOrders()).first(where: { $0.strategyID == config.id })?.status == "canceled")
+    #expect(try persistedReservationKeys(directory).isEmpty)
+}
+
+@Test("A late-accepted entry that cannot be cancelled blocks deletion until the cancel succeeds")
+func lateAcceptedEntryThatCannotBeCancelledBlocksDeletion() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, config, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+    _ = try await backend.pauseStrategy(config.id)
+
+    let resting = lateEntry("late-live", status: "live", filled: 0)
+    await runner.setClientOrderLookupFails(false)
+    await runner.setClientOrder(clientOrderID, order: resting)
+    await runner.setRemoteOrders([resting])
+    await runner.setRejectCancel(true)
+    await #expect(throws: ATKError.unavailable("策略仍有结果未知或待撤销的下单，请等待后台按 clOrdId 核对完成后再删除")) {
+        _ = try await backend.deleteStrategy(config.id)
+    }
+    #expect((await backend.strategies()).count == 1)
+    #expect((await backend.riskEngine.strategyCapital(config.id)).openPositions == 1)
+
+    // Reconciliation retries the cancel and settles the entry once it lands.
+    await runner.setRejectCancel(false)
+    _ = try await backend.account()
+    #expect((await backend.riskEngine.strategyCapital(config.id)).openPositions == 0)
+    _ = try await backend.deleteStrategy(config.id)
+    #expect((await backend.strategies()).isEmpty)
+}
+
+@Test("Pausing a strategy cancels an entry that OKX accepted after the cancel pass")
+func pauseCancelsLateAcceptedRestingEntry() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, config, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+
+    let resting = lateEntry("late-live", status: "live", filled: 0)
+    await runner.setClientOrderLookupFails(false)
+    await runner.setClientOrder(clientOrderID, order: resting)
+    await runner.setRemoteOrders([resting])
+    _ = try await backend.pauseStrategy(config.id)
+
+    #expect((await runner.commandsContainingCancel()).contains { $0.contains("late-live") })
+    let pool = await backend.riskEngine.strategyCapital(config.id)
+    #expect(pool.openPositions == 0)
+    #expect(pool.reservedCapital == 0)
+}
+
+@Test("A running strategy's in-transit entry is not cancelled when its outcome resolves")
+func runningStrategyRestingEntryIsKeptWhenResolved() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, config, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+
+    let resting = lateEntry("late-live", status: "live", filled: 0)
+    await runner.setClientOrderLookupFails(false)
+    await runner.setClientOrder(clientOrderID, order: resting)
+    await runner.setRemoteOrders([resting])
+    _ = try await backend.account()
+
+    #expect((await runner.commandsContainingCancel()).isEmpty)
+    #expect(try persistedReservationKeys(directory) == ["late-live"])
+    #expect((await backend.riskEngine.strategyCapital(config.id)).openPositions == 1)
+}
+
+@Test("An unresolved entry that OKX reports cancelled without fills releases its pool slot")
+func unresolvedEntryReportedCancelledReleasesPool() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, config, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+
+    await runner.setClientOrderLookupFails(false)
+    await runner.setClientOrder(clientOrderID, order: lateEntry("dead-entry", status: "canceled", filled: 0))
+    _ = try await backend.account()
+
+    let pool = await backend.riskEngine.strategyCapital(config.id)
+    #expect(pool.openPositions == 0)
+    #expect(pool.reservedCapital == 0)
+    #expect(pool.openRisk == 0)
+    #expect((await backend.paper.allOrders()).first(where: { $0.strategyID == config.id })?.status == "canceled")
+    #expect(try persistedReservationKeys(directory).isEmpty)
+}
+
+@Test("A cancelled entry that had filled partly keeps its claim")
+func cancelledEntryWithPartialFillKeepsClaim() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, config, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+
+    // A terminal state alone does not prove the order left no position.
+    await runner.setClientOrderLookupFails(false)
+    await runner.setClientOrder(clientOrderID, order: lateEntry("part-entry", status: "canceled", filled: 1))
+    _ = try await backend.account()
+    #expect(try persistedReservationKeys(directory) == ["part-entry"])
+    #expect((await backend.riskEngine.strategyCapital(config.id)).openPositions == 1)
+    #expect((await backend.paper.allOrders()).first(where: { $0.strategyID == config.id })?.remoteOrderID == "part-entry")
+}
+
+@Test("A rejected strategy entry leaves no live order record behind")
+func rejectedStrategyEntryClosesItsRecord() async throws {
+    let runner = HLSRBackendRunner(rejectNextPlace: true)
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let backend = makeBackend(runner: runner, directory: directory)
+    let config = try await backend.createStrategy(hlsrBackendConfig(enabled: true))
+    _ = try await backend.startStrategy(config.id)
+    _ = try await backend.contracts(forceRefresh: true)
+    let fixtures = hlsrBackendFixtures()
+    await backend.paper.prewarm(MarketSnapshot(instrumentID: "ALT-USDT-SWAP", interval: .fourHours, candles: fixtures.fourHour))
+    for candle in fixtures.lower {
+        _ = await backend.ingestRealtimeCandle(candle, instrumentID: "ALT-USDT-SWAP", interval: .fifteenMinutes)
+    }
+    #expect((await runner.commandsContainingPlace()).count == 1)
+    #expect((await backend.paper.allOrders()).filter { $0.strategyID == config.id }.map(\.status) == ["rejected"])
+    #expect((await backend.riskEngine.strategyCapital(config.id)).openPositions == 0)
+}
+
+@Test("A process that exits mid-submission leaves the entry and its claim for the restart to resolve")
+func crashDuringSubmitIsRecoveredByClientOrderID() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    await runner.setHoldPlace(true)
+    let backend = makeBackend(runner: runner, directory: directory)
+    let config = try await backend.createStrategy(hlsrBackendConfig(enabled: true))
+    _ = try await backend.startStrategy(config.id)
+    _ = try await backend.contracts(forceRefresh: true)
+    let fixtures = hlsrBackendFixtures()
+    await backend.paper.prewarm(MarketSnapshot(instrumentID: "ALT-USDT-SWAP", interval: .fourHours, candles: fixtures.fourHour))
+    let driving = Task {
+        for candle in fixtures.lower {
+            _ = await backend.ingestRealtimeCandle(candle, instrumentID: "ALT-USDT-SWAP", interval: .fifteenMinutes)
+        }
+    }
+    var submitted: [String]?
+    for _ in 0..<400 where submitted == nil {
+        submitted = await runner.commandsContainingPlace().first
+        if submitted == nil { try await Task.sleep(for: .milliseconds(5)) }
+    }
+    let place = try #require(submitted)
+    let index = try #require(place.firstIndex(of: "--clOrdId"))
+    let clientOrderID = place[index + 1]
+
+    // The process dies while the submit is on the wire; a fresh backend sees
+    // only what was persisted before the command was sent.
+    let restarted = makeBackend(runner: runner, directory: directory)
+    let entry = try #require((await restarted.paper.allOrders()).first { $0.strategyID == config.id })
+    #expect(entry.clientOrderID == clientOrderID)
+    #expect(entry.remoteOrderID == nil)
+    #expect(try persistedReservationKeys(directory) == ["unresolved-\(clientOrderID)"])
+
+    await runner.setClientOrder(clientOrderID, order: lateEntry("crash-entry", status: "filled", filled: 1))
+    _ = try await restarted.account()
+    #expect(try persistedReservationKeys(directory) == ["crash-entry"])
+    #expect((await restarted.paper.allOrders()).first { $0.strategyID == config.id }?.remoteOrderID == "crash-entry")
+    #expect((await restarted.riskEngine.strategyCapital(config.id)).openPositions == 1)
+
+    // Let the abandoned process's command finish so its task ends.
+    await runner.setHoldPlace(false)
+    _ = await driving.value
+}
+
+@Test("A crash after the claim is written but before the entry record releases the claim on restart")
+func crashBeforeEntryRecordReleasesClaim() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (_, config, _) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+
+    // Rewrite the persisted ledger as it stood in the crash window: the risk
+    // snapshot and the claim reached disk, the entry record did not.
+    let stateURL = directory.appendingPathComponent("paper-state.json")
+    var state = try JSONSerialization.jsonObject(with: Data(contentsOf: stateURL)) as? [String: Any] ?? [:]
+    let orders = state["orders"] as? [[String: Any]] ?? []
+    state["orders"] = orders.filter { ($0["strategyID"] as? String) != config.id.uuidString }
+    try JSONSerialization.data(withJSONObject: state).write(to: stateURL)
+
+    let restarted = makeBackend(runner: runner, directory: directory)
+    #expect((await restarted.paper.allOrders()).filter { $0.strategyID == config.id }.isEmpty)
+    // The backend restores the persisted pool before serving it.
+    #expect((await restarted.strategyCapital()).first { $0.strategyID == config.id }?.openPositions == 1)
+    await runner.setClientOrderLookupFails(false) // OKX never saw the clOrdId
+    _ = try await restarted.account()
+    #expect(try persistedReservationKeys(directory).isEmpty)
+    let pool = await restarted.riskEngine.strategyCapital(config.id)
+    #expect(pool.openPositions == 0)
+    #expect(pool.reservedCapital == 0)
 }
 
 private func hlsrBackendFixtures() -> (lower: [Candle], fourHour: [Candle]) {

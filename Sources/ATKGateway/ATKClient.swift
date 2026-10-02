@@ -466,11 +466,15 @@ public struct ATKClient: Sendable {
         return order
     }
 
+    /// OKX `clOrdId`: 1 to 32 ASCII letters or digits.
+    public static func isValidClientOrderID(_ value: String) -> Bool {
+        (1...32).contains(value.utf8.count) && value.utf8.allSatisfy { byte in
+            (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
+        }
+    }
+
     private static func validateClientOrderID(_ value: String) throws {
-        guard (1...32).contains(value.utf8.count),
-              value.utf8.allSatisfy({ byte in
-                  (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
-              }) else {
+        guard isValidClientOrderID(value) else {
             throw ATKError.invalidOrder("客户端订单号必须是 1 到 32 位字母或数字")
         }
     }
@@ -595,7 +599,10 @@ public struct ATKClient: Sendable {
             }
             price = parsed > 0 ? parsed : nil
         } else { price = nil }
-        return OrderSnapshot(id: orderID, instrumentID: instrument, side: side.lowercased(), status: state.lowercased(), quantity: quantity, price: price, createdAt: created)
+        // Parsed leniently: a missing or malformed fill size only makes the
+        // fill unknown, and callers treat unknown as possibly filled.
+        let filled = Self.decimal(row["accFillSz"]).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        return OrderSnapshot(id: orderID, instrumentID: instrument, side: side.lowercased(), status: state.lowercased(), quantity: quantity, price: price, createdAt: created, filledQuantity: filled)
     }
 
     private static func decodeCandle(_ row: [Any]) -> Candle? {

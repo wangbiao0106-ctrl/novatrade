@@ -205,24 +205,29 @@ def existing_result(symbol: str, filename: str, destination: Path,
         return None
 
 
-# A candle is usable only when it is closed and carries finite positive
-# prices.  OKX writes `confirmed` as the string "1"/"0" and trims trailing
-# zeros, so a text field can hold "0.0" or "" where a number is expected.
-_STATUS_WORDS = {"": 0.0, "0": 0.0, "false": 0.0, "no": 0.0, "n": 0.0,
-                 "1": 1.0, "true": 1.0, "yes": 1.0, "y": 1.0}
-_REQUIRED_FIELDS = ("timestamp", "open", "high", "low", "close", "quote_volume")
+# A candle is usable only when it is closed and carries finite prices and
+# volumes.  The `confirmed` field is a flag, not a number, so it gets its own
+# reader: the empty string is how OKX serializes a column it did not send.
+_REQUIRED_FIELDS = ("timestamp", "open", "high", "low", "close", "volume", "quote_volume")
+_FLAG_WORDS = {"0": False, "false": False, "no": False, "n": False,
+               "1": True, "true": True, "yes": True, "y": True}
 
 
 def _finite(value: Any) -> float | None:
-    """Return a finite float for an OKX numeric field, else None."""
+    """Return a finite float for an OKX numeric field, else None.
+
+    An empty string is missing data, not zero: OKX trims trailing zeros and
+    sends `""` for a column it omitted, and a backtest must not read that as
+    a real zero volume.
+    """
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
         number = float(value)
     elif isinstance(value, str):
         text = value.strip()
-        if text in _STATUS_WORDS:
-            return _STATUS_WORDS[text]
+        if not text:
+            return None
         try:
             number = float(text)
         except ValueError:
@@ -230,6 +235,21 @@ def _finite(value: Any) -> float | None:
     else:
         return None
     return number if math.isfinite(number) else None
+
+
+def _flag(value: Any) -> bool | None:
+    """Read the `confirmed` flag from OKX's string or boolean spelling."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return float(value) == 1.0 if math.isfinite(float(value)) else None
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _FLAG_WORDS:
+            return _FLAG_WORDS[text]
+        number = _finite(text)
+        return None if number is None else number == 1.0
+    return None
 
 
 def is_complete_candle(candle: dict[str, Any]) -> bool:
@@ -241,15 +261,19 @@ def is_complete_candle(candle: dict[str, Any]) -> bool:
             return False
     if _finite(candle.get("timestamp_ms")) is None:
         return False
-    confirmed = candle.get("confirmed")
-    closed = confirmed if isinstance(confirmed, bool) else _finite(confirmed) == 1.0
-    if not closed:
+    if _flag(candle.get("confirmed")) is not True:
         return False
-    prices = {field: _finite(candle.get(field)) for field in ("open", "high", "low", "close", "quote_volume")}
+    prices = {field: _finite(candle.get(field)) for field in ("open", "high", "low", "close")}
     if any(value is None for value in prices.values()):
         return False
     open_, high, low, close = (prices[field] for field in ("open", "high", "low", "close"))
     if min(open_, high, low, close) <= 0:
+        return False
+    # Volume feeds the same research loaders as price: a missing or non-finite
+    # `volume` (OKX trims trailing zeros, so `""` and `"NaN"` both occur) must
+    # fail the completeness check instead of being skipped as a good file.
+    volumes = [_finite(candle.get(field)) for field in ("volume", "quote_volume")]
+    if any(value is None or value < 0 for value in volumes):
         return False
     # An inverted range cannot come from OKX; refuse to treat such a file as
     # a valid backtest input instead of silently trading on it.

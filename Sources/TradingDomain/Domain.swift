@@ -280,9 +280,14 @@ public struct OrderSnapshot: Codable, Equatable, Sendable, Identifiable {
     public let quantity: Decimal
     public let price: Decimal?
     public let createdAt: Date
+    /// OKX `accFillSz`: contracts filled so far. A cancelled order can still
+    /// have filled partly, so terminal state alone does not prove that an
+    /// order left no position. Nil when the exchange row did not report it.
+    public let filledQuantity: Decimal?
 
-    public init(id: String = UUID().uuidString, instrumentID: String, side: String, status: String, quantity: Decimal, price: Decimal? = nil, createdAt: Date = .now) {
+    public init(id: String = UUID().uuidString, instrumentID: String, side: String, status: String, quantity: Decimal, price: Decimal? = nil, createdAt: Date = .now, filledQuantity: Decimal? = nil) {
         self.id = id; self.instrumentID = instrumentID; self.side = side; self.status = status; self.quantity = quantity; self.price = price; self.createdAt = createdAt
+        self.filledQuantity = filledQuantity
     }
 }
 
@@ -885,13 +890,18 @@ public struct PaperOrder: Codable, Equatable, Sendable, Identifiable {
     public let status: String
     /// OKX order id when this record was submitted to the demo account.
     public let remoteOrderID: String?
+    /// Exchange client order id of the submission. It is known before the
+    /// order is sent, so a process that dies mid-submission can still resolve
+    /// the outcome by looking this id up.
+    public let clientOrderID: String?
     /// Protection must keep the signal that authorized this entry even if
     /// the scanner later observes another setup or the service restarts.
     public let signal: StrategySignal?
 
-    public init(id: UUID = UUID(), strategyID: UUID, instrumentID: String, side: String, quantity: Decimal, requestedAt: Date = .now, fillPrice: Decimal? = nil, status: String = "pending", remoteOrderID: String? = nil, signal: StrategySignal? = nil) {
+    public init(id: UUID = UUID(), strategyID: UUID, instrumentID: String, side: String, quantity: Decimal, requestedAt: Date = .now, fillPrice: Decimal? = nil, status: String = "pending", remoteOrderID: String? = nil, clientOrderID: String? = nil, signal: StrategySignal? = nil) {
         self.id = id; self.strategyID = strategyID; self.instrumentID = instrumentID; self.side = side; self.quantity = quantity
         self.requestedAt = requestedAt; self.fillPrice = fillPrice; self.status = status; self.remoteOrderID = remoteOrderID
+        self.clientOrderID = clientOrderID
         self.signal = signal
     }
 }
