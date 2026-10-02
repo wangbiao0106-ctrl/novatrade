@@ -188,7 +188,11 @@ struct StrategyStatusModule: View {
             scope = config.scope.displayName
         }
         var parts = [scope, config.type.signalCycleShortLabel, "\(formatLeverage(config.leverage)) 倍"]
-        if let universe { parts.append("扫描 \(universe.targetCount) 个币") }
+        if let universe {
+            // Zero is a normal outcome on a quiet day: no symbol clears the
+            // rule's gain and turnover gates. Say so instead of "scanning 0".
+            parts.append(universe.targetCount == 0 ? "暂无符合条件的币" : "扫描 \(universe.targetCount) 个币")
+        }
         return parts.joined(separator: " · ")
     }
 
