@@ -21,6 +21,11 @@ private actor HLSRBackendRunner: ATKCommandRunning {
     private var clientOrderLookupFails = false
     private var cancelCommands: [[String]] = []
     private var rejectCancel = false
+    /// Number of clOrdId lookups that fail before the runner answers again.
+    private var lookupFailuresRemaining = 0
+    /// When set, a cancelled order disappears from clOrdId lookups entirely,
+    /// as OKX can briefly do while its state propagates.
+    private var vanishAfterCancel = false
     /// Suspends `swap place` to model a process that exits mid-submission.
     private var holdPlace = false
 
@@ -38,6 +43,8 @@ private actor HLSRBackendRunner: ATKCommandRunning {
     func commandsContainingPlace() -> [[String]] { placeCommands }
     func commandsContainingCancel() -> [[String]] { cancelCommands }
     func setRejectCancel(_ value: Bool) { rejectCancel = value }
+    func setLookupFailures(_ count: Int) { lookupFailuresRemaining = count }
+    func setVanishAfterCancel(_ value: Bool) { vanishAfterCancel = value }
     func setHoldPlace(_ value: Bool) { holdPlace = value }
 
     func run(arguments: [String]) async throws -> ATKCommandResult {
@@ -57,6 +64,11 @@ private actor HLSRBackendRunner: ATKCommandRunning {
         if command.contains("swap cancel") {
             cancelCommands.append(arguments)
             if rejectCancel { return ATKCommandResult(stdout: #"{"code":"51000","msg":"cancel rejected"}"#) }
+            if vanishAfterCancel {
+                for (clientOrderID, order) in clientOrders where arguments.contains(order.id) {
+                    clientOrders.removeValue(forKey: clientOrderID)
+                }
+            }
             // A cancelled order keeps its client-order lookup, now terminal
             // with whatever had filled before the cancel.
             for (clientOrderID, order) in clientOrders where arguments.contains(order.id) {
@@ -91,6 +103,10 @@ private actor HLSRBackendRunner: ATKCommandRunning {
             return ATKCommandResult(stdout: encodeOrders())
         }
         if command.contains("swap get ") {
+            if lookupFailuresRemaining > 0 {
+                lookupFailuresRemaining -= 1
+                throw ATKError.unavailable("ATK 查询超时")
+            }
             if clientOrderLookupFails { throw ATKError.unavailable("ATK 查询超时") }
             if let index = arguments.firstIndex(of: "--clOrdId"), index + 1 < arguments.count,
                let order = clientOrders[arguments[index + 1]] {
@@ -718,6 +734,85 @@ func crashBeforeEntryRecordReleasesClaim() async throws {
     let pool = await restarted.riskEngine.strategyCapital(config.id)
     #expect(pool.openPositions == 0)
     #expect(pool.reservedCapital == 0)
+}
+
+@Test("Pausing cancels a resting entry that only the later resolution passes can see")
+func pauseCancelsRestingEntryFoundOnLaterPass() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, config, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+    await runner.setClientOrderLookupFails(false)
+    await runner.setClientOrder(clientOrderID, order: lateEntry("late-live", status: "live", filled: 0))
+    await runner.setRemoteOrders([lateEntry("late-live", status: "live", filled: 0)])
+    // The first lookup during the pause's first resolver pass fails; the entry
+    // is only visible to the final pass.
+    await runner.setLookupFailures(1)
+
+    _ = try await backend.pauseStrategy(config.id)
+
+    #expect((await runner.commandsContainingCancel()).contains { $0.contains("late-live") })
+    let pool = await backend.riskEngine.strategyCapital(config.id)
+    #expect(pool.openPositions == 0)
+    #expect(pool.reservedCapital == 0)
+    #expect(try persistedReservationKeys(directory).isEmpty)
+}
+
+@Test("A cancel whose order then disappears from lookups keeps its claim and pool slot")
+func cancelledEntryThatVanishesFromLookupsKeepsClaim() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, config, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+    await runner.setClientOrderLookupFails(false)
+    await runner.setClientOrder(clientOrderID, order: lateEntry("late-live", status: "live", filled: 0))
+    await runner.setRemoteOrders([lateEntry("late-live", status: "live", filled: 0)])
+    // After the cancel, OKX drops the order from clOrdId lookups while the
+    // state propagates, even though a fill may have raced the cancel.
+    await runner.setVanishAfterCancel(true)
+
+    _ = try await backend.pauseStrategy(config.id)
+
+    // The cancel was sent, so the claim must not be released on a bare
+    // "order does not exist".
+    #expect((await runner.commandsContainingCancel()).contains { $0.contains("late-live") })
+    #expect(try persistedReservationKeys(directory) == ["unresolved-\(clientOrderID)"])
+    let pool = await backend.riskEngine.strategyCapital(config.id)
+    #expect(pool.openPositions == 1)
+    #expect(pool.reservedCapital > 0)
+    let entry = try #require((await backend.paper.allOrders()).first { $0.strategyID == config.id })
+    #expect(entry.status == "submitted")
+    #expect(entry.remoteOrderID == nil)
+}
+
+@Test("Market-maker protection and command-layer failures release the pool like other empty terminal states")
+func specialTerminalStatesReleasePool() async throws {
+    for status in ["mmp_canceled", "order_failed", "expired"] {
+        let runner = HLSRBackendRunner()
+        let directory = backendDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (backend, config, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+        await runner.setClientOrderLookupFails(false)
+        await runner.setClientOrder(clientOrderID, order: lateEntry("dead-entry", status: status, filled: 0))
+        _ = try await backend.account()
+        let pool = await backend.riskEngine.strategyCapital(config.id)
+        #expect(pool.openPositions == 0, "\(status) should release the pool slot")
+        #expect(pool.reservedCapital == 0, "\(status) should release capital")
+        #expect(try persistedReservationKeys(directory).isEmpty, "\(status) should drop the claim")
+    }
+}
+
+@Test("A special terminal state that had filled partly keeps its claim")
+func mmpCanceledWithPartialFillKeepsClaim() async throws {
+    let runner = HLSRBackendRunner()
+    let directory = backendDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let (backend, config, clientOrderID) = try await submitHLSREntryWithUnknownOutcome(runner: runner, directory: directory)
+    await runner.setClientOrderLookupFails(false)
+    await runner.setClientOrder(clientOrderID, order: lateEntry("part-entry", status: "mmp_canceled", filled: 1))
+    _ = try await backend.account()
+    #expect(try persistedReservationKeys(directory) == ["part-entry"])
+    #expect((await backend.riskEngine.strategyCapital(config.id)).openPositions == 1)
 }
 
 private func hlsrBackendFixtures() -> (lower: [Candle], fourHour: [Candle]) {

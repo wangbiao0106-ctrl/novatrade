@@ -367,8 +367,7 @@ final class DashboardModel: ObservableObject {
     /// be used here, or "close and delete" would flatten manual positions and
     /// other strategies' positions on the same instruments.
     func strategyOpenPositions(for config: StrategyConfig) -> [PositionSnapshot] {
-        let terminal: Set<String> = ["cancelled", "canceled", "rejected", "expired", "failed", "closed"]
-        let owned = orders.filter { $0.strategyID == config.id && !terminal.contains($0.status.lowercased()) }
+        let owned = orders.filter { $0.strategyID == config.id && !OrderLifecycle.isTerminal($0.status) }
         let directionsByInstrument = Dictionary(grouping: owned, by: \.instrumentID).mapValues { values in
             Set(values.map { $0.side.lowercased() })
         }

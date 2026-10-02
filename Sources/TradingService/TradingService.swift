@@ -366,7 +366,7 @@ public actor PaperTradingStore {
     /// A released reservation must not be recreated from its old submitted
     /// entry on the next authenticated reconciliation or after a restart.
     public func markRemoteOrderTerminal(_ remoteOrderID: String, status: String = "closed") {
-        guard ["closed", "cancelled", "canceled", "rejected", "expired", "failed"].contains(status.lowercased()) else { return }
+        guard OrderLifecycle.isTerminal(status) else { return }
         var changed = false
         orders = orders.map { order in
             guard order.remoteOrderID == remoteOrderID,
@@ -400,7 +400,7 @@ public actor PaperTradingStore {
     /// Closes an entry that never received an exchange order id, so it no
     /// longer claims ownership of later positions on its instrument.
     public func markLocalOrderTerminal(_ localOrderID: UUID, status: String) {
-        guard ["closed", "cancelled", "canceled", "rejected", "expired", "failed"].contains(status.lowercased()),
+        guard OrderLifecycle.isTerminal(status),
               let index = orders.firstIndex(where: { $0.id == localOrderID }),
               orders[index].status.lowercased() != status.lowercased() else { return }
         let order = orders[index]
@@ -1017,13 +1017,18 @@ public actor TradingBackend {
         /// Ledger entry that carries strategy ownership until the exchange
         /// order id of an unresolved submission is known.
         let localOrderID: UUID?
+        /// When a cancel was successfully sent for an entry that was found
+        /// resting. A later "order does not exist" must not be read as "never
+        /// placed": the cancel may be racing a fill, so the claim is held
+        /// until either the order, a position or history settles it.
+        var cancelRequestedAt: Date?
 
         init(instrumentID: String, notional: Decimal, createdAt: Date = .now,
              strategyID: UUID? = nil, margin: Decimal? = nil,
              riskAmount: Decimal = 0, closedPosition: Bool = false,
              inFlight: Bool = false, positionID: String? = nil,
              clientOrderID: String? = nil, demo: Bool? = nil,
-             localOrderID: UUID? = nil) {
+             localOrderID: UUID? = nil, cancelRequestedAt: Date? = nil) {
             self.instrumentID = instrumentID
             self.notional = notional
             self.createdAt = createdAt
@@ -1036,6 +1041,7 @@ public actor TradingBackend {
             self.clientOrderID = clientOrderID
             self.demo = demo
             self.localOrderID = localOrderID
+            self.cancelRequestedAt = cancelRequestedAt
         }
     }
     private static let unresolvedReservationPrefix = "unresolved-"
@@ -1223,36 +1229,62 @@ public actor TradingBackend {
         // transit and manual orders belong to the user, so both are left
         // alone. Network calls stay outside the mutation gate.
         let running = Set((await paper.allStrategies()).filter(\.enabled).map(\.id))
-        var outcomes: [(key: String, clientOrderID: String, outcome: FailedSubmissionOutcome)] = []
+        var outcomes: [(key: String, clientOrderID: String, outcome: FailedSubmissionOutcome, cancelRequested: Bool)] = []
         for (key, reservation, clientOrderID) in unresolved {
             let demo = reservation.demo ?? true
             var outcome = await resolveFailedSubmission(instrumentID: reservation.instrumentID,
                                                         clientOrderID: clientOrderID, demo: demo)
+            // A previous pass may already have cancelled this entry.
+            var cancelRequested = reservation.cancelRequestedAt != nil
             if case let .accepted(orderID, status) = outcome,
-               Self.restingOrderStates.contains(status),
+               OrderLifecycle.isResting(status),
                let strategyID = reservation.strategyID, !running.contains(strategyID) {
                 if let cancelError = await cancelRestingOrder(orderID: orderID, instrumentID: reservation.instrumentID) {
                     appendLog("已停止策略的挂单补撤失败（\(reservation.instrumentID) 订单 \(orderID)），下次核对重试：\(cancelError.localizedDescription)", level: "warning")
                     // Stay unresolved so the next pass retries the cancel.
                     outcome = .unknown(cancelError)
                 } else {
+                    cancelRequested = true
                     appendLog("已停止策略的挂单已补撤：\(reservation.instrumentID) 订单 \(orderID)", level: "warning")
                     // Settle on the post-cancel state: a cancel can race a
                     // partial fill, and only the exchange knows which won.
                     outcome = await resolveFailedSubmission(instrumentID: reservation.instrumentID,
                                                             clientOrderID: clientOrderID, demo: demo)
-                    if case let .accepted(_, after) = outcome, Self.restingOrderStates.contains(after) {
+                    if case let .accepted(_, after) = outcome, OrderLifecycle.isResting(after) {
                         outcome = .unknown(ATKError.unavailable("撤单尚未生效"))
                     }
                 }
             }
-            outcomes.append((key, clientOrderID, outcome))
+            // A cancelled entry whose order then disappears from lookups is
+            // ambiguous: the cancel may be racing a fill. Release it only
+            // once the exchange shows no position for the instrument and the
+            // grace period has passed. Network reads stay outside the gate.
+            if case .notPlaced = outcome, cancelRequested {
+                let positions = (try? await market.privatePositions()) ?? []
+                let hasPosition = positions.contains {
+                    $0.instrumentID == reservation.instrumentID && abs($0.quantity) > 0
+                }
+                if hasPosition || Date().timeIntervalSince(reservation.cancelRequestedAt ?? .now) < Self.cancelSettlementGrace {
+                    outcome = .unknown(ATKError.unavailable("撤单后订单暂时查询不到"))
+                }
+            }
+            outcomes.append((key, clientOrderID, outcome, cancelRequested))
         }
         await withRiskReservationMutation {
             var releases: [RemoteReservation] = []
-            for (key, clientOrderID, outcome) in outcomes {
+            for (key, clientOrderID, outcome, cancelRequested) in outcomes {
                 // A strategy exit may have settled the entry meanwhile.
-                guard let reservation = remoteReservations[key], !reservation.inFlight else { continue }
+                guard var reservation = remoteReservations[key], !reservation.inFlight else { continue }
+                if cancelRequested, reservation.cancelRequestedAt == nil {
+                    // Persist the cancel mark before the outcome switch. A
+                    // later pass sees the order missing rather than resting,
+                    // so the local flag would be false again; the durable
+                    // mark is what keeps that absence from releasing a claim
+                    // whose cancel may have raced a fill.
+                    reservation.cancelRequestedAt = .now
+                    remoteReservations[key] = reservation
+                    saveRemoteReservations()
+                }
                 switch outcome {
                 case let .accepted(orderID, _):
                     remoteReservations.removeValue(forKey: key)
@@ -1303,6 +1335,12 @@ public actor TradingBackend {
             }
         }
     }
+
+    /// How long a cancelled entry whose order then disappears from OKX
+    /// lookups keeps its claim before the absence of any position is taken as
+    /// proof that nothing was executed. A cancel can race a fill, so a bare
+    /// "order does not exist" is never enough on its own.
+    static let cancelSettlementGrace: TimeInterval = 60
 
     private static let submittedSignalLimit = 500
     private static let runtimeLogMemoryLimit = 1_000
@@ -1538,8 +1576,7 @@ public actor TradingBackend {
         guard !orderIDs.isEmpty else { return }
         await market.invalidateAccountState()
         let remoteOrders = try await market.privateOrders()
-        let pending = remoteOrders.filter { orderIDs.contains($0.id) &&
-            !["filled", "canceled", "cancelled", "closed", "rejected", "expired", "failed"].contains($0.status.lowercased()) }
+        let pending = remoteOrders.filter { orderIDs.contains($0.id) && !$0.isTerminal }
         guard !pending.isEmpty else { return }
         let account = try await market.account()
         guard account.mode != .readOnly else {
@@ -1564,8 +1601,7 @@ public actor TradingBackend {
     /// instrument and direction match a non-terminal strategy order.
     private func strategyRemotePositions(_ strategyID: UUID) async throws -> [PositionSnapshot] {
         let orders = await paper.allOrders().filter {
-            $0.strategyID == strategyID &&
-            !["cancelled", "canceled", "rejected", "expired", "failed", "closed"].contains($0.status.lowercased())
+            $0.strategyID == strategyID && !OrderLifecycle.isTerminal($0.status)
         }
         let reservationOrders = remoteReservations.values.filter { $0.strategyID == strategyID }
         let instruments = Set(orders.map(\.instrumentID) + reservationOrders.map(\.instrumentID))
@@ -1676,6 +1712,9 @@ public actor TradingBackend {
         guard !remoteReservations.contains(where: { Self.isUnresolvedReservation($0.key) && $0.value.strategyID == id }) else {
             throw ATKError.unavailable("策略仍有结果未知或待撤销的下单，请等待后台按 clOrdId 核对完成后再删除")
         }
+        // Final sweep, matching the pause path: it catches an entry the
+        // resolver re-keyed during the pass above.
+        try await cancelRemoteEntryOrders(for: id)
         let positions = try await strategyRemotePositions(id)
         guard positions.isEmpty else {
             throw ATKError.unavailable("策略仍有远端持仓，请先平仓并确认持仓归零后再删除")
@@ -1706,10 +1745,21 @@ public actor TradingBackend {
     public func pauseStrategy(_ id: UUID) async throws -> StrategyConfig {
         await restoreRiskIfNeeded()
         let config = try await paper.setState(id, running: false)
+        // The cancel sweep below only sees order ids the service already
+        // knows. An entry still unresolved during it is cancelled by the
+        // resolver, and a concurrent reconciliation can re-key an entry to a
+        // live order id after that sweep has looked; the final sweep after
+        // the resolver is the serialized confirmation that no resting entry
+        // of this strategy is left.
         try await cancelRemoteEntryOrders(for: id)
-        // An entry still unresolved during that cancel pass is cancelled by
-        // the resolver once it turns out to be resting; it retries on every
-        // reconciliation until the exchange confirms the cancel.
+        // Resolve first, so an entry that turns out to be resting is settled
+        // (or cancelled) before the final sweep.
+        await resolveUnconfirmedSubmissions()
+        // Final sweep: catches anything the resolver re-keyed during the pass
+        // above, and any entry that only became a known order id in between.
+        try await cancelRemoteEntryOrders(for: id)
+        // The resolver may have left an entry unresolved on purpose; make one
+        // more attempt so a pause does not return with a live entry order.
         await resolveUnconfirmedSubmissions()
         appendLog("策略已停止：\(config.name)")
         return config
@@ -1790,8 +1840,7 @@ public actor TradingBackend {
         var cleanupSucceeded = true
         do {
             let orders = try await market.privateOrders()
-            let terminal: Set<String> = ["filled", "canceled", "cancelled", "closed", "rejected", "expired", "failed"]
-            for order in orders where !terminal.contains(order.status.lowercased()) {
+            for order in orders where !order.isTerminal {
                 do {
                     if account.mode == .paper {
                         try await market.cancelDemoOrder(instrumentID: order.instrumentID, orderID: order.id)
@@ -1836,8 +1885,7 @@ public actor TradingBackend {
         do {
             let remainingOrders = try await market.privateOrders()
             let remainingPositions = try await market.privatePositions()
-            let terminal: Set<String> = ["filled", "canceled", "cancelled", "closed", "rejected", "expired", "failed"]
-            if remainingOrders.contains(where: { !terminal.contains($0.status.lowercased()) }) ||
+            if remainingOrders.contains(where: { !$0.isTerminal }) ||
                 remainingPositions.contains(where: { abs($0.quantity) > 0 }) {
                 cleanupSucceeded = false
             }
@@ -1934,7 +1982,7 @@ public actor TradingBackend {
             if let pending = pendingRemoteExits[positionKey],
                let remoteOrderID = pending.remoteOrderID,
                let remoteOrder = remoteOrders?.first(where: { $0.id == remoteOrderID }),
-               ["filled", "canceled", "cancelled", "rejected", "expired", "failed", "closed"].contains(remoteOrder.status.lowercased()) {
+               remoteOrder.isTerminal {
                 // A reduce-only order may be terminal while a partial
                 // remainder is still visible. Release the retry latch so the
                 // next pass can submit only the current residual quantity.
@@ -2146,7 +2194,7 @@ public actor TradingBackend {
                 // Market reduce-only orders normally settle immediately. A
                 // stale/rejected order must eventually be released so a
                 // later snapshot can retry the same intent.
-                let failedTerminalStates: Set<String> = ["canceled", "cancelled", "rejected", "expired", "failed"]
+                let failedTerminalStates = OrderLifecycle.unfilledTerminalStates
                 let remoteOrder = recoveredRemoteOrder ?? runtime.remoteOrderID.flatMap { id in
                     remoteOrders?.first { $0.id == id }
                 }
@@ -2379,8 +2427,8 @@ public actor TradingBackend {
         let orders = try await market.privateOrders()
         let positions = try await market.privatePositions()
         guard generation == reconciliationGeneration else { return }
-        let terminal: Set<String> = ["filled", "canceled", "cancelled", "rejected", "expired", "failed", "closed"]
-        let canceledTerminal: Set<String> = ["canceled", "cancelled", "rejected", "expired", "failed"]
+        let terminal = OrderLifecycle.terminalStates
+        let canceledTerminal = OrderLifecycle.unfilledTerminalStates
         // Recreate confirmed strategy/manual reservations from the durable
         // paper ledger when the process was restarted between remote
         // acceptance and the in-memory reservation update.
@@ -2396,7 +2444,7 @@ public actor TradingBackend {
             guard let remoteOrderID = paperOrder.remoteOrderID,
                   remoteReservations[remoteOrderID] == nil,
                   !(paperOrder.clientOrderID.map(unresolvedClientOrderIDs.contains) ?? false),
-                  !["closed", "cancelled", "canceled", "rejected", "expired", "failed"].contains(paperOrder.status.lowercased()) else { continue }
+                  !OrderLifecycle.isTerminal(paperOrder.status) else { continue }
             let remoteOrder = orders.first(where: { $0.id == remoteOrderID })
             let expectedSide = paperOrder.side.lowercased()
             let position = positions.first(where: {
@@ -2517,12 +2565,19 @@ public actor TradingBackend {
             // before the first position snapshot. This makes later native
             // close settlement exact even when another position uses the same
             // instrument.
-            let paperOrdersByRemoteID = Dictionary(uniqueKeysWithValues: (await paper.allOrders()).compactMap { order in
+            let allOrders = await paper.allOrders()
+            let paperOrdersByRemoteID = Dictionary(uniqueKeysWithValues: allOrders.compactMap { order in
                 order.remoteOrderID.map { ($0, order) }
             })
+            let ordersByLocalID = Dictionary(uniqueKeysWithValues: allOrders.map { ($0.id, $0) })
             for orderID in remoteReservations.keys {
                 guard var reservation = remoteReservations[orderID], reservation.positionID == nil,
-                      let paperOrder = paperOrdersByRemoteID[orderID] else { continue }
+                      remoteReservations[orderID]?.clientOrderID != nil else { continue }
+                // An entry whose outcome is still unknown is settled by its
+                // clOrdId lookup, so its local record is not keyed by order id.
+                let paperOrder = paperOrdersByRemoteID[orderID]
+                    ?? reservation.localOrderID.flatMap { ordersByLocalID[$0] }
+                guard let paperOrder else { continue }
                 let expectedSide = paperOrder.side.lowercased()
                 if let position = positions.first(where: {
                     guard $0.instrumentID == reservation.instrumentID, abs($0.quantity) > 0 else { return false }
@@ -3155,11 +3210,7 @@ public actor TradingBackend {
         case unknown(Error)
     }
 
-    /// States that end an order's life. `filled`/`closed` are deliberately
-    /// absent: they carry exposure and are handled as accepted.
-    static let unfilledTerminalOrderStates: Set<String> = ["canceled", "cancelled", "rejected", "expired", "failed"]
-    /// States in which an order still rests on the book and can fill later.
-    static let restingOrderStates: Set<String> = ["live", "partially_filled"]
+
 
     /// A timed-out or truncated CLI response does not mean OKX rejected the
     /// order. Look up the exact client order id before treating the attempt
@@ -3169,10 +3220,10 @@ public actor TradingBackend {
     private func resolveFailedSubmission(instrumentID: String, clientOrderID: String, demo: Bool) async -> FailedSubmissionOutcome {
         do {
             if let order = try await market.privateOrder(instrumentID: instrumentID, clientOrderID: clientOrderID, demo: demo) {
-                let status = order.status.lowercased()
+                let status = OrderLifecycle.normalized(order.status)
                 // A cancelled or expired order may still have filled partly;
                 // only a reported zero fill proves it opened no position.
-                if Self.unfilledTerminalOrderStates.contains(status), order.filledQuantity == 0 {
+                if order.endedUnfilled {
                     return .terminal(orderID: order.id, status: status)
                 }
                 return .accepted(orderID: order.id, status: status)
