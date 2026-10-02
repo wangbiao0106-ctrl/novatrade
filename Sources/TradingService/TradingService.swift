@@ -899,6 +899,13 @@ public actor TradingBackend {
     /// so the dedupe set cannot grow without bound over long sessions.
     private var submittedSignalOrder: [UUID] = []
     private var strategyEntrySubmissionsInFlight: Set<UUID> = []
+    /// Prevents a resolver that started before pause/delete from re-keying a
+    /// resting entry after the final cancellation sweep has already run.
+    private var strategyEntryClosures: Set<UUID> = []
+    /// Monotonic generations invalidate resolver results captured before a
+    /// pause/delete operation, including tasks that resume after its closing
+    /// set has been cleared.
+    private var strategyEntryClosureEpochs: [UUID: UInt64] = [:]
     private var strategyEntryInFlightInstruments: Set<String> = []
     private var runtimeLogs: [RuntimeLog] = []
     private var runtimeLogFileLines = 0
@@ -1184,7 +1191,11 @@ public actor TradingBackend {
                 riskAmount: reservation.riskAmount,
                 closedPosition: reservation.closedPosition,
                 inFlight: false,
-                positionID: reservation.positionID
+                positionID: reservation.positionID,
+                clientOrderID: reservation.clientOrderID,
+                demo: reservation.demo,
+                localOrderID: reservation.localOrderID,
+                cancelRequestedAt: reservation.cancelRequestedAt
             )
             saveRemoteReservations()
         }
@@ -1214,12 +1225,13 @@ public actor TradingBackend {
     /// its order id, so native SL/TP settlement can find it); an order OKX
     /// confirms absent releases it; another failure keeps it reserved.
     private func resolveUnconfirmedSubmissions() async {
-        let unresolved = remoteReservations.compactMap { key, reservation -> (String, RemoteReservation, String)? in
+        let unresolved = remoteReservations.compactMap { key, reservation -> (String, RemoteReservation, String, UInt64)? in
             // A submission still awaiting its own response is settled by its
             // caller; a lookup now could miss an order OKX is about to accept.
             guard Self.isUnresolvedReservation(key), !reservation.inFlight,
                   let clientOrderID = reservation.clientOrderID else { return nil }
-            return (key, reservation, clientOrderID)
+            let epoch = reservation.strategyID.flatMap { strategyEntryClosureEpochs[$0] } ?? 0
+            return (key, reservation, clientOrderID, epoch)
         }
         guard !unresolved.isEmpty else { return }
         // A pause or delete can run its cancel pass while an entry is still
@@ -1229,16 +1241,30 @@ public actor TradingBackend {
         // transit and manual orders belong to the user, so both are left
         // alone. Network calls stay outside the mutation gate.
         let running = Set((await paper.allStrategies()).filter(\.enabled).map(\.id))
-        var outcomes: [(key: String, clientOrderID: String, outcome: FailedSubmissionOutcome, cancelRequested: Bool)] = []
-        for (key, reservation, clientOrderID) in unresolved {
+        var outcomes: [(key: String, clientOrderID: String, outcome: FailedSubmissionOutcome, cancelRequested: Bool, closureEpoch: UInt64)] = []
+        for (key, reservation, clientOrderID, closureEpoch) in unresolved {
             let demo = reservation.demo ?? true
             var outcome = await resolveFailedSubmission(instrumentID: reservation.instrumentID,
                                                         clientOrderID: clientOrderID, demo: demo)
             // A previous pass may already have cancelled this entry.
             var cancelRequested = reservation.cancelRequestedAt != nil
+            let strategyIsClosing = reservation.strategyID.map { strategyEntryClosures.contains($0) } ?? false
             if case let .accepted(orderID, status) = outcome,
                OrderLifecycle.isResting(status),
-               let strategyID = reservation.strategyID, !running.contains(strategyID) {
+               let strategyID = reservation.strategyID,
+               strategyIsClosing || !running.contains(strategyID) {
+                if cancelRequested == false {
+                    // Persist the cancellation intent before the network call.
+                    // A process can exit after the exchange accepts the cancel
+                    // but before the outcome mutation below runs.
+                    cancelRequested = true
+                    await withRiskReservationMutation {
+                        guard var current = remoteReservations[key], current.cancelRequestedAt == nil else { return }
+                        current.cancelRequestedAt = .now
+                        remoteReservations[key] = current
+                        saveRemoteReservations()
+                    }
+                }
                 if let cancelError = await cancelRestingOrder(orderID: orderID, instrumentID: reservation.instrumentID) {
                     appendLog("已停止策略的挂单补撤失败（\(reservation.instrumentID) 订单 \(orderID)），下次核对重试：\(cancelError.localizedDescription)", level: "warning")
                     // Stay unresolved so the next pass retries the cancel.
@@ -1260,7 +1286,16 @@ public actor TradingBackend {
             // once the exchange shows no position for the instrument and the
             // grace period has passed. Network reads stay outside the gate.
             if case .notPlaced = outcome, cancelRequested {
-                let positions = (try? await market.privatePositions()) ?? []
+                let positions: [PositionSnapshot]
+                do {
+                    positions = try await market.privatePositions()
+                } catch {
+                    // An unavailable position snapshot cannot prove that the
+                    // cancelled order left no exposure behind.
+                    outcome = .unknown(error)
+                    outcomes.append((key, clientOrderID, outcome, cancelRequested, closureEpoch))
+                    continue
+                }
                 let hasPosition = positions.contains {
                     $0.instrumentID == reservation.instrumentID && abs($0.quantity) > 0
                 }
@@ -1268,11 +1303,11 @@ public actor TradingBackend {
                     outcome = .unknown(ATKError.unavailable("撤单后订单暂时查询不到"))
                 }
             }
-            outcomes.append((key, clientOrderID, outcome, cancelRequested))
+            outcomes.append((key, clientOrderID, outcome, cancelRequested, closureEpoch))
         }
         await withRiskReservationMutation {
             var releases: [RemoteReservation] = []
-            for (key, clientOrderID, outcome, cancelRequested) in outcomes {
+            for (key, clientOrderID, outcome, cancelRequested, closureEpoch) in outcomes {
                 // A strategy exit may have settled the entry meanwhile.
                 guard var reservation = remoteReservations[key], !reservation.inFlight else { continue }
                 if cancelRequested, reservation.cancelRequestedAt == nil {
@@ -1287,6 +1322,16 @@ public actor TradingBackend {
                 }
                 switch outcome {
                 case let .accepted(orderID, _):
+                    if let strategyID = reservation.strategyID,
+                       strategyEntryClosureEpochs[strategyID, default: 0] != closureEpoch {
+                        // A resolver may have captured a running strategy
+                        // before pause/delete started. Leave every accepted
+                        // result under its unresolved key so the closing
+                        // operation's own resolver can settle it with a fresh
+                        // lifecycle snapshot. This is deliberately
+                        // conservative for filled or unrecognized states too.
+                        continue
+                    }
                     remoteReservations.removeValue(forKey: key)
                     if remoteReservations[orderID] == nil {
                         remoteReservations[orderID] = RemoteReservation(
@@ -1296,7 +1341,12 @@ public actor TradingBackend {
                             strategyID: reservation.strategyID,
                             margin: reservation.margin,
                             riskAmount: reservation.riskAmount,
-                            closedPosition: reservation.closedPosition
+                            closedPosition: reservation.closedPosition,
+                            positionID: reservation.positionID,
+                            clientOrderID: reservation.clientOrderID,
+                            demo: reservation.demo,
+                            localOrderID: reservation.localOrderID,
+                            cancelRequestedAt: reservation.cancelRequestedAt
                         )
                     } else {
                         // The order id is already reserved; keep one claim.
@@ -1582,6 +1632,17 @@ public actor TradingBackend {
         guard account.mode != .readOnly else {
             throw ATKError.unavailable("当前账户为只读模式，无法撤销策略挂单")
         }
+        let cancelRequestedAt = Date()
+        await withRiskReservationMutation {
+            var changed = false
+            for order in pending {
+                guard var reservation = remoteReservations[order.id], reservation.cancelRequestedAt == nil else { continue }
+                reservation.cancelRequestedAt = cancelRequestedAt
+                remoteReservations[order.id] = reservation
+                changed = true
+            }
+            if changed { saveRemoteReservations() }
+        }
         for order in pending {
             if account.mode == .paper {
                 try await market.cancelDemoOrder(instrumentID: order.instrumentID, orderID: order.id)
@@ -1593,6 +1654,19 @@ public actor TradingBackend {
         }
         await market.invalidateAccountState()
         try await reconcileRemoteReservations()
+        // A reservation may have been reconstructed from the paper ledger
+        // during reconciliation (for example after a restart). Carry the
+        // cancel intent onto that recovered record before the next snapshot.
+        await withRiskReservationMutation {
+            var changed = false
+            for order in pending {
+                guard var reservation = remoteReservations[order.id], reservation.cancelRequestedAt == nil else { continue }
+                reservation.cancelRequestedAt = cancelRequestedAt
+                remoteReservations[order.id] = reservation
+                changed = true
+            }
+            if changed { saveRemoteReservations() }
+        }
         await paper.setRisk(await riskEngine.snapshot())
     }
 
@@ -1699,6 +1773,9 @@ public actor TradingBackend {
             throw PaperTradingStore.StoreError.notFound
         }
         guard !config.enabled else { throw PaperTradingStore.StoreError.running }
+        strategyEntryClosureEpochs[id, default: 0] &+= 1
+        strategyEntryClosures.insert(id)
+        defer { strategyEntryClosures.remove(id) }
         // Remove pending entries first, then verify that no attributed remote
         // position remains. Deletion is refused while exposure exists so the
         // service cannot lose ownership of a live position.
@@ -1745,6 +1822,9 @@ public actor TradingBackend {
     public func pauseStrategy(_ id: UUID) async throws -> StrategyConfig {
         await restoreRiskIfNeeded()
         let config = try await paper.setState(id, running: false)
+        strategyEntryClosureEpochs[id, default: 0] &+= 1
+        strategyEntryClosures.insert(id)
+        defer { strategyEntryClosures.remove(id) }
         // The cancel sweep below only sees order ids the service already
         // knows. An entry still unresolved during it is cancelled by the
         // resolver, and a concurrent reconciliation can re-key an entry to a
@@ -2194,12 +2274,11 @@ public actor TradingBackend {
                 // Market reduce-only orders normally settle immediately. A
                 // stale/rejected order must eventually be released so a
                 // later snapshot can retry the same intent.
-                let failedTerminalStates = OrderLifecycle.unfilledTerminalStates
                 let remoteOrder = recoveredRemoteOrder ?? runtime.remoteOrderID.flatMap { id in
                     remoteOrders?.first { $0.id == id }
                 }
                 let failedRemoteOrder = remoteOrder.map {
-                    failedTerminalStates.contains($0.status.lowercased())
+                    $0.endedUnfilled
                 } ?? false
                 // An absent order row is ambiguous on OKX: the order may be
                 // filled, still propagating, or omitted by a paginated
@@ -2427,8 +2506,6 @@ public actor TradingBackend {
         let orders = try await market.privateOrders()
         let positions = try await market.privatePositions()
         guard generation == reconciliationGeneration else { return }
-        let terminal = OrderLifecycle.terminalStates
-        let canceledTerminal = OrderLifecycle.unfilledTerminalStates
         // Recreate confirmed strategy/manual reservations from the durable
         // paper ledger when the process was restarted between remote
         // acceptance and the in-memory reservation update.
@@ -2507,7 +2584,7 @@ public actor TradingBackend {
             guard notional.isFinite, notional > 0 else { continue }
             exposures[position.instrumentID, default: 0] += notional
         }
-        for order in orders where !terminal.contains(order.status.lowercased()) {
+        for order in orders where !OrderLifecycle.isTerminal(order.status) {
             let notional: Decimal?
             if let reserved = (remoteReservations[order.id] ?? recoveredReservations[order.id])?.notional, reserved.isFinite, reserved > 0 {
                 notional = reserved
@@ -2545,7 +2622,7 @@ public actor TradingBackend {
             .compactMap { orderID, reservation -> String? in
                 guard reservation.strategyID != nil, let positionID = reservation.positionID,
                       !positions.contains(where: { $0.id == positionID && $0.instrumentID == reservation.instrumentID && abs($0.quantity) > 0 }) else { return nil }
-                if let order = orders.first(where: { $0.id == orderID }), canceledTerminal.contains(order.status.lowercased()) {
+                if let order = orders.first(where: { $0.id == orderID }), order.endedUnfilled {
                     return nil
                 }
                 return reservation.instrumentID
@@ -2571,8 +2648,7 @@ public actor TradingBackend {
             })
             let ordersByLocalID = Dictionary(uniqueKeysWithValues: allOrders.map { ($0.id, $0) })
             for orderID in remoteReservations.keys {
-                guard var reservation = remoteReservations[orderID], reservation.positionID == nil,
-                      remoteReservations[orderID]?.clientOrderID != nil else { continue }
+                guard var reservation = remoteReservations[orderID], reservation.positionID == nil else { continue }
                 // An entry whose outcome is still unknown is settled by its
                 // clOrdId lookup, so its local record is not keyed by order id.
                 let paperOrder = paperOrdersByRemoteID[orderID]
@@ -2606,16 +2682,19 @@ public actor TradingBackend {
                 let shouldRelease: Bool
                 var realizedPnL: Decimal?
                 if let order {
-                    if terminal.contains(order.status.lowercased()) && !hasPosition {
-                        let state = order.status.lowercased()
-                        if !canceledTerminal.contains(state) {
-                            guard let positionID = reservation.positionID,
-                                  let history = closedHistoryByInstrument[reservation.instrumentID],
-                                  let closed = history.first(where: { $0.positionID == positionID }) else {
+                    if OrderLifecycle.isTerminal(order.status) && !hasPosition {
+                        if !order.endedUnfilled {
+                            let cancellationSettled = reservation.cancelRequestedAt.map {
+                                Date().timeIntervalSince($0) >= Self.cancelSettlementGrace
+                            } ?? false
+                            if let positionID = reservation.positionID,
+                               let history = closedHistoryByInstrument[reservation.instrumentID],
+                               let closed = history.first(where: { $0.positionID == positionID }) {
+                                realizedPnL = closed.realizedPnL
+                            } else if !cancellationSettled {
                                 terminalRemoteOrderObservations.removeValue(forKey: orderID)
                                 continue
                             }
-                            realizedPnL = closed.realizedPnL
                         }
                         let observations = (terminalRemoteOrderObservations[orderID] ?? 0) + 1
                         terminalRemoteOrderObservations[orderID] = observations
@@ -2629,20 +2708,31 @@ public actor TradingBackend {
                     }
                 } else {
                     terminalRemoteOrderObservations.removeValue(forKey: orderID)
-                    if reservation.strategyID != nil {
+                    let cancellationSettled = reservation.cancelRequestedAt.map {
+                        Date().timeIntervalSince($0) >= Self.cancelSettlementGrace
+                    } ?? false
+                    if reservation.strategyID != nil && !cancellationSettled {
                         // `swap orders` defaults to open orders, so a filled
                         // entry commonly disappears from this response. Do
                         // not release a strategy reservation in that case
                         // until closed-position history confirms its stable
                         // position ID and realized result.
-                        guard let positionID = reservation.positionID,
-                              let history = closedHistoryByInstrument[reservation.instrumentID],
-                              let closed = history.first(where: { $0.positionID == positionID }) else {
+                        if let positionID = reservation.positionID,
+                           let history = closedHistoryByInstrument[reservation.instrumentID],
+                           let closed = history.first(where: { $0.positionID == positionID }) {
+                            realizedPnL = closed.realizedPnL
+                        } else {
                             continue
                         }
-                        realizedPnL = closed.realizedPnL
                     } else {
-                        realizedPnL = nil
+                        if reservation.strategyID != nil,
+                           let positionID = reservation.positionID,
+                           let history = closedHistoryByInstrument[reservation.instrumentID],
+                           let closed = history.first(where: { $0.positionID == positionID }) {
+                            realizedPnL = closed.realizedPnL
+                        } else {
+                            realizedPnL = nil
+                        }
                     }
                     shouldRelease = !hasPosition && Date().timeIntervalSince(reservation.createdAt) >= 30
                 }
@@ -2682,9 +2772,18 @@ public actor TradingBackend {
             // exchange view may lag a just-submitted order, but local risk may
             // never be reset below that in-flight authorization.
             for (orderID, reservation) in remoteReservations {
-                if reservation.inFlight || orders.allSatisfy({ $0.id != orderID }) {
-                    guard reservation.inFlight || Self.isUnresolvedReservation(orderID) ||
-                            Date().timeIntervalSince(reservation.createdAt) < 30 else { continue }
+                let orderMissing = orders.allSatisfy { $0.id != orderID }
+                if reservation.inFlight || orderMissing {
+                    let age = Date().timeIntervalSince(reservation.createdAt)
+                    let cancelAge = reservation.cancelRequestedAt.map {
+                        Date().timeIntervalSince($0)
+                    }
+                    let retainMissing = reservation.inFlight ||
+                        Self.isUnresolvedReservation(orderID) ||
+                        reservation.strategyID != nil ||
+                        age < 30 ||
+                        (cancelAge.map { $0 < Self.cancelSettlementGrace } ?? false)
+                    guard retainMissing else { continue }
                     exposures[reservation.instrumentID, default: 0] += reservation.notional
                 }
             }

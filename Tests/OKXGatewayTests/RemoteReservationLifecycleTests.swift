@@ -15,7 +15,7 @@ private actor RemoteLifecycleRunner: ATKCommandRunning {
         }
         if command == "account config --json" { return ATKCommandResult(stdout: #"[{"label":"demo"}]"#) }
         if command == "swap orders --json" {
-            return ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","ordId":"previous-entry","side":"sell","state":"rejected","sz":"1","cTime":"1700000000000"}]"#)
+            return ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","ordId":"previous-entry","side":"sell","state":"rejected","sz":"1","accFillSz":"0","cTime":"1700000000000"}]"#)
         }
         if command.hasPrefix("account positions-history") { return ATKCommandResult(stdout: "[]") }
         if command.hasPrefix("market instruments") {

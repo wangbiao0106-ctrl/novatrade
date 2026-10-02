@@ -11,7 +11,7 @@ public enum OrderLifecycle {
     /// callers that care about the difference between "ended empty" and
     /// "ended with a position" use `unfilledTerminalStates` instead.
     public static let terminalStates: Set<String> = [
-        "filled", "closed", "canceled", "cancelled", "rejected", "expired", "failed", "mmp_canceled"
+        "filled", "closed", "canceled", "cancelled", "rejected", "expired", "failed", "mmp_canceled", "order_failed"
     ]
 
     /// Terminal states that mean no size was executed, so the order left no

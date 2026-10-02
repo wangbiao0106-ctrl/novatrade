@@ -115,11 +115,15 @@ func unknownSubmitOutcomeIsRekeyedWhenLookupFindsTheOrder() async throws {
     let backend = makeUnresolvedBackend(runner: runner, directory: directory, risk: risk)
 
     _ = try? await backend.placePaperOrder(PaperOrderRequest(instrumentID: "BTC-USDT-SWAP", side: "buy", quantity: 1))
+    let unresolvedKey = try #require(try persistedReservationKeys(directory).first)
+    let clientOrderID = String(unresolvedKey.dropFirst("unresolved-".count))
     await runner.setLookup(.accepted("late-order"))
     await runner.setHasPosition(true)
     _ = try await backend.account()
 
     #expect(try persistedReservationKeys(directory) == ["late-order"])
+    let reservations = try JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("remote-reservations.json"))) as? [String: [String: Any]] ?? [:]
+    #expect(reservations["late-order"]?["clientOrderID"] as? String == clientOrderID)
 
     // Within the 30-second publication window reconciliation counts both the
     // position and the just-submitted reservation. After a restart only the
