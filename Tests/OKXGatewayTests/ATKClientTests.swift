@@ -11,7 +11,6 @@ private struct StubATKRunner: ATKCommandRunning {
     }
 }
 
-#if os(macOS)
 @Test
 func addsATKExecutableDirectoryToChildPath() {
     let runner = LocalATKCommandRunner(
@@ -22,30 +21,21 @@ func addsATKExecutableDirectoryToChildPath() {
     #expect(path.split(separator: ":").first == "/tmp/nova-atk/bin")
     #expect(path.contains("/usr/bin"))
 }
-#endif
 
 @Test
-func readsOAuthStatusAndTickerThroughATK() async throws {
+func readsTickerThroughATK() async throws {
     let runner = StubATKRunner(outputs: [
-        "auth status --json": ATKCommandResult(stdout: #"{"profile":"oauth","site":"global","status":"logged_in","scopes":["live:read"]}"#),
-        "market ticker BTC-USDT-SWAP --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","last":"100.5","bidPx":"100.4","askPx":"100.6","ts":"1700000000000"}]"#),
-        "config show --json": ATKCommandResult(stdout: #"{"default_profile":"oauth","profiles":{"oauth":{"site":"global"}}}"#)
+        "market ticker BTC-USDT-SWAP --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","last":"100.5","bidPx":"100.4","askPx":"100.6","ts":"1700000000000"}]"#)
     ])
-    let client = ATKClient(runner: runner)
-    let auth = try await client.authStatus()
-    let ticker = try await client.marketTicker(instrumentID: "BTC-USDT-SWAP")
-    let config = try await client.configSummary()
-    #expect(auth.isLoggedIn)
-    #expect(auth.site == "global")
+    let ticker = try await ATKClient(runner: runner).marketTicker(instrumentID: "BTC-USDT-SWAP")
     #expect(ticker.last == Decimal(string: "100.5"))
-    #expect(config.hasAPIKeyProfile == false)
 }
 
 @Test
 func surfacesATKCommandFailures() async throws {
     let client = ATKClient(runner: StubATKRunner(outputs: [:]))
     await #expect(throws: ATKError.self) {
-        try await client.authStatus()
+        try await client.marketTicker(instrumentID: "BTC-USDT-SWAP")
     }
 }
 
@@ -61,46 +51,22 @@ func parsesClosedSwapPositionHistoryForNativeExitSettlement() async throws {
 }
 
 @Test
-func redactsConfigToAPIKeyPresenceAndNormalizesUnauthenticatedSite() async throws {
+func redactsConfigToAPIKeyPresence() async throws {
     let runner = StubATKRunner(outputs: [
-        "auth status --json": ATKCommandResult(stdout: #"{"profile":"oauth","site":"global","status":"not_logged_in"}"#, exitCode: 2),
         "config show --json": ATKCommandResult(stdout: #"{"default_profile":"live","profiles":{"live":{"site":"global","api_key":"secret-value","secret_key":"do-not-retain","passphrase":"hidden"}}}"#)
     ])
-    let client = ATKClient(runner: runner)
-    let status = try await client.authStatus()
-    let config = try await client.configSummary()
-    #expect(status.site == nil)
-    #expect(config.hasAPIKeyProfile)
-    #expect(config.profiles.first?.id == "live")
+    let config = try await ATKClient(runner: runner).configSummary()
+    #expect(config.profiles == [ATKProfileSummary(id: "live", site: "global", hasAPIKey: true)])
 }
 
 @Test
-func rejectsOAuthLoginWhenAPIKeyProfileExists() async throws {
-    let runner = StubATKRunner(outputs: [
-        "auth login --manual --site global": ATKCommandResult(stdout: #"{"status":"skipped","reason":"api_key_configured","profile":"live"}"#, exitCode: 2)
-    ])
-    await #expect(throws: ATKError.apiKeyConfigured(profile: "live")) {
-        try await ATKClient(runner: runner).authLoginManual(site: "global")
-    }
-}
-
-@Test
-func requiresAPIKeyProfileForTradingPath() async throws {
-    let runner = StubATKRunner(outputs: [
-        "config show --json": ATKCommandResult(stdout: #"{"default_profile":"oauth","profiles":{"oauth":{"site":"global"}}}"#)
-    ])
-    await #expect(throws: ATKError.apiKeyNotConfigured) {
-        try await ATKClient(runner: runner).requireAPIKeyProfile()
-    }
-}
-
-@Test
-func requiresDefaultProfileToContainAPIKey() async throws {
+func refusesOrderWhenDefaultProfileHasNoAPIKey() async throws {
     let runner = StubATKRunner(outputs: [
         "config show --json": ATKCommandResult(stdout: #"{"default_profile":"oauth","profiles":{"oauth":{"site":"global"},"live":{"site":"global","api_key":"key"}}}"#)
     ])
+    let order = LiveOrderRequest(instrumentID: "BTC-USDT-SWAP", side: "buy", quantity: 1)
     await #expect(throws: ATKError.apiKeyNotConfigured) {
-        try await ATKClient(runner: runner).requireAPIKeyProfile()
+        try await ATKClient(runner: runner).placeSwapOrder(order)
     }
 }
 
@@ -181,11 +147,7 @@ func rejectsEntryWhenConfiguredLeverageCannotBeApplied() async throws {
 }
 
 @Test
-func liveOrderRequestKeepsLeverageCodableCompatibility() throws {
-    let decoder = JSONDecoder()
-    let legacy = try decoder.decode(LiveOrderRequest.self, from: Data(#"{"instrumentID":"BTC-USDT-SWAP","side":"buy","quantity":1}"#.utf8))
-    #expect(legacy.leverage == nil)
-
+func liveOrderRequestEncodesLeverage() throws {
     let request = LiveOrderRequest(instrumentID: "BTC-USDT-SWAP", side: "buy", quantity: 1, leverage: 2.5)
     let encoded = try JSONEncoder().encode(request)
     let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]

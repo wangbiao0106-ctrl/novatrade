@@ -127,8 +127,11 @@ def main() -> int:
     ):
         fail(errors, "策略资金池必须按实例隔离、只用已实现盈亏滚仓且禁止浮盈释放或跨池借用")
 
-    if not re.search(r"availableCases\s*:.*\.sweepReversalShort.*\.emaAltcoinLong", domain, re.DOTALL):
-        fail(errors, "StrategyType.availableCases 未包含 EMA 多头策略")
+    if not re.search(r"availableCases\s*:.*\.sweepReversalShort.*\.hlsr.*\.doublePumpExhaustionShort", domain, re.DOTALL):
+        fail(errors, "StrategyType.availableCases 未包含全部已集成策略")
+    if re.search(r"emaAltcoin|双均线交易山寨币做多", "".join(
+            path.read_text() for path in sorted((ROOT / "Sources").rglob("*.swift")))):
+        fail(errors, "运行时代码仍包含已下线的 EMA 山寨币做多策略")
     if ".prefix(20)" not in domain and "prefix(limit)" not in domain:
         fail(errors, "StrategyScope.hotAltcoins 未按动态成交额前 20 实现")
     if "StrategyUniverseRules.isEligibleHotAltcoin" not in domain:
@@ -184,7 +187,7 @@ def main() -> int:
     if live_stable is not None and not live_stable <= canonical_exclude:
         fail(errors, f"live_signal.py 的 STABLECOINS 未全部包含在 universe.json 的 exclude 中：{sorted(live_stable - canonical_exclude)}")
 
-    for strategy in ("ema_altcoin_long", "ema_3line_pullback"):
+    for strategy in ("ema_3line_pullback",):
         source_path = ROOT / "strategies" / strategy / "src" / "backtest.py"
         major = python_literal_set(source_path, "MAJOR")
         stable = python_literal_set(source_path, "STABLE")
@@ -200,27 +203,20 @@ def main() -> int:
             missing = sorted(expected_non_crypto - non_crypto)
             extra = sorted(non_crypto - expected_non_crypto)
             fail(errors, f"{strategy} 的 NON_CRYPTO 与规范排除清单不一致：缺少 {missing}，多出 {extra}")
-    main_source = (ROOT / "Sources" / "MacTraderApp" / "main.swift").read_text()
+    main_source = "".join(path.read_text() for path in sorted((ROOT / "Sources" / "MacTraderApp").glob("*.swift")))
     service_source = (ROOT / "Sources" / "TradingService" / "TradingService.swift").read_text()
-    runtime_sources = domain + engine + service_source + main_source + stream
-    if "emaAltcoinLong" not in runtime_sources or "evaluateEmaAltcoinLong" not in runtime_sources:
-        fail(errors, "运行时代码未注册 EMA 山寨币多头策略")
     if re.search(r"case\s+trendFollowing|case\s+rsiReversal|\.trendFollowing|\.rsiReversal", domain + engine + service_source + main_source):
         fail(errors, "运行时代码仍包含已清理的演示策略入口")
     if "scope: selectedRule.defaultScope" not in main_source:
         fail(errors, "新建策略表单未使用策略类型对应的动态标的范围")
     if "ForEach(StrategyType.availableCases" not in main_source:
         fail(errors, "新建策略表单未从可用策略规则列表选择规则")
-    if "StrategyUniverseRules.isEligibleHotAltcoin" not in main_source:
-        fail(errors, "前台热门山寨币筛选未使用统一资产类别过滤")
     if "config.scope.mode == .dynamicCategory" not in service_source or "config.type.defaultScope" not in service_source:
         fail(errors, "后端未校验并 canonicalize 策略类型对应的动态标的范围")
     if "pool.openPositions < maxConcurrent" not in service_source or "已有其他币种的挂单或持仓" not in service_source:
         fail(errors, "后端未限制策略实例同时只允许一个活动币种")
-    if "case .emaAltcoinLong" not in service_source or "evaluateEmaAltcoinLong" not in service_source:
-        fail(errors, "后端未接入 EMA 多头策略")
-    if "双均线交易山寨币做多" not in main_source:
-        fail(errors, "新建策略表单未显示 EMA 多头策略名称")
+    if "selectedRule.displayName" not in main_source:
+        fail(errors, "新建策略表单未显示领域层的策略名称")
     if "isEligibleHotAltcoin" not in service_source:
         fail(errors, "后台热门榜未使用统一资产类别过滤")
     if "config.type.maxRiskPercent" not in service_source:
@@ -247,21 +243,6 @@ def main() -> int:
         fail(errors, "策略自带止损规则未在领域层和前台展示")
     if '"maxConcurrentPositions": 1' not in domain or '"maxOpenRiskPercent": 1.0' not in domain:
         fail(errors, "运行时默认参数未同步策略级单币种并发和开放风险上限")
-
-    ema_config_path = ROOT / "strategies" / "ema_altcoin_long" / "config" / "strategy.json"
-    try:
-        ema_config = json.loads(ema_config_path.read_text())
-        ema_runtime = ema_config.get("runtime", {})
-        if ema_runtime.get("scope") != "dynamic.emaAltcoinCandidates":
-            fail(errors, "EMA 策略实验室运行范围必须是 dynamic.emaAltcoinCandidates")
-        if ema_runtime.get("max_concurrent_positions") != 1 or ema_runtime.get("max_open_risk_pct") != 1.0:
-            fail(errors, "EMA 策略实验室必须限制为单币种和 1% 开放风险")
-        if ema_config.get("portfolio", {}).get("leverage") != 2.0:
-            fail(errors, "EMA 策略实验室杠杆必须为 2 倍")
-        if ema_config.get("universe", {}).get("one_active_symbol_per_strategy") is not True:
-            fail(errors, "EMA 策略实验室未声明策略实例只允许一个活动币种")
-    except Exception as exc:
-        fail(errors, f"无法读取 EMA 策略配置：{exc}")
 
     # 运行时默认参数必须与实验室 config 的 signal_parameters 逐项一致。
     def swift_default_parameters(case_label: str) -> dict[str, float]:
@@ -474,7 +455,7 @@ def main() -> int:
     strategy_dirs = [
         ROOT / "strategies" / name for name in (
             "sweep_reversal_short", "hlsr", "intraday_pump_retest_short",
-            "extreme_wick_short", "ema_altcoin_long", "double_pump_exhaustion_short",
+            "extreme_wick_short", "double_pump_exhaustion_short",
             "ema_3line_pullback",
         )
     ]
@@ -657,7 +638,7 @@ def main() -> int:
             fail(errors, "StrategyType.availableCases 未注册 HLSR（hlsr）")
         if not re.search(r"evaluate(?:HLSR|Hlsr|HighShort)", engine):
             fail(errors, "StrategyEngine 未接入 HLSR 信号评估入口")
-        if "高位扫顶反转做空" not in main_source or "高位扫顶反转做空" not in domain:
+        if "高位扫顶反转做空" not in domain or "selectedRule.displayName" not in main_source:
             fail(errors, "HLSR 中文显示名未同步到领域层和前台")
         if "High-Level Liquidity Sweep Reversal" not in domain + main_source:
             fail(errors, "HLSR 英文稳定名称未保留在运行时元数据")

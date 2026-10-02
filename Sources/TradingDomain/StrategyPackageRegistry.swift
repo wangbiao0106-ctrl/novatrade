@@ -17,7 +17,7 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
     public let displayName: String
     public let englishName: String
     /// The executable adapter name.  Existing adapters use values such as
-    /// `hlsr`, `emaAltcoinLong`, and `sweepReversalShort`.  A package may be
+    /// `hlsr`, `doublePumpExhaustionShort`, and `sweepReversalShort`.  A package may be
     /// installed before its adapter is shipped; it will then remain dormant.
     public let runtimeHandler: String
     public let sourceOfTruth: String?
@@ -31,8 +31,8 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
     public let autoSubmitLiveOrders: Bool
     public let enabledByDefault: Bool
     /// `candidate`/`draft` packages can be staged in the laboratory but are
-    /// refused by the runtime installer. Legacy config-only directories have
-    /// no lifecycle and remain readable for development imports.
+    /// refused by the runtime installer. Research directories without a root
+    /// manifest have no lifecycle and remain readable for development imports.
     public let lifecycle: String?
 
     public init(identifier: String,
@@ -137,12 +137,7 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
         return normalized
     }
 
-    /// Backwards-compatible spelling used by older service callers.
-    public static func normalizeIdentifier(_ value: String) -> String {
-        normalizePackageIdentifier(value)
-    }
-
-    /// Converts the legacy names used in research JSON files into the stable
+    /// Converts the snake_case names used in research JSON files into the stable
     /// Swift adapter identifiers. Unknown identifiers are preserved exactly
     /// (apart from whitespace normalization), so installing a future package
     /// never accidentally aliases it to an existing rule.
@@ -152,7 +147,6 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
         switch compact {
         case "hlsr": return "hlsr"
         case "sweepreversalshort": return "sweepReversalShort"
-        case "emaaltcoinlong": return "emaAltcoinLong"
         case "doublepumpexhaustionshort": return "doublePumpExhaustionShort"
         default: return trimmed
         }
@@ -339,10 +333,9 @@ public actor StrategyPackageRegistry {
         }
         let candidates = [
             // Packed laboratory artifacts carry lifecycle/version metadata in
-            // a root manifest. Legacy directories only have config/strategy.
+            // a root manifest. Research directories only have config/strategy.
             url.appendingPathComponent("manifest.json"),
-            url.appendingPathComponent("config/strategy.json"),
-            url.appendingPathComponent("strategy.json")
+            url.appendingPathComponent("config/strategy.json")
         ]
         guard let manifestURL = candidates.first(where: { fileManager.fileExists(atPath: $0.path) }) else {
             throw StrategyPackageError.invalidPackage("策略包缺少 config/strategy.json 或 manifest.json：\(url.lastPathComponent)")
@@ -398,7 +391,6 @@ public actor StrategyPackageRegistry {
             ?? object["parameters"] as? [String: Any] ?? [:]
         let identifier = string(runtime["strategy_type"])
             ?? string(runtime["strategy_id"])
-            ?? string(object["strategyId"])
             ?? string(object["strategy_id"])
             ?? string(object["package_id"])
             ?? string(object["identifier"])
@@ -407,19 +399,14 @@ public actor StrategyPackageRegistry {
             ?? string(object["strategy"])
         guard let identifier else { throw StrategyPackageError.invalidManifest("缺少 strategy_type 或 identifier") }
         let display = string(object["display_name"])
-            ?? string(object["displayName"])
             ?? string(object["name_zh"])
             ?? string(object["name"])
             ?? identifier
-        let english = string(object["name_en"])
-            ?? string(object["english_name"])
-            ?? string(object["englishName"])
-            ?? display
+        let english = string(object["name_en"]) ?? display
         let version = string(object["version"]) ?? "0.0.0"
         let handler = string(runtime["strategy_type"])
             ?? string(runtime["runtime_handler"])
             ?? string(object["runtime_handler"])
-            ?? string(object["runtimeHandler"])
             ?? identifier
         let source = string(object["source_of_truth"])
         let entry = integer(object["entry_timeframe_minutes"])
@@ -441,15 +428,14 @@ public actor StrategyPackageRegistry {
             ?? number(position["max_open_risk_percent"])
         let cooldown = integer(position["cooldown_bars"])
         let mode = string(runtime["live_order_mode"])
-            ?? string(runtime["liveOrderMode"])
             ?? string(object["live_order_mode"])
         let autoSubmit = bool(runtime["auto_submit_live_orders"])
             ?? bool(object["auto_submit_live_orders"]) ?? false
         let enabled = bool(runtime["enabled_by_default"])
             ?? bool(object["enabled_by_default"]) ?? false
         let scope = string(runtime["scope"])
-        let packageID = string(object["package_id"]) ?? string(object["packageId"])
-        let schemaVersion = integer(object["schema_version"] ?? object["schemaVersion"])
+        let packageID = string(object["package_id"])
+        let schemaVersion = integer(object["schema_version"])
         let lifecycleCandidate = string(object["lifecycle"]) ?? string(object["status"])
         let lifecycle = ["draft", "candidate", "finalized", "retired"].contains(lifecycleCandidate ?? "")
             ? lifecycleCandidate : nil
@@ -571,7 +557,7 @@ public actor StrategyPackageRegistry {
     }
 
     /// Compare the numeric components and prerelease suffixes used by the
-    /// laboratory package tool.  A malformed legacy version is kept
+    /// laboratory package tool.  A malformed installed version is kept
     /// installable, but never treated as newer than a valid incoming version.
     private static func compareVersions(_ lhs: String, _ rhs: String) -> Int {
         func parse(_ value: String) -> ([Int], [String]) {

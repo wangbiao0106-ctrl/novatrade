@@ -1,8 +1,5 @@
 .build/
 .swiftpm/
-DerivedData/
-*.xcuserstate
-*.xcworkspace/xcuserdata/
 .DS_Store
 .venv/
 __pycache__/

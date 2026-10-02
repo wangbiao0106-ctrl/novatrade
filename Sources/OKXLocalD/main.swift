@@ -7,7 +7,7 @@ import TradingDomain
 @main
 struct OKXLocalD {
     static func main() throws {
-        let port = Int(ProcessInfo.processInfo.environment["OKX_LOCALD_PORT"] ?? "8787") ?? 8787
+        let port = ProcessInfo.processInfo.environment[LocalService.portEnvironmentKey].flatMap(Int.init) ?? LocalService.defaultPort
         let app = HBApplication(configuration: .init(address: .hostname("127.0.0.1", port: port), serverName: "NovaTrade"))
         let service = TradingHTTPServer()
         let backend = service.backend
@@ -25,7 +25,7 @@ struct OKXLocalD {
         app.ws.addUpgrade()
         // Browsers do not apply same-origin policy to WebSocket upgrades.
         app.ws.add(middleware: LoopbackOriginGuardMiddleware())
-        // One shared hub: a single upstream OKX socket and a single auxiliary
+        // One shared hub: a single upstream OKX socket and a single account/log
         // poll serve every client subscribed to the same instrument/interval
         // instead of opening one upstream connection per client.
         let hub = StreamHub(backend: backend)
@@ -39,49 +39,23 @@ struct OKXLocalD {
                       let body = text.data(using: .utf8),
                       let subscription = try? JSONDecoder().decode(StreamSubscription.self, from: body) else { return }
                 writer.send(StreamEvent(type: "connection", timestamp: .now, payload: "subscribed:\(subscription.channels.joined(separator: ","))"))
-                if let previousID = state.subscriptionID, let previousInstrument = state.instrumentID, let previousInterval = state.interval {
-                    hub.unsubscribe(id: previousID, instrumentID: previousInstrument, interval: previousInterval)
+                if let previous = state.active {
+                    hub.unsubscribe(id: previous.id, instrumentID: previous.subscription.instrumentID, interval: previous.subscription.interval)
                 }
-                let instrumentID = subscription.instrumentID ?? "BTC-USDT-SWAP"
-                let interval = subscription.interval ?? .fifteenMinutes
-                let subscriptionID = UUID()
-                state.subscriptionID = subscriptionID
-                state.instrumentID = instrumentID
-                state.interval = interval
+                state.active = nil
                 guard !subscription.channels.isEmpty else { return }
-                hub.subscribe(StreamHub.Subscriber(id: subscriptionID, writer: writer, channels: Set(subscription.channels)), instrumentID: instrumentID, interval: interval)
+                let id = UUID()
+                state.active = (id, subscription)
+                hub.subscribe(StreamHub.Subscriber(id: id, writer: writer, channels: Set(subscription.channels)), instrumentID: subscription.instrumentID, interval: subscription.interval)
             }
             ws.onClose { _ in
-                if let id = state.subscriptionID, let instrumentID = state.instrumentID, let interval = state.interval {
-                    hub.unsubscribe(id: id, instrumentID: instrumentID, interval: interval)
+                if let active = state.active {
+                    hub.unsubscribe(id: active.id, instrumentID: active.subscription.instrumentID, interval: active.subscription.interval)
                 }
             }
         })
     }
 
-}
-
-private struct StreamSubscription: Decodable {
-    let channels: [String]
-    let instrumentID: String?
-    let interval: KlineInterval?
-    enum CodingKeys: String, CodingKey { case channels, instrumentID = "instrumentID", instrument = "instId", interval, bar }
-    init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        channels = try values.decodeIfPresent([String].self, forKey: .channels) ?? []
-        instrumentID = try values.decodeIfPresent(String.self, forKey: .instrumentID) ?? values.decodeIfPresent(String.self, forKey: .instrument)
-        interval = try values.decodeIfPresent(KlineInterval.self, forKey: .interval) ?? values.decodeIfPresent(KlineInterval.self, forKey: .bar)
-    }
-}
-
-private struct StreamEvent: Codable {
-    let type: String
-    let timestamp: Date?
-    let instrumentID: String?
-    let payload: String?
-    init(type: String, timestamp: Date? = nil, instrumentID: String? = nil, payload: String? = nil) {
-        self.type = type; self.timestamp = timestamp; self.instrumentID = instrumentID; self.payload = payload
-    }
 }
 
 private final class StreamWriter: @unchecked Sendable {
@@ -110,10 +84,10 @@ private final class StreamWriter: @unchecked Sendable {
     }
 }
 
+/// Per-socket subscription. NIO delivers a socket's read and close callbacks
+/// on that socket's event loop, so they never race each other.
 private final class StreamState: @unchecked Sendable {
-    var subscriptionID: UUID?
-    var instrumentID: String?
-    var interval: KlineInterval?
+    var active: (id: UUID, subscription: StreamSubscription)?
 }
 
 /// Bounds how many REST history prewarms run at once. Each prewarm spawns
@@ -145,7 +119,7 @@ private actor PrewarmGate {
     }
 }
 
-/// Shares one upstream OKX candle subscription and one auxiliary poll across
+/// Shares one upstream OKX candle subscription and one account/log poll across
 /// every WebSocket client watching the same instrument and interval. Fan-out
 /// happens here; the backend ingests each realtime candle exactly once.
 private final class StreamHub: @unchecked Sendable {
@@ -206,9 +180,6 @@ private final class StreamHub: @unchecked Sendable {
                     if config.type == .sweepReversalShort && (config.parameters["btcGateEnabled"] ?? 1) >= 1 {
                         targets.insert(StrategyTarget(instrumentID: "BTC-USDT-SWAP", interval: .oneHour))
                     }
-                    if config.type == .emaAltcoinLong {
-                        targets.insert(StrategyTarget(instrumentID: "BTC-USDT-SWAP", interval: .oneHour))
-                    }
                 }
                 self.updateStrategyTargets(targets)
                 do { try await Task.sleep(for: .seconds(30)) }
@@ -262,7 +233,7 @@ private final class StreamHub: @unchecked Sendable {
 
     // MARK: - Supervision
 
-    /// Starts/stops the candle upstream and the auxiliary poll as channel
+    /// Starts/stops the candle upstream and the account/log poll as channel
     /// demand changes. Both subtasks stop when the last subscriber leaves
     /// (the supervisor itself is cancelled by `unsubscribe`).
     private func supervisor(hubKey: String, instrumentID: String, interval: KlineInterval) -> Task<Void, Never> {
@@ -299,7 +270,7 @@ private final class StreamHub: @unchecked Sendable {
         var auxiliary = false
         for subscriber in subscribersByKey[key] ?? [] {
             if !subscriber.channels.isDisjoint(with: ["candle", "strategy", "risk"]) { candle = true }
-            if !subscriber.channels.isDisjoint(with: ["ticker", "orderbook", "trade", "account", "log"]) { auxiliary = true }
+            if !subscriber.channels.isDisjoint(with: ["account", "log"]) { auxiliary = true }
         }
         return (candle, auxiliary)
     }
@@ -377,24 +348,12 @@ private final class StreamHub: @unchecked Sendable {
         }
     }
 
-    // MARK: - Auxiliary polling
+    // MARK: - Account and log polling
 
     private func auxiliaryPoll(hubKey: String, instrumentID: String) -> Task<Void, Never> {
         Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                if self.subscribers(of: hubKey).contains(where: { $0.channels.contains("ticker") }),
-                   let ticker = try? await backend.market.ticker(instrumentID: instrumentID) {
-                    self.send(hubKey: hubKey, type: "ticker", value: ticker, instrumentID: instrumentID) { $0.channels.contains("ticker") }
-                }
-                if self.subscribers(of: hubKey).contains(where: { $0.channels.contains("orderbook") }),
-                   let book = try? await backend.market.orderBook(instrumentID: instrumentID) {
-                    self.send(hubKey: hubKey, type: "orderbook", value: book, instrumentID: instrumentID) { $0.channels.contains("orderbook") }
-                }
-                if self.subscribers(of: hubKey).contains(where: { $0.channels.contains("trade") }),
-                   let trades = try? await backend.market.trades(instrumentID: instrumentID) {
-                    self.send(hubKey: hubKey, type: "trade", value: trades, instrumentID: instrumentID) { $0.channels.contains("trade") }
-                }
                 if self.subscribers(of: hubKey).contains(where: { $0.channels.contains("account") }),
                    let account = try? await backend.account() {
                     self.send(hubKey: hubKey, type: "account", value: account, instrumentID: instrumentID) { $0.channels.contains("account") }

@@ -59,8 +59,7 @@ spec/                               稳定的工程规范和接口约定
 | 目录 | 用途 | 状态 |
 | --- | --- | --- |
 | `strategies/hlsr/` | 高位扫顶反转及其 15 分钟回测 | 已接入 OKX 模拟盘执行层，默认禁用；`STRATEGY.md` 是人类规则真源、`config/strategy.json` 是机器参数真源（四个参数块都被源码读取）；三段退出状态机位于 `Sources/TradingService/HLSRPositionManager.swift` |
-| `strategies/sweep_reversal_short/` | 山寨币二次扫顶做空 | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.3）|
-| `strategies/ema_altcoin_long/` | 双均线交易山寨币做多 | 已集成 `Sources/TradingService/StrategyEngine.swift`；目录同时保存规则真源、回测和参数验证 |
+| `strategies/sweep_reversal_short/` | 山寨币二次扫顶做空 | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.4）|
 | `strategies/ema_3line_pullback/` | EMA 20/60/120 回踩策略族历史研究（四方向） | 研究归档，不是规则真源，未接入运行时 |
 | `strategies/extreme_wick_short/` | 山寨日内涨幅超过 100% 的 15m 动能衰竭做空 | 研究候选，未接入运行时 |
 | `strategies/double_pump_exhaustion_short/` | 从翻倍动能衰竭研究中固定出的正式核心规则 | 正式规则；已接入纸面/模拟运行时，默认停用 |

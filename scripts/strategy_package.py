@@ -44,9 +44,7 @@ def _default_runtime_dir() -> Path:
     override = os.environ.get("OKX_STRATEGY_PACKAGES_DIR")
     if override:
         return Path(override).expanduser()
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "NovaTrade" / "strategy-packages"
-    return Path.home() / ".config" / "NovaTrade" / "strategy-packages"
+    return Path.home() / "Library" / "Application Support" / "NovaTrade" / "strategy-packages"
 
 
 DEFAULT_STRATEGIES_DIR = _default_runtime_dir()
@@ -142,9 +140,9 @@ class Version:
 
 
 def _config_identity(config: Mapping[str, Any], strategy_id: str) -> Optional[str]:
-    """Read the several historical strategy-id spellings used by the lab."""
+    """Read the strategy-id spellings used by the lab configs."""
 
-    for key in ("strategy_id", "strategyId", "strategy", "id"):
+    for key in ("strategy_id", "strategy", "id"):
         raw = config.get(key)
         if isinstance(raw, str) and raw.strip():
             return _normalise_identifier(raw)
@@ -177,13 +175,13 @@ def _validate_manifest(manifest: Mapping[str, Any], package_dir: Path, require_f
     for item in package_dir.rglob("*"):
         if item.is_symlink():
             errors.append(f"策略包不允许符号链接：{item.relative_to(package_dir)}")
-    if manifest.get("schema_version", manifest.get("schemaVersion")) != SCHEMA_VERSION:
+    if manifest.get("schema_version") != SCHEMA_VERSION:
         errors.append(f"schema_version 必须为 {SCHEMA_VERSION}")
-    strategy_id = manifest.get("strategy_id", manifest.get("strategyId"))
+    strategy_id = manifest.get("strategy_id")
     if not isinstance(strategy_id, str) or not STRATEGY_ID_RE.fullmatch(strategy_id):
         errors.append("strategy_id 必须是稳定的 snake_case 标识")
         strategy_id = ""
-    package_id = manifest.get("package_id", manifest.get("packageId"))
+    package_id = manifest.get("package_id")
     if not isinstance(package_id, str) or not STRATEGY_ID_RE.fullmatch(package_id):
         errors.append("package_id 必须是稳定的 snake_case 标识")
     elif package_id != strategy_id:
@@ -194,7 +192,7 @@ def _validate_manifest(manifest: Mapping[str, Any], package_dir: Path, require_f
     except PackageError as exc:
         errors.append(str(exc))
         normalized_version = str(version or "")
-    display_name = manifest.get("display_name", manifest.get("displayName"))
+    display_name = manifest.get("display_name")
     if not isinstance(display_name, str) or not display_name.strip():
         errors.append("display_name 不能为空")
     lifecycle = manifest.get("lifecycle", manifest.get("status"))
@@ -546,13 +544,9 @@ def pack_strategy(strategy_dir: Path | str, output: Path | str, lifecycle: str =
             "schema_version": SCHEMA_VERSION,
             "package_id": strategy_id,
             "strategy_id": strategy_id,
-            # The aliases keep packages consumable by the Swift registry and
-            # by older laboratory importers while strategy_id remains the
-            # canonical field for this tool.
-            "identifier": strategy_id,
             "version": chosen_version,
             "display_name": str(config.get("display_name") or config.get("name_zh") or strategy_id),
-            "name_en": str(config.get("name_en") or config.get("english_name") or strategy_id),
+            "name_en": str(config.get("name_en") or strategy_id),
             "runtime_handler": strategy_id,
             "runtime": {
                 "strategy_type": strategy_id,

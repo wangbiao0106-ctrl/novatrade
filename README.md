@@ -1,22 +1,19 @@
 # OKX Self Trader
 
-面向苹果生态的本地 OKX 自助交易系统。当前版本以 OKX Agent Trade Kit（ATK）为连接层：Swift 应用使用 ATK 的 API Key profile，通过 `okx --json` 获取结构化数据；MCP 只作为 AI 客户端入口。
+面向 macOS 的本地 OKX 自助交易系统，前后端分离：SwiftUI 客户端 `mac-trader` 只通过回环地址访问本地服务 `okx-locald`。当前版本以 OKX Agent Trade Kit（ATK）为连接层：Swift 应用使用 ATK 的 API Key profile，通过 `okx --json` 获取结构化数据；MCP 只作为 AI 客户端入口。
 
 ## 架构
 
 ```text
-macOS SwiftUI
-      |
-本地交易服务（策略、风控、审计）
-      |
-ATKGateway（Swift Process 适配层）
+mac-trader（SwiftUI）
+      |  REST + WebSocket，127.0.0.1:8787
+okx-locald（Hummingbird：策略、风控、StreamHub）
+      |                         |
+ATKGateway（Process 适配层）   OKXCandleSocket（OKX Business WSS 实时 K 线）
       |
 okx --json  <->  ~/.okx/config.toml API Key profile
-      |
-OKX REST API
 
-iOS Monitor  --->  Mac 本地服务（只读，不持有凭据）
-AI 客户端   --->  okx-trade-mcp（stdio，可只读或按模块启用）
+AI 客户端  --->  okx-trade-mcp（stdio，可只读或按模块启用）
 ```
 
 Swift 代码不直接打开 `~/.okx/config.toml`，也不保存或展示 API Key、Secret、Passphrase 或 OAuth Token。`config show --json` 的原始输出可能包含密钥，适配层只在内存中提取 profile/site/是否存在 API Key，随后丢弃原始输出，绝不写入日志、界面或审计。
@@ -43,11 +40,10 @@ Swift 应用不会直接打开配置文件，也不会持久化或展示密钥�
 - K 线使用 SwiftUI 原生 Canvas：红涨绿跌、连续拖拽、悬停十字线、日期/价格轴、成交量和 EMA。历史数据首次通过 API 预热；实时 K 柱仅使用 OKX V5 Business WSS 的 candle 频道，没有 K 线轮询或 ticker 拼接。WSS 不提供历史查询，因此首次历史加载仍需 API。
 - `okx-locald` 使用 Hummingbird 提供 REST 和本地 WebSocket；上游订阅、断线、重连状态会传到图表底栏。使用 OKX 文本 ping/pong 保活，断线后指数退避并重新订阅。多个本地客户端订阅同一合约/周期时共享同一个上游 OKX 连接和辅助轮询（StreamHub 扇出），实时 K 柱只在服务端摄入一次。
 - 策略扫描池按策略类型独立解析并缓存；K 线评估和 StreamHub 订阅共用同一份解析结果，避免每根 K 线重复筛选全量合约。可用 `GET /api/v1/strategies/targets?fresh=true` 查看后台实际使用的 instrument ID、策略专属 universe 和刷新时间。
-- 本地服务对 ATK CLI 调用带 TTL 缓存和单飞去重（ticker 2s、账户/持仓/挂单 5s、合约列表与历史预热 60s），多个客户端并发轮询时不再重复拉起 CLI 进程；下单成功后立即失效账户缓存。盘口和逐笔成交通过 OKX REST 提供。
-- 运行日志按 JSONL 持久化到状态目录的 `runtime-log.jsonl`，服务重启后自动回读；策略状态、订单账本和状态审计仍分别写入 `paper-state.json`、`paper-ledger.json` 和 `audit.jsonl`。
+- 本地服务对 ATK CLI 调用带 TTL 缓存和单飞去重（ticker 2s、账户/持仓/挂单 5s、合约列表与历史预热 60s），多个客户端并发轮询时不再重复拉起 CLI 进程；下单成功后立即失效账户缓存。
+- 状态目录（`~/Library/Application Support/NovaTrade/`）只有两份运行时文件：`paper-state.json` 原子写入策略、状态、订单、成交和风控；`runtime-log.jsonl` 保存最近 1000 条运行日志，服务启动时自动回读并压缩。
 - 风控：日亏/回撤熔断按 UTC 日界滚动日初权益基线；模拟撮合支持部分平仓（保留剩余仓位）和同向加仓均价合并，已实现盈亏扣除手续费。
-- 工作台通过 ATK CLI 读取实时 ticker 和 API Key profile 状态；未配置或暂时无法连接 ATK 时显示等待状态，不注入虚构行情或策略实例。
-- iOS SwiftUI 入口：只读占位，不运行 CLI，不保存凭据。
+- 工作台通过本地服务读取合约行情和 API Key profile 状态；未配置或暂时无法连接 ATK 时显示等待状态，不注入虚构行情或策略实例。
 - `ATKGateway`：使用 `Process` 调用 CLI，不经过 shell；支持 JSON 解码、退出码和测试替身。
 - UI 默认不提供下单按钮；实盘 HTTP 接口需要先手动启用交易，再经过 profile、订单参数和风控检查。
 - OKX 永续订单的 `quantity` 始终表示合约张数（`sz`），下单前读取 `ctVal/ctMult/lotSz/minSz/tickSz`；策略按真实报价名义价值换算并向下取整，规格缺失或不符合时拒绝下单。
@@ -102,10 +98,6 @@ python3 strategies/hlsr/src/hlsr_signal_generator.py \
 
 回测的 `--days` 至少为 180 天，以覆盖三个 60/30/30 天 walk-forward 折；`--end` 支持带时区的 ISO-8601 时间，也支持 `Z` 结尾。
 
-## 双均线交易山寨币做多（已集成）
-
-`ema_altcoin_long` 已接入 `StrategyType.emaAltcoinLong`，运行时在动态合规山寨币池中按 EMA20/60/120 突破回踩规则生成多头信号，使用 BTC EMA 门控、ATR 止损/止盈、0.5% 开放风险和单币种并发限制。该规则只允许 OKX 模拟盘策略下单；实验室规则与参数见 `strategies/ema_altcoin_long/`，运行时映射位于 `Sources/TradingService/StrategyEngine.swift`。
-
 ## 山寨币二次扫顶做空（已集成）
 
 策略实验室中的 `sweep_reversal_short` 是当前规则的唯一来源：人类规则见 `strategies/sweep_reversal_short/STRATEGY.md`，机器参数见同目录 `config/strategy.json`。运行时策略依据该版本同步到 `Sources/`，不会读取研究目录。
@@ -144,11 +136,11 @@ python3 scripts/strategy_package.py uninstall hlsr
 
 ```bash
 swift test
-./scripts/launch-app.sh
-swift run okx-atk-cli BTC-USDT-SWAP
+./scripts/build_and_run.sh            # 构建 dist/NovaTrade.app 并打开
+./scripts/build_and_run.sh package    # 额外生成 dist/NovaTrade.dmg
 ```
 
-`launch-app.sh` 构建并打开 `.build/NovaTrade.app`，客户端在后台静默启动 `okx-locald`。实时链路回归检查：`python3 scripts/test_local_stream.py --live`，使用独立端口和临时状态目录，只订阅 K 线，不启用策略或下单。
+`build_and_run.sh` 把 `mac-trader` 和 `okx-locald` 打进同一个 `dist/NovaTrade.app`，客户端在后台以 `nohup` 静默启动同目录的 `okx-locald`，退出客户端不会中断运行中的策略。实时链路回归检查：`python3 scripts/test_local_stream.py --live`，使用独立端口和临时状态目录，只订阅 K 线，不启用策略或下单。
 
 ## 导出 AI 行情数据
 
@@ -160,15 +152,7 @@ python3 scripts/export_market_data.py
 
 `manifest.json` 记录时间范围、字段定义、每个合约的文件名、K 线数量和失败状态；每行行情包含 UTC 时间、毫秒时间戳、OHLC、成交量、报价成交量和 `confirmed`。脚本支持断点续跑，已经完成的文件会跳过；需要重新抓取时加 `--force`。已有全量清单需要更新到当前时间时使用 `--update`，它只抓取各合约最后一根附近到现在的增量行情并替换旧文件。可用 `--output` 指定目录，`--symbols BTC-USDT-SWAP ETH-USDT-SWAP` 只导出指定合约，`--workers` 控制并发数。
 
-安装 ATK 后，`okx-atk-cli` 会通过系统 `PATH` 或 `/opt/homebrew/bin/okx`、`/usr/local/bin/okx` 查找 `okx`，也可使用 `OKX_CLI_PATH` 指定绝对路径。它是本项目的诊断入口；Swift 适配层使用同一 CLI 的 `--json` 机器输出。未安装或未配置 API Key 时，界面会显示明确错误；公共行情本身不要求 API Key。
-
-## 后续迭代
-
-1. 增加本地 `okx-locald` actor 服务，统一 ATK 调用、订单状态机和 append-only 审计。
-2. 增加纸面交易、订单预览、风险拦截和人工确认；Swift 端禁止任意写命令，只允许显式白名单。
-3. 增加 ATK CLI 的账户、持仓和订单 JSON 适配，处理超时、重连、部分失败和幂等。
-4. 增加 iOS 与 Mac 的本地配对，只同步脱敏状态和告警。
-5. 最后才开放实盘写操作，并要求独立小额子账户、无提币权限、日损熔断和保护单核验。
+安装 ATK 后，`okx-locald` 会通过系统 `PATH` 或 `/opt/homebrew/bin/okx`、`/usr/local/bin/okx` 查找 `okx`，也可使用 `OKX_CLI_PATH` 指定绝对路径。诊断时直接运行 `okx` 命令；Swift 适配层使用同一 CLI 的 `--json` 机器输出。未安装或未配置 API Key 时，界面会显示明确错误；公共行情本身不要求 API Key。
 
 ## 目录规范
 

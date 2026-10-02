@@ -4,7 +4,7 @@ import TradingDomain
 @testable import TradingService
 
 private func hlsrConfig(enabled: Bool = true) -> StrategyConfig {
-    StrategyConfig(name: "高位扫顶反转做空", instrumentID: "ALT-USDT-SWAP", interval: .fifteenMinutes,
+    StrategyConfig(name: "高位扫顶反转做空", scope: .dynamic(.hlsrCandidates), interval: .fifteenMinutes,
                    type: .hlsr, enabled: enabled, cooldownBars: 16)
 }
 

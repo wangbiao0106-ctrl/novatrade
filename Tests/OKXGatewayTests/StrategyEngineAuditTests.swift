@@ -20,7 +20,7 @@ func disabledStrategyCannotKeepRunningStatus() {
     let engine = StrategyEngine()
     let previous = StrategyStatus(id: id, state: .running, direction: "short", cooldown: 4)
     let config = StrategyConfig(
-        id: id, name: "paused", instrumentID: "ALT-USDT-SWAP", interval: .oneHour,
+        id: id, name: "paused", scope: .dynamic(.sweepCandidates), interval: .oneHour,
         type: .sweepReversalShort, enabled: false
     )
     let candle = Candle(timestamp: Date(timeIntervalSince1970: 1_700_000_000), open: 10, high: 11, low: 9, close: 10)
@@ -118,7 +118,7 @@ func sweepGateFailsClosedWhenBTCDataIsOlderThanOneHour() {
                       close: Decimal(close), volume: 100)
     }
     let config = StrategyConfig(
-        name: "扫顶", instrumentID: "ALT-USDT-SWAP", interval: .oneHour,
+        name: "扫顶", scope: .dynamic(.sweepCandidates), interval: .oneHour,
         type: .sweepReversalShort,
         parameters: ["L": 10, "R": 5, "majorWindow": 288, "sweepWait": 96,
                      "rejectWait": 5, "resweepWait": 12, "rsiMin": 62,

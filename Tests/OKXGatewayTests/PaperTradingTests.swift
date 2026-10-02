@@ -11,17 +11,15 @@ func strategyScopesResolveSingleMultipleAndDynamicTargets() throws {
         ContractMarket(id: "ALT-USDT-SWAP", name: "ALT", baseCurrency: "ALT", quoteCurrency: "USDT", last: 1, changePercent: 60, volume24h: 50_000_000),
         ContractMarket(id: "MOON-USDT-SWAP", name: "MOON", baseCurrency: "MOON", quoteCurrency: "USDT", last: 1, changePercent: 101, volume24h: 40_000_000)
     ]
-    #expect(StrategyScope.single("BTC-USDT-SWAP").matches("BTC-USDT-SWAP", contracts: contracts))
+    #expect(StrategyScope.single("BTC-USDT-SWAP").resolvedInstrumentIDs(from: contracts) == ["BTC-USDT-SWAP"])
     #expect(StrategyScope.multiple(["BTC-USDT-SWAP", "ALT-USDT-SWAP"]).resolvedInstrumentIDs(from: contracts).count == 2)
-    #expect(StrategyScope.dynamic(.highGain60).resolvedInstrumentIDs(from: contracts) == ["MOON-USDT-SWAP", "ALT-USDT-SWAP"])
-    #expect(StrategyScope.dynamic(.highGain100).resolvedInstrumentIDs(from: contracts) == ["MOON-USDT-SWAP"])
+    #expect(StrategyScope.dynamic(.hotAltcoins).resolvedInstrumentIDs(from: contracts) == ["ALT-USDT-SWAP", "MOON-USDT-SWAP"])
 }
 
 @Test
 func strategySpecificScopesDoNotReuseTheHot20Pool() {
     let contracts = [
         ContractMarket(id: "SWEEP-USDT-SWAP", name: "SWEEP", baseCurrency: "SWEEP", quoteCurrency: "USDT", last: 1, changePercent: 5, volume24h: 80_000_000),
-        ContractMarket(id: "EMA-USDT-SWAP", name: "EMA", baseCurrency: "EMA", quoteCurrency: "USDT", last: 1, changePercent: 8, volume24h: 60_000_000),
         ContractMarket(id: "HLSR-USDT-SWAP", name: "HLSR", baseCurrency: "HLSR", quoteCurrency: "USDT", last: 1, changePercent: 41, volume24h: 31_000_001),
         ContractMarket(id: "HLSR-LOW-VOLUME-USDT-SWAP", name: "HLSR low volume", baseCurrency: "HLSR-LOW-VOLUME", quoteCurrency: "USDT", last: 1, changePercent: 80, volume24h: 29_000_000),
         ContractMarket(id: "DME-USDT-SWAP", name: "DME", baseCurrency: "DME", quoteCurrency: "USDT", last: 1, changePercent: 101, volume24h: 10_000_000),
@@ -29,7 +27,6 @@ func strategySpecificScopesDoNotReuseTheHot20Pool() {
     ]
 
     #expect(StrategyType.sweepReversalShort.defaultUniverseCategory == .sweepCandidates)
-    #expect(StrategyType.emaAltcoinLong.defaultUniverseCategory == .emaAltcoinCandidates)
     #expect(StrategyType.hlsr.defaultUniverseCategory == .hlsrCandidates)
     #expect(StrategyType.doublePumpExhaustionShort.defaultUniverseCategory == .doublePumpCandidates)
     #expect(StrategyScope.dynamic(.hlsrCandidates).resolvedInstrumentIDs(from: contracts) == ["HLSR-USDT-SWAP"])
@@ -112,25 +109,8 @@ func unknownStrategyTypeDoesNotDiscardLedgerOrKnownStrategies() async throws {
 }
 
 @Test
-func emaAltcoinLongIsAvailableAndCanonicalized() async throws {
-    #expect(StrategyType.availableCases.contains(.emaAltcoinLong))
-    #expect(StrategyType.emaAltcoinLong.displayName == "双均线交易山寨币做多")
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-ema-visible-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let store = PaperTradingStore(directory: directory)
-    let input = StrategyConfig(name: "EMA", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .emaAltcoinLong, riskPercent: 0.5)
-    let created = try await store.create(input)
-    #expect(created.name == "双均线交易山寨币做多")
-    #expect(created.scope == .dynamic(.emaAltcoinCandidates))
-    #expect(created.instrumentID.isEmpty)
-    #expect(created.riskPercent == 1.0)
-    #expect(created.parameters["maxConcurrentPositions"] == 1)
-    #expect(created.parameters["leverage"] == 2)
-}
-
-@Test
 func storeCanonicalizesEveryRuntimeStrategyToItsOwnUniverse() async throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-universe-(UUID().uuidString)", isDirectory: true)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-universe-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = PaperTradingStore(directory: directory)
 
@@ -192,7 +172,7 @@ func strategyStoreRejectsFixedInstrumentScopes() async throws {
     ]
     for scope in invalidScopes {
         do {
-            _ = try await store.create(StrategyConfig(name: "无效范围", scope: scope, interval: .oneHour, type: .emaAltcoinLong, riskPercent: 0.5))
+            _ = try await store.create(StrategyConfig(name: "无效范围", scope: scope, interval: .oneHour, type: .sweepReversalShort, riskPercent: 0.5))
             Issue.record("expected a strategy scope with anything other than one instrument to be rejected")
         } catch PaperTradingStore.StoreError.unsupported {
             // Expected.
@@ -316,8 +296,8 @@ func tradingBackendAllowsSavingPausedStrategyWhileAccountKillSwitchIsLatched() a
         _ = try await backend.createStrategy(StrategyConfig(
             name: "熔断期间启动",
             scope: .dynamic(.hotAltcoins),
-            interval: .oneHour,
-            type: .emaAltcoinLong,
+            interval: .fifteenMinutes,
+            type: .hlsr,
             enabled: true,
             riskPercent: 0.5
         ))
@@ -348,7 +328,7 @@ func deletingStrategyPersistsRemovalOfItsCapitalPool() async throws {
 
 @Test
 func strategyStoreAcceptsOnePercentRiskAndRejectsAboveIt() async throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-risk-(UUID().uuidString)", isDirectory: true)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-risk-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = PaperTradingStore(directory: directory)
     let accepted = StrategyConfig(name: "上限内", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 1.0)
@@ -985,7 +965,7 @@ func newStrategyAllocationUsesRemainingUSDTPoolEquity() async {
 }
 
 @Test
-func legacyPoolMigrationUsesUSDTAndCapsPoolsToCurrentBalance() async {
+func firstCapitalSyncUsesUSDTAndCapsPoolsToCurrentBalance() async {
     let firstID = UUID()
     let secondID = UUID()
     let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -1163,7 +1143,7 @@ func realtimeUnconfirmedBarFillsPendingOrderAtItsOpen() async {
     _ = await backend.broker.submit(strategyID: UUID(), instrumentID: "BTC-USDT-SWAP", side: "long", quantity: 1, referencePrice: 100, requestedAt: signalTime)
 
     _ = await backend.ingestRealtimeCandle(Candle(timestamp: signalTime.addingTimeInterval(60), open: 100, high: 112, low: 99, close: 110, confirmed: false), instrumentID: "BTC-USDT-SWAP", interval: .oneMinute)
-    let positions = await backend.positions()
+    let positions = await backend.broker.allPositions()
     #expect(positions.count == 1)
     #expect(positions[0].entryPrice == Decimal(string: "100.02"))
     #expect(positions[0].markPrice == 110)

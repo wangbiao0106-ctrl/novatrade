@@ -3,15 +3,9 @@ import PackageDescription
 
 let package = Package(
     name: "OKXSelfTrader",
-    platforms: [.macOS(.v15), .iOS(.v18)],
+    platforms: [.macOS(.v15)],
     products: [
-        .library(name: "TradingDomain", targets: ["TradingDomain"]),
-        .library(name: "OKXGateway", targets: ["OKXGateway"]),
-        .library(name: "ATKGateway", targets: ["ATKGateway"]),
-        .library(name: "TradingService", targets: ["TradingService"]),
-        .library(name: "TradingServiceClient", targets: ["TradingServiceClient"]),
         .executable(name: "mac-trader", targets: ["MacTraderApp"]),
-        .executable(name: "okx-atk-cli", targets: ["OKXSelfTraderCLI"]),
         .executable(name: "okx-locald", targets: ["OKXLocalD"])
     ],
     dependencies: [
@@ -32,10 +26,9 @@ let package = Package(
         .executableTarget(
             name: "MacTraderApp",
             dependencies: ["TradingDomain", "TradingServiceClient"],
-            resources: [.copy("Resources")]
+            exclude: ["Resources"]
         ),
-        .executableTarget(name: "OKXSelfTraderCLI", dependencies: ["ATKGateway"]),
         .executableTarget(name: "OKXLocalD", dependencies: ["TradingService"]),
-        .testTarget(name: "OKXGatewayTests", dependencies: ["OKXGateway", "ATKGateway", "TradingDomain", "TradingService", "TradingServiceClient"])
+        .testTarget(name: "OKXGatewayTests", dependencies: ["OKXGateway", "ATKGateway", "TradingDomain", "TradingService"])
     ]
 )

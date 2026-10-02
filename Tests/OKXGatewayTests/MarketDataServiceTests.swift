@@ -71,32 +71,24 @@ func marketDataServiceForceRefreshesContractsBeyondCacheTTL() async throws {
 @Test
 func marketDataServiceCachesHistoricalSnapshotWithinTTL() async throws {
     let candleOutput = #"[[1700000000000,"100","110","95","104","12","12","1248","1"]]"#
-    let tickerOutput = #"[{"instId":"BTC-USDT-SWAP","last":"104","ts":"1700000000000"}]"#
-    let runner = CountingRunner(outputs: [
-        "market candles BTC-USDT-SWAP --bar 1H --limit 300 --json": candleOutput,
-        "market ticker BTC-USDT-SWAP --json": tickerOutput
-    ])
+    let runner = CountingRunner(outputs: ["market candles BTC-USDT-SWAP --bar 1H --limit 300 --json": candleOutput])
     let service = MarketDataService(client: ATKClient(runner: runner), ttl: MarketCacheTTL(snapshot: 10))
     let first = try await service.snapshot(instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     #expect(first.candles.count == 1)
     let second = try await service.snapshot(instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     #expect(second.candles.count == 1)
-    #expect(await runner.total() == 2) // one candles call + one ticker call
+    #expect(await runner.total() == 1)
     // Realtime updates keep the cached snapshot live without a REST reload.
     await service.cacheRealtimeCandle(Candle(timestamp: Date(timeIntervalSince1970: 1_700_003_600), open: 104, high: 108, low: 103, close: 107, confirmed: true), instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     let updated = try await service.snapshot(instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     #expect(updated.candles.count == 2)
-    #expect(await runner.total() == 2)
+    #expect(await runner.total() == 1)
 }
 
 @Test
 func marketDataServiceMergesRealtimeCandlesWhenHistoricalTTLExpires() async throws {
     let candleOutput = #"[[1700000000000,"100","110","95","104","12","12","1248","1"]]"#
-    let tickerOutput = #"[{"instId":"BTC-USDT-SWAP","last":"104","ts":"1700000000000"}]"#
-    let runner = CountingRunner(outputs: [
-        "market candles BTC-USDT-SWAP --bar 1H --limit 300 --json": candleOutput,
-        "market ticker BTC-USDT-SWAP --json": tickerOutput
-    ])
+    let runner = CountingRunner(outputs: ["market candles BTC-USDT-SWAP --bar 1H --limit 300 --json": candleOutput])
     let service = MarketDataService(client: ATKClient(runner: runner), ttl: MarketCacheTTL(snapshot: -1))
     _ = try await service.snapshot(instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     await service.cacheRealtimeCandle(Candle(timestamp: Date(timeIntervalSince1970: 1_700_003_600), open: 104, high: 108, low: 103, close: 107, confirmed: true), instrumentID: "BTC-USDT-SWAP", interval: .oneHour)

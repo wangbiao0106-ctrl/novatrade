@@ -47,16 +47,6 @@ struct AccountToolbarLabel: View {
 struct BackendToolbarControls: View {
     @ObservedObject var model: DashboardModel
 
-    private var statusLabel: String {
-        switch model.serviceState {
-        case .running: return "后台已连接"
-        case .starting: return "后台启动中"
-        case .stopping: return "后台停止中"
-        case .stopped: return "后台已停止"
-        case .unavailable: return "后台不可用"
-        }
-    }
-
     private var canStop: Bool {
         model.serviceState == .running || model.serviceState == .starting
     }
@@ -68,11 +58,10 @@ struct BackendToolbarControls: View {
                     .fill(model.serviceState.color)
                     .frame(width: 7, height: 7)
                     .accessibilityHidden(true)
-                Text(statusLabel)
+                Text(model.serviceState.title)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(model.serviceState.color)
             }
-            .help(model.serviceState.title)
             Button(canStop ? "停止" : "启动") {
                 model.toggleBackend()
             }

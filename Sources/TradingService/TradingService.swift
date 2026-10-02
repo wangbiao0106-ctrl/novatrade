@@ -68,10 +68,9 @@ public actor PaperTradingStore {
         for (key, value) in config.type.defaultParameters where normalized.parameters[key] == nil {
             normalized.parameters[key] = value
         }
-        // Leverage is a user-editable strategy parameter.  Older persisted
-        // instances have no key, while malformed files may contain a NaN or
-        // an out-of-range number; both cases must converge to the strategy's
-        // built-in default before being written back to disk.
+        // Leverage is a user-editable strategy parameter. A missing, NaN or
+        // out-of-range value converges to the strategy's built-in default
+        // before being written back to disk.
         if config.type.hasRuntimeHandler {
             let fallback = config.type.defaultParameters["leverage"] ?? 2.0
             let value = normalized.parameters["leverage"] ?? fallback
@@ -80,24 +79,16 @@ public actor PaperTradingStore {
                 ? value : fallback
         }
         switch config.type {
-        case .sweepReversalShort, .emaAltcoinLong:
+        case .sweepReversalShort:
             normalized.name = config.type.displayName
             normalized.interval = .oneHour
-            // Strategy instances scan their own live universe. Fixed-symbol
-            // inputs and stale generic scopes are migrated to the strategy's
-            // canonical scope when state is loaded or saved.
-            normalized.instrumentID = ""
+            // Strategy instances scan their own live universe; stale generic
+            // scopes converge to the strategy's canonical scope.
             normalized.scope = config.type.defaultScope
-            if config.type == .emaAltcoinLong {
-                normalized.riskPercent = config.type.maxRiskPercent
-                normalized.cooldownBars = 96
-            } else {
-                normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
-            }
+            normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
         case .hlsr, .doublePumpExhaustionShort:
             normalized.name = config.type.displayName
             normalized.interval = config.type.entryInterval
-            normalized.instrumentID = ""
             normalized.scope = config.type.defaultScope
             normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
             normalized.cooldownBars = config.type.defaultCooldownBars
@@ -108,44 +99,19 @@ public actor PaperTradingStore {
             normalized.enabled = false
         }
         // A strategy may scan many symbols, but its instance-level execution
-        // policy allows only one active symbol at a time. Override stale
-        // persisted concurrency values during migration.
+        // policy allows only one active symbol at a time.
         normalized.parameters["maxConcurrentPositions"] = 1
         normalized.parameters["maxOpenRiskPercent"] = 1.0
         normalized.capitalPoolPercent = min(max(normalized.capitalPoolPercent, 0.1), 100.0)
         return normalized
     }
 
-    private static func supports(_ config: StrategyConfig, allowLegacyDynamic: Bool = false) -> Bool {
+    /// Built-in strategies scan a dynamic universe on their own entry bar.
+    /// The exact category is canonicalized from the strategy type, so any
+    /// dynamic category is accepted here; fixed single/multiple scopes are not.
+    private static func supports(_ config: StrategyConfig) -> Bool {
         if case .external = config.type { return true }
-        let validInterval = (config.type == .hlsr || config.type == .doublePumpExhaustionShort) ? config.interval == .fifteenMinutes : config.interval == .oneHour
-        guard validInterval else { return false }
-        // The exact category is canonicalized below from the strategy type.
-        // Accept any dynamic category at the input boundary so older saved
-        // configs and package callers can migrate without losing the instance;
-        // fixed single/multiple scopes remain rejected.
-        let validDynamic = config.scope.mode == .dynamicCategory
-        let legacySingle = allowLegacyDynamic && Self.singleInstrumentID(in: config.scope) != nil
-        switch config.type {
-        case .sweepReversalShort:
-            return validDynamic || legacySingle
-        case .emaAltcoinLong:
-            return validDynamic || legacySingle
-        case .hlsr:
-            return validDynamic || legacySingle
-        case .doublePumpExhaustionShort:
-            return validDynamic || legacySingle
-        case .external:
-            return true
-        }
-    }
-
-    /// Returns a fixed symbol only for migrating old persisted configurations.
-    /// New instances always use a dynamic scan scope.
-    private static func singleInstrumentID(in scope: StrategyScope) -> String? {
-        guard scope.mode == .single, scope.instrumentIDs.count == 1 else { return nil }
-        let instrumentID = scope.instrumentIDs[0].trimmingCharacters(in: .whitespacesAndNewlines)
-        return instrumentID.isEmpty ? nil : instrumentID
+        return config.interval == config.type.entryInterval && config.scope.mode == .dynamicCategory
     }
 
     public init(directory: URL = PaperTradingStore.defaultDirectory()) {
@@ -158,7 +124,7 @@ public actor PaperTradingStore {
         self.fills = []
         if let file = Self.loadFile(directory: directory, decoder: decoder) {
             let loaded = file.strategies
-                .filter { Self.supports($0, allowLegacyDynamic: true) }
+                .filter(Self.supports(_:))
                 .map(Self.canonicalized(_:))
             var unique: [StrategyConfig] = []
             for config in loaded where !unique.contains(where: { $0.type == config.type }) {
@@ -175,21 +141,16 @@ public actor PaperTradingStore {
             let strategyIDs = Set(self.strategies.map(\.id))
             self.orders.removeAll { $0.status == "pending" && !strategyIDs.contains($0.strategyID) }
         }
-        if self.strategies.isEmpty {
-            // A new installation starts with no strategy instances. Strategies
-            // are created explicitly by the user in the strategy center.
-            Self.persistInitial(directory: directory, encoder: encoder, strategies: self.strategies, statuses: self.statuses, orders: self.orders, fills: self.fills, risk: self.risk)
-        } else {
-            // A service restart is an explicit safety boundary: strategies must be
-            // started manually after the backend becomes available.
-            self.strategies = self.strategies.map { config in
-                var paused = config
-                paused.enabled = false
-                return paused
-            }
-            self.statuses = Dictionary(uniqueKeysWithValues: self.strategies.map { ($0.id, StrategyStatus(id: $0.id, state: .paused)) })
-            Self.persistInitial(directory: directory, encoder: encoder, strategies: self.strategies, statuses: self.statuses, orders: self.orders, fills: self.fills, risk: self.risk)
+        // A service restart is an explicit safety boundary: strategies must be
+        // started manually after the backend becomes available. A new
+        // installation starts with no strategy instances.
+        self.strategies = self.strategies.map { config in
+            var paused = config
+            paused.enabled = false
+            return paused
         }
+        self.statuses = Dictionary(uniqueKeysWithValues: self.strategies.map { ($0.id, StrategyStatus(id: $0.id, state: .paused)) })
+        Self.persist(StoreFile(strategies: self.strategies, statuses: self.statuses, orders: self.orders, fills: self.fills, risk: self.risk), directory: directory, encoder: encoder)
     }
 
     public static func defaultDirectory() -> URL {
@@ -336,9 +297,7 @@ public actor PaperTradingStore {
     }
 
     /// Validates the raw persisted/user supplied value before canonicalization
-    /// can replace it with a fallback.  This keeps create/update strict while
-    /// still allowing old state files without a leverage key to migrate to 2x.
-    /// The range is deliberately broader than the editor's usual defaults,
+    /// can replace it with a fallback, so create/update stay strict. The range is deliberately broader than the editor's usual defaults,
     /// because OKX's per-instrument maximum can vary while values outside
     /// this account-wide range are always unsafe.
     private static func validLeverage(_ config: StrategyConfig) -> Bool {
@@ -533,24 +492,6 @@ public actor PaperTradingStore {
                 }
                 continue
             }
-            if config.type == .emaAltcoinLong {
-                guard snapshot.interval == .oneHour else {
-                    let current = statusesByInstrument[config.id]?[snapshot.instrumentID]
-                        ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
-                    evaluatedStatuses.append(current)
-                    continue
-                }
-                let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
-                    ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
-                let next = engine.evaluateEmaAltcoinLong(config: config, candles: snapshot.candles, previous: previous, btcCandles: btcHourlyCandles)
-                statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
-                evaluatedStatuses.append(next)
-                if statuses[config.id] != next {
-                    statuses[config.id] = next
-                    changed = true
-                }
-                continue
-            }
             if config.type == .doublePumpExhaustionShort {
                 guard snapshot.interval == .fifteenMinutes else {
                     let current = statusesByInstrument[config.id]?[snapshot.instrumentID]
@@ -592,26 +533,23 @@ public actor PaperTradingStore {
         save()
     }
 
+    /// `paper-state.json` is the single persisted record of strategies,
+    /// statuses, the paper ledger and account risk.
     private struct StoreFile: Codable {
-        let schemaVersion: Int
+        var schemaVersion = 1
         let strategies: [StrategyConfig]
         let statuses: [String: StrategyStatus]
         let orders: [PaperOrder]
         let fills: [PaperFill]
         let risk: RiskSnapshot
-    }
 
-    private struct StrategyFile: Codable {
-        let schemaVersion: Int
-        let strategies: [StrategyConfig]
-        let statuses: [String: StrategyStatus]
-    }
-
-    private struct LedgerFile: Codable {
-        let schemaVersion: Int
-        let orders: [PaperOrder]
-        let fills: [PaperFill]
-        let risk: RiskSnapshot
+        init(strategies: [StrategyConfig], statuses: [UUID: StrategyStatus], orders: [PaperOrder], fills: [PaperFill], risk: RiskSnapshot) {
+            self.strategies = strategies
+            self.statuses = Dictionary(uniqueKeysWithValues: statuses.map { ($0.key.uuidString, $0.value) })
+            self.orders = orders
+            self.fills = fills
+            self.risk = risk
+        }
     }
 
     private static func loadFile(directory: URL, decoder: JSONDecoder) -> StoreFile? {
@@ -621,38 +559,13 @@ public actor PaperTradingStore {
     }
 
     private func save() {
-        let file = StoreFile(schemaVersion: 1, strategies: strategies, statuses: Dictionary(uniqueKeysWithValues: statuses.map { ($0.key.uuidString, $0.value) }), orders: orders, fills: fills, risk: risk)
-        guard let data = try? encoder.encode(file) else { return }
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try Self.writeAtomic(data, to: directory.appendingPathComponent("paper-state.json"))
-            let strategyData = try encoder.encode(StrategyFile(schemaVersion: 1, strategies: strategies, statuses: Dictionary(uniqueKeysWithValues: statuses.map { ($0.key.uuidString, $0.value) })))
-            try Self.writeAtomic(strategyData, to: directory.appendingPathComponent("strategies.json"))
-            let ledgerData = try encoder.encode(LedgerFile(schemaVersion: 1, orders: orders, fills: fills, risk: risk))
-            try Self.writeAtomic(ledgerData, to: directory.appendingPathComponent("paper-ledger.json"))
-            let audit = directory.appendingPathComponent("audit.jsonl")
-            let line = "{\"timestamp\":\"\(ISO8601DateFormatter().string(from: .now))\",\"event\":\"state_saved\"}\n"
-            if let handle = try? FileHandle(forWritingTo: audit) { try handle.seekToEnd(); try handle.write(contentsOf: Data(line.utf8)); try handle.close() }
-            else { try Data(line.utf8).write(to: audit, options: .atomic) }
-        } catch { }
+        Self.persist(StoreFile(strategies: strategies, statuses: statuses, orders: orders, fills: fills, risk: risk), directory: directory, encoder: encoder)
     }
 
-    private static func writeAtomic(_ data: Data, to url: URL) throws {
-        let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).tmp")
-        try data.write(to: tmp, options: .atomic)
-        if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
-        try FileManager.default.moveItem(at: tmp, to: url)
-    }
-
-    private static func persistInitial(directory: URL, encoder: JSONEncoder, strategies: [StrategyConfig], statuses: [UUID: StrategyStatus], orders: [PaperOrder], fills: [PaperFill], risk: RiskSnapshot) {
-        let file = StoreFile(schemaVersion: 1, strategies: strategies, statuses: Dictionary(uniqueKeysWithValues: statuses.map { ($0.key.uuidString, $0.value) }), orders: orders, fills: fills, risk: risk)
+    private static func persist(_ file: StoreFile, directory: URL, encoder: JSONEncoder) {
         guard let data = try? encoder.encode(file) else { return }
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try writeAtomic(data, to: directory.appendingPathComponent("paper-state.json"))
-            try writeAtomic(try encoder.encode(StrategyFile(schemaVersion: 1, strategies: strategies, statuses: file.statuses)), to: directory.appendingPathComponent("strategies.json"))
-            try writeAtomic(try encoder.encode(LedgerFile(schemaVersion: 1, orders: orders, fills: fills, risk: risk)), to: directory.appendingPathComponent("paper-ledger.json"))
-        } catch { }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? data.write(to: directory.appendingPathComponent("paper-state.json"), options: .atomic)
     }
 
     public enum StoreError: LocalizedError {
@@ -670,8 +583,8 @@ public actor PaperTradingStore {
 }
 
 /// Cache TTLs for `MarketDataService`. Every uncached read spawns an ATK CLI
-/// process (or hits OKX REST), so short windows collapse bursts from several
-/// stream clients and the auxiliary poller into one call per window.
+/// process, so short windows collapse bursts from several stream clients and
+/// the auxiliary poller into one call per window.
 public struct MarketCacheTTL: Sendable {
     public var ticker: TimeInterval
     public var snapshot: TimeInterval
@@ -679,12 +592,10 @@ public struct MarketCacheTTL: Sendable {
     public var account: TimeInterval
     public var positions: TimeInterval
     public var orders: TimeInterval
-    public var orderBook: TimeInterval
-    public var trades: TimeInterval
 
-    public init(ticker: TimeInterval = 2, snapshot: TimeInterval = 60, contracts: TimeInterval = 60, account: TimeInterval = 5, positions: TimeInterval = 5, orders: TimeInterval = 5, orderBook: TimeInterval = 3, trades: TimeInterval = 3) {
+    public init(ticker: TimeInterval = 2, snapshot: TimeInterval = 60, contracts: TimeInterval = 60, account: TimeInterval = 5, positions: TimeInterval = 5, orders: TimeInterval = 5) {
         self.ticker = ticker; self.snapshot = snapshot; self.contracts = contracts; self.account = account
-        self.positions = positions; self.orders = orders; self.orderBook = orderBook; self.trades = trades
+        self.positions = positions; self.orders = orders
     }
 }
 
@@ -699,9 +610,7 @@ public actor MarketDataService {
     /// The OKX business socket is the sole source for live candle updates.
     /// ATK remains available for the authenticated account surface and the
     /// one-time historical snapshot used to paint the chart on subscription.
-    private let marketSocket: OKXPublicClient
-    /// REST client for order book and public trade polling.
-    private let rest: OKXPublicClient
+    private let marketSocket: OKXCandleSocket
     private let ttl: MarketCacheTTL
 
     private var cache: [String: MarketSnapshot] = [:]
@@ -729,16 +638,9 @@ public actor MarketDataService {
     private var ordersTask: Task<[OrderSnapshot], Error>?
     private var ordersGeneration = 0
 
-    private var orderBookCache: [String: Fresh<OrderBookSnapshot>] = [:]
-    private var orderBookTasks: [String: Task<OrderBookSnapshot, Error>] = [:]
-
-    private var tradesCache: [String: Fresh<[TradeTick]>] = [:]
-    private var tradesTasks: [String: Task<[TradeTick], Error>] = [:]
-
-    public init(client: ATKClient = ATKClient(), marketSocket: OKXPublicClient = OKXPublicClient(), rest: OKXPublicClient = OKXPublicClient(), ttl: MarketCacheTTL = MarketCacheTTL()) {
+    public init(client: ATKClient = ATKClient(), marketSocket: OKXCandleSocket = OKXCandleSocket(), ttl: MarketCacheTTL = MarketCacheTTL()) {
         self.client = client
         self.marketSocket = marketSocket
-        self.rest = rest
         self.ttl = ttl
     }
 
@@ -752,9 +654,7 @@ public actor MarketDataService {
         }
         if let task = cacheTasks[cacheKey] { return try await task.value }
         let task = Task { [client] in
-            let candles = try await client.marketCandles(instrumentID: instrumentID, interval: interval)
-            let ticker = try? await client.marketTicker(instrumentID: instrumentID)
-            return MarketSnapshot(instrumentID: instrumentID, interval: interval, candles: candles, ticker: ticker)
+            MarketSnapshot(instrumentID: instrumentID, interval: interval, candles: try await client.marketCandles(instrumentID: instrumentID, interval: interval))
         }
         cacheTasks[cacheKey] = task
         do {
@@ -775,11 +675,10 @@ public actor MarketDataService {
                 }
             }
             if mergedCandles.count > 500 { mergedCandles.removeFirst(mergedCandles.count - 500) }
-            let merged = MarketSnapshot(instrumentID: instrumentID, interval: interval, candles: mergedCandles, ticker: value.ticker ?? cache[cacheKey]?.ticker)
+            let merged = MarketSnapshot(instrumentID: instrumentID, interval: interval, candles: mergedCandles)
             cache[cacheKey] = merged
             cacheFetchedAt[cacheKey] = Date()
             cacheTasks[cacheKey] = nil
-            if let ticker = merged.ticker { tickerCache[instrumentID] = Fresh(value: ticker, fetchedAt: Date()) }
             return merged
         } catch {
             cacheTasks[cacheKey] = nil
@@ -820,38 +719,6 @@ public actor MarketDataService {
             return value
         } catch {
             instrumentSpecTasks[instrumentID] = nil
-            throw error
-        }
-    }
-
-    public func orderBook(instrumentID: String) async throws -> OrderBookSnapshot {
-        if let cached = orderBookCache[instrumentID], cached.isValid(ttl: ttl.orderBook) { return cached.value }
-        if let task = orderBookTasks[instrumentID] { return try await task.value }
-        let task = Task { [rest] in try await rest.orderBook(instrumentID: instrumentID) }
-        orderBookTasks[instrumentID] = task
-        do {
-            let value = try await task.value
-            orderBookCache[instrumentID] = Fresh(value: value, fetchedAt: Date())
-            orderBookTasks[instrumentID] = nil
-            return value
-        } catch {
-            orderBookTasks[instrumentID] = nil
-            throw error
-        }
-    }
-
-    public func trades(instrumentID: String) async throws -> [TradeTick] {
-        if let cached = tradesCache[instrumentID], cached.isValid(ttl: ttl.trades) { return cached.value }
-        if let task = tradesTasks[instrumentID] { return try await task.value }
-        let task = Task { [rest] in try await rest.trades(instrumentID: instrumentID) }
-        tradesTasks[instrumentID] = task
-        do {
-            let value = try await task.value
-            tradesCache[instrumentID] = Fresh(value: value, fetchedAt: Date())
-            tradesTasks[instrumentID] = nil
-            return value
-        } catch {
-            tradesTasks[instrumentID] = nil
             throw error
         }
     }
@@ -960,13 +827,9 @@ public actor MarketDataService {
         try await client.closedSwapPositions(instrumentID: instrumentID)
     }
 
-    public func candleUpdates(instrumentID: String, interval: KlineInterval) -> AsyncStream<Candle> {
-        // OKXPublicClient owns the socket lifecycle and reconnects with
-        // exponential backoff after a disconnect. Keeping this as a direct
-        // pass-through is intentional: no timer or REST fallback should run
-        // in the real-time candle path.
-        marketSocket.candleUpdates(instrumentID: instrumentID, interval: interval)
-    }
+    /// `OKXCandleSocket` owns the socket lifecycle and reconnects with
+    /// exponential backoff. No timer or REST fallback runs in the real-time
+    /// candle path.
     public func candleEvents(instrumentID: String, interval: KlineInterval) -> AsyncStream<OKXCandleEvent> {
         marketSocket.candleEvents(instrumentID: instrumentID, interval: interval)
     }
@@ -981,7 +844,7 @@ public actor MarketDataService {
         }
         values.upsert(candle)
         if values.count > 500 { values.removeFirst(values.count - 500) }
-        cache[cacheKey] = MarketSnapshot(instrumentID: instrumentID, interval: interval, candles: values, ticker: previous.ticker, updatedAt: .now)
+        cache[cacheKey] = MarketSnapshot(instrumentID: instrumentID, interval: interval, candles: values, updatedAt: .now)
     }
     public func cached(instrumentID: String, interval: KlineInterval) -> MarketSnapshot? { cache[key(instrumentID, interval)] }
 
@@ -1005,6 +868,7 @@ public actor TradingBackend {
     private var strategyEntrySubmissionsInFlight: Set<UUID> = []
     private var strategyEntryInFlightInstruments: Set<String> = []
     private var runtimeLogs: [RuntimeLog] = []
+    private var runtimeLogFileLines = 0
     private let runtimeLogURL: URL
     private var loggedSignalIDs: Set<UUID> = []
     private var loggedFillIDs: Set<UUID> = []
@@ -1021,9 +885,8 @@ public actor TradingBackend {
     private struct HLSRExitRuntimeState: Codable, Sendable {
         var manager: HLSRPositionManager
         var remoteOrderID: String?
-        /// Persisted before the network submit. A nil field on legacy state
-        /// is deliberately not guessed: that old order may have been sent
-        /// without a client id and therefore cannot be safely resubmitted.
+        /// Persisted before the network submit and cleared once the leg is
+        /// confirmed, so a restart can look the in-flight order up exactly.
         var clientOrderID: String? = nil
         var submittedAt: Date?
         var lastExitPrice: Decimal?
@@ -1040,13 +903,11 @@ public actor TradingBackend {
     private var strategyExitMonitorInFlight = false
     private struct PendingRemoteExit: Codable {
         let strategyID: UUID
-        /// The entry whose capital reservation this exit settles. Optional
-        /// keeps old pending files decodable without guessing a newer entry.
+        /// The entry whose capital reservation this exit settles; nil when
+        /// the entry never received a remote order id.
         let entryOrderID: String?
-        /// The original remote position identity. Optional keeps records
-        /// written before this field existed decodable and conservatively
-        /// falls back to instrument-level matching for those records.
-        let positionID: String?
+        /// The original remote position identity (OKX `posId`).
+        let positionID: String
         let instrumentID: String
         let quantity: Decimal
         let entryPrice: Decimal
@@ -1251,7 +1112,11 @@ public actor TradingBackend {
         self.broker = PaperBroker(risk: riskEngine)
         let directory = logDirectory ?? paper.stateDirectory
         self.runtimeLogURL = directory.appendingPathComponent("runtime-log.jsonl")
-        self.runtimeLogs = Self.loadRuntimeLogs(from: self.runtimeLogURL)
+        let (logs, fileLines) = Self.loadRuntimeLogs(from: self.runtimeLogURL)
+        // Drop the lines that fell out of the retained window at startup.
+        if fileLines > logs.count { Self.writeRuntimeLogs(logs, to: self.runtimeLogURL) }
+        self.runtimeLogs = logs
+        self.runtimeLogFileLines = logs.count
         self.hlsrExitStateURL = directory.appendingPathComponent("hlsr-exit-state.json")
         self.hlsrExitStates = Self.loadHLSRExitStates(from: self.hlsrExitStateURL)
         self.pendingRemoteExitURL = directory.appendingPathComponent("pending-remote-exits.json")
@@ -1392,7 +1257,7 @@ public actor TradingBackend {
         let configs = await paper.allStrategies()
         let matching = configs.filter { config in
             if let strategyType { return config.type == strategyType }
-            return config.strategyIdentifier == normalized
+            return config.type.identifier == normalized
         }
         guard matching.allSatisfy({ !$0.enabled }) else {
             throw StrategyPackageError.activePackage(normalized)
@@ -1522,7 +1387,7 @@ public actor TradingBackend {
         let created = try await paper.create(normalized)
         _ = await riskEngine.registerStrategy(created.id, allocationPercent: Decimal(created.capitalPoolPercent))
         await paper.setRisk(await riskEngine.snapshot())
-        appendLog("策略已创建：\(created.name)，规则 \(Self.strategyRuleName(created.type))")
+        appendLog("策略已创建：\(created.name)，规则 \(created.type.displayName)")
         return created
     }
 
@@ -1646,16 +1511,6 @@ public actor TradingBackend {
 
     public func recordLog(_ log: RuntimeLog) {
         appendLog(log)
-    }
-
-    private static func strategyRuleName(_ type: StrategyType) -> String {
-        switch type {
-        case .sweepReversalShort: return "山寨币二次扫顶做空"
-        case .emaAltcoinLong: return "双均线交易山寨币做多"
-        case .hlsr: return "高位扫顶反转做空"
-        case .doublePumpExhaustionShort: return "日内翻倍动能衰竭确认做空"
-        case .external(let identifier): return identifier
-        }
     }
 
     private func logSignals(_ statuses: [StrategyStatus], configs: [StrategyConfig], instrumentID: String) {
@@ -1911,14 +1766,12 @@ public actor TradingBackend {
 
     /// Time exit measured from the entry order's signal bar. Mirrors each
     /// lab's `max_hold_bars` on its entry timeframe: double pump holds at
-    /// most 24 × 15m after the signal bar closes, the 1h rules 96 hours.
+    /// most 24 × 15m after the signal bar closes, the 1h sweep rule 96 hours.
     static func strategyMaxHoldSeconds(_ config: StrategyConfig) -> TimeInterval {
         switch config.type {
         case .doublePumpExhaustionShort:
             let bars = max(1, config.parameters["maxHoldBars"] ?? 24)
             return (bars + 1) * 15 * 60
-        case .emaAltcoinLong:
-            return max(1, config.parameters["maxHoldBars"] ?? 96) * 3600
         default:
             return 96 * 3600
         }
@@ -2203,8 +2056,7 @@ public actor TradingBackend {
         var closedHistoryByInstrument: [String: [ClosedSwapPositionSnapshot]] = [:]
         let pendingSnapshot = pendingRemoteExits.values
         let historyInstruments = Set(pendingSnapshot.compactMap { pending -> String? in
-            guard let positionID = pending.positionID, !positionID.isEmpty,
-                  !positions.contains(where: { $0.id == positionID && abs($0.quantity) > 0 }) else { return nil }
+            guard !positions.contains(where: { $0.id == pending.positionID && abs($0.quantity) > 0 }) else { return nil }
             return pending.instrumentID
         })
         for instrumentID in historyInstruments {
@@ -2218,20 +2070,10 @@ public actor TradingBackend {
             // reconciliation and new order authorization.
             var completed: [(String, PendingRemoteExit, Decimal, Decimal, Decimal)] = []
             for (key, pending) in pendingRemoteExits {
-                let hasOpenOriginalPosition: Bool
-                if let positionID = pending.positionID, !positionID.isEmpty {
-                    hasOpenOriginalPosition = positions.contains {
-                        $0.id == positionID &&
-                            $0.instrumentID == pending.instrumentID &&
-                            abs($0.quantity) > 0
-                    }
-                } else {
-                    // Legacy records did not persist the position identity.
-                    // Keep their conservative instrument-level behavior so a
-                    // migration cannot release a reservation early.
-                    hasOpenOriginalPosition = positions.contains {
-                        $0.instrumentID == pending.instrumentID && abs($0.quantity) > 0
-                    }
+                let hasOpenOriginalPosition = positions.contains {
+                    $0.id == pending.positionID &&
+                        $0.instrumentID == pending.instrumentID &&
+                        abs($0.quantity) > 0
                 }
                 guard !hasOpenOriginalPosition else { continue }
                 pendingRemoteExits.removeValue(forKey: key)
@@ -2271,9 +2113,8 @@ public actor TradingBackend {
                 let direction: Decimal = pending.side == "short" ? -1 : 1
                 let fallbackRealized = (pending.exitPrice - pending.entryPrice) * pending.quantity * pending.contractValue * direction
                     - abs(pending.exitPrice * pending.quantity * pending.contractValue) * broker.feeRate
-                let historyRealized = pending.positionID.flatMap { positionID in
-                    closedHistoryByInstrument[pending.instrumentID]?.first(where: { $0.positionID == positionID })?.realizedPnL
-                }
+                let historyRealized = closedHistoryByInstrument[pending.instrumentID]?
+                    .first(where: { $0.positionID == pending.positionID })?.realizedPnL
                 let realized = historyRealized ?? pending.realizedPnL ?? fallbackRealized
                 await riskEngine.recordStrategyRealized(realized, strategyID: pending.strategyID, now: timestamp)
                 await riskEngine.release(instrumentID: pending.instrumentID, notional: reservedNotional, strategyID: pending.strategyID, margin: reservedMargin, riskAmount: reservedRisk, closedPosition: true)
@@ -2334,10 +2175,8 @@ public actor TradingBackend {
             guard let price, price.isFinite, price > 0 else { continue }
             let notional = abs(spec.notional(forContracts: paperOrder.quantity, price: price))
             guard notional.isFinite, notional > 0 else { continue }
-            // Older strategy orders may not have persisted their signal. Use
-            // the durable instance registry for ownership instead of treating
-            // every signal-less order as a manual order. Manual order APIs use
-            // a fresh UUID which is not present in this set.
+            // Ownership comes from the durable instance registry. Manual order
+            // APIs use a fresh UUID which is not present in this set.
             let strategyID = strategyIDs.contains(paperOrder.strategyID) ? paperOrder.strategyID : nil
             let riskAmount: Decimal
             if let stop = paperOrder.signal?.stopPrice,
@@ -3033,7 +2872,6 @@ public actor TradingBackend {
         }
     }
 
-    public func positions() async -> [PaperPosition] { await broker.allPositions() }
     public func orders() async -> [PaperOrder] { await paper.allOrders() }
     public func fills() async -> [PaperFill] { await paper.allFills() }
     public func logs() -> [RuntimeLog] { runtimeLogs }
@@ -3061,12 +2899,11 @@ public actor TradingBackend {
             let statuses = await paper.evaluate(snapshot, contracts: contractUniverse)
             logSignals(statuses, configs: configs, instrumentID: instrumentID)
             for status in statuses {
-            guard status.state == .running, let signal = status.lastSignal, signal.type.hasPrefix("entry_"), signal.timestamp == candle.timestamp, !submittedSignals.contains(signal.id), let config = configs.first(where: { $0.id == status.id }), config.enabled else { continue }
-            // 防御：信号必须就是本标的当前记录的那一个，跨标的信号一律不下单。
-            guard await paper.status(for: config.id, instrumentID: instrumentID)?.lastSignal?.id == signal.id else { continue }
+                guard status.state == .running, let signal = status.lastSignal, signal.type.hasPrefix("entry_"), signal.timestamp == candle.timestamp, !submittedSignals.contains(signal.id), let config = configs.first(where: { $0.id == status.id }), config.enabled else { continue }
+                // 防御：信号必须就是本标的当前记录的那一个，跨标的信号一律不下单。
+                guard await paper.status(for: config.id, instrumentID: instrumentID)?.lastSignal?.id == signal.id else { continue }
                 if await submitDemoStrategyOrder(config: config, signal: signal, instrumentID: instrumentID) { recordSubmittedSignal(signal.id) }
             }
-            appendLog("\(instrumentID) \(interval.rawValue) K 线收盘，策略状态已更新")
             return statuses
         }
         return await paper.allStatuses()
@@ -3076,47 +2913,65 @@ public actor TradingBackend {
         appendLog(RuntimeLog(level: level, message: message))
     }
 
+    /// `runtime-log.jsonl` is append-only between compactions. Once it holds
+    /// twice the in-memory window it is rewritten to that window, so the file
+    /// stays bounded however long the daemon runs.
     private func appendLog(_ log: RuntimeLog) {
         runtimeLogs.append(log)
         if runtimeLogs.count > Self.runtimeLogMemoryLimit {
             runtimeLogs.removeFirst(runtimeLogs.count - Self.runtimeLogMemoryLimit)
         }
-        Self.persistRuntimeLog(log, to: runtimeLogURL)
-    }
-
-    private static func loadRuntimeLogs(from url: URL) -> [RuntimeLog] {
-        guard let data = try? Data(contentsOf: url),
-              let text = String(data: data, encoding: .utf8) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let logs = text.split(separator: "\n").compactMap { line -> RuntimeLog? in
-            guard let lineData = line.data(using: .utf8) else { return nil }
-            return try? decoder.decode(RuntimeLog.self, from: lineData)
+        runtimeLogFileLines += 1
+        if runtimeLogFileLines > 2 * Self.runtimeLogMemoryLimit {
+            Self.writeRuntimeLogs(runtimeLogs, to: runtimeLogURL)
+            runtimeLogFileLines = runtimeLogs.count
+        } else {
+            Self.appendRuntimeLog(log, to: runtimeLogURL)
         }
-        return logs.count > runtimeLogMemoryLimit ? Array(logs.suffix(runtimeLogMemoryLimit)) : logs
     }
 
-    private static func persistRuntimeLog(_ log: RuntimeLog, to url: URL) {
+    private static func runtimeLogEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(log) else { return }
-        do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if FileManager.default.fileExists(atPath: url.path) {
-                guard let handle = try? FileHandle(forWritingTo: url) else { return }
-                try handle.seekToEnd()
-                try handle.write(contentsOf: data)
-                try handle.write(contentsOf: Data([0x0A]))
-                try handle.close()
-            } else {
-                var line = Data()
-                line.append(data)
-                line.append(0x0A)
-                try line.write(to: url, options: .atomic)
-            }
-        } catch {
-            // Runtime logging must never interrupt market-data or order handling.
+        return encoder
+    }
+
+    /// Returns the retained log window and the number of lines in the file.
+    private static func loadRuntimeLogs(from url: URL) -> (logs: [RuntimeLog], fileLines: Int) {
+        guard let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else { return ([], 0) }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let lines = text.split(separator: "\n")
+        let logs = lines.suffix(runtimeLogMemoryLimit).compactMap { line -> RuntimeLog? in
+            try? decoder.decode(RuntimeLog.self, from: Data(line.utf8))
         }
+        return (logs, lines.count)
+    }
+
+    private static func writeRuntimeLogs(_ logs: [RuntimeLog], to url: URL) {
+        let encoder = runtimeLogEncoder()
+        var data = Data()
+        for log in logs {
+            guard let line = try? encoder.encode(log) else { continue }
+            data.append(line)
+            data.append(0x0A)
+        }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private static func appendRuntimeLog(_ log: RuntimeLog, to url: URL) {
+        guard var line = try? runtimeLogEncoder().encode(log) else { return }
+        line.append(0x0A)
+        // Runtime logging must never interrupt market-data or order handling.
+        guard let handle = try? FileHandle(forWritingTo: url) else {
+            writeRuntimeLogs([log], to: url)
+            return
+        }
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: line)
     }
 }
 
@@ -3198,21 +3053,9 @@ public struct TradingHTTPServer {
         }
         app.router.get("api/v1/market/candles") { [backend] request in
             let params = request.uri.queryParameters
-            let instrument = params.get("instId") ?? "BTC-USDT-SWAP"
-            let interval = KlineInterval(rawValue: params.get("bar") ?? "15m") ?? .fifteenMinutes
+            guard let instrument = params.get("instId"), !instrument.isEmpty,
+                  let interval = params.get("bar").flatMap(KlineInterval.init(rawValue:)) else { throw HBHTTPError(.badRequest) }
             return try request.application.encoder.encode(await backend.marketSnapshot(instrumentID: instrument, interval: interval), from: request)
-        }
-        app.router.get("api/v1/market/ticker") { [backend] request in
-            let instrument = request.uri.queryParameters.get("instId") ?? "BTC-USDT-SWAP"
-            return try request.application.encoder.encode(await backend.market.ticker(instrumentID: instrument), from: request)
-        }
-        app.router.get("api/v1/market/orderbook") { [backend] request in
-            let instrument = request.uri.queryParameters.get("instId") ?? "BTC-USDT-SWAP"
-            return try request.application.encoder.encode(await backend.market.orderBook(instrumentID: instrument), from: request)
-        }
-        app.router.get("api/v1/market/trades") { [backend] request in
-            let instrument = request.uri.queryParameters.get("instId") ?? "BTC-USDT-SWAP"
-            return try request.application.encoder.encode(await backend.market.trades(instrumentID: instrument), from: request)
         }
         app.router.get("api/v1/strategies") { [backend] request in try request.application.encoder.encode(await backend.strategies(), from: request) }
         app.router.get("api/v1/strategies/targets") { [backend] request in
@@ -3232,12 +3075,13 @@ public struct TradingHTTPServer {
         }
         app.router.post("api/v1/strategy-packages/:id/instances") { [backend] request in
             guard let identifier = request.parameters.get("id") else { throw HBHTTPError(.badRequest) }
-            let instance = (try? request.decode(as: StrategyPackageInstanceRequest.self)) ?? StrategyPackageInstanceRequest()
+            // An empty body asks for the manifest defaults; a malformed one is rejected.
+            let hasBody = (request.body.buffer?.readableBytes ?? 0) > 0
+            let instance = hasBody ? try request.decode(as: StrategyPackageInstanceRequest.self) : StrategyPackageInstanceRequest()
             return try request.application.encoder.encode(try await backend.createStrategyFromPackage(identifier: identifier, request: instance), from: request)
         }
         app.router.get("api/v1/strategies/status") { [backend] request in try request.application.encoder.encode(await backend.statuses(), from: request) }
         app.router.get("api/v1/strategies/capital") { [backend] request in try request.application.encoder.encode(await backend.strategyCapital(), from: request) }
-        app.router.get("api/v1/paper/positions") { [backend] request in try request.application.encoder.encode(await backend.positions(), from: request) }
         app.router.get("api/v1/paper/orders") { [backend] request in try request.application.encoder.encode(await backend.orders(), from: request) }
         app.router.get("api/v1/paper/fills") { [backend] request in try request.application.encoder.encode(await backend.fills(), from: request) }
         app.router.get("api/v1/logs") { [backend] request in try request.application.encoder.encode(await backend.logs(), from: request) }
@@ -3276,14 +3120,5 @@ public struct TradingHTTPServer {
         }
         app.router.get("api/v1/risk") { [backend] request in try request.application.encoder.encode(await backend.broker.riskSnapshot(), from: request) }
         app.router.post("api/v1/risk/reset") { [backend] request in try request.application.encoder.encode(await backend.resetRisk(), from: request) }
-        app.router.get("api/v1/paper/ledger") { [backend] _ in
-            PaperLedger(orders: await backend.paper.allOrders(), fills: await backend.paper.allFills())
-        }
     }
-}
-
-public struct PaperLedger: Codable, HBResponseEncodable {
-    public let orders: [PaperOrder]
-    public let fills: [PaperFill]
-    public init(orders: [PaperOrder], fills: [PaperFill]) { self.orders = orders; self.fills = fills }
 }

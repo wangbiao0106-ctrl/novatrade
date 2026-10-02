@@ -279,9 +279,9 @@ public actor RiskEngine {
             dayStartEquity = value
             dayStartBoundary = dayStart
             hasSynchronizedEquity = true
-            // Strategy pools use their authenticated USDT base.  Keep the
-            // legacy account-equity rebase only until that base is supplied;
-            // synchronizeStrategyCapital performs the explicit migration.
+            // Strategy pools use their authenticated USDT base. Until the
+            // first USDT read arrives, size them from account equity;
+            // synchronizeStrategyCapital then establishes the real base.
             if strategyCapitalBase == nil { rebaseUnreservedPools(to: value, now: now) }
             refresh(now: now)
             return
@@ -303,15 +303,15 @@ public actor RiskEngine {
 
     /// Reconciles the strategy allocation ledger with the account's USDT
     /// asset.  Zero is a valid balance and must not fall back to all-asset
-    /// account equity.  A legacy snapshot without a strategy base is migrated
-    /// on the first call; later calls only resize empty pools so realized PnL
-    /// and open reservations remain intact.
+    /// account equity.  The first call allocates every pool from that base;
+    /// later calls only resize empty pools so realized PnL and open
+    /// reservations remain intact.
     public func synchronizeStrategyCapital(_ value: Decimal, now: Date = .now) {
         guard value.isFinite, value >= 0 else { return }
-        let wasLegacy = strategyCapitalBase == nil
+        let isFirstSync = strategyCapitalBase == nil
         strategyCapitalBase = value
-        if wasLegacy {
-            migrateLegacyPools(to: value, now: now)
+        if isFirstSync {
+            allocatePools(fromFirstBase: value, now: now)
         } else {
             rebaseUnreservedStrategyPools(to: value, now: now)
         }
@@ -436,7 +436,7 @@ public actor RiskEngine {
         strategyCapitalBase = snapshot.strategyCapitalBase.flatMap { value in
             value.isFinite && value >= 0 ? value : nil
         }
-        // A legacy or hand-written zero-equity snapshot may not carry the
+        // A hand-written zero-equity snapshot may not carry the
         // kill-switch bit. Recompute the invariant before returning so callers
         // cannot observe an open-entry state between restore and the next
         // account refresh.
@@ -510,7 +510,7 @@ public actor RiskEngine {
         )
     }
 
-    private func migrateLegacyPools(to totalCapital: Decimal, now: Date) {
+    private func allocatePools(fromFirstBase totalCapital: Decimal, now: Date) {
         var usedAllocation: Decimal = 0
         for strategyID in pools.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
             guard var pool = pools[strategyID] else { continue }
@@ -565,8 +565,8 @@ public actor PaperBroker {
     private var fills: [PaperFill] = []
     private var positions: [String: PaperPosition] = [:]
     private var positionStrategyIDs: [String: UUID] = [:]
-    // PaperOrder predates reduceOnly and is persisted without that field. Keep
-    // the execution-only flag separately so the public ledger stays compatible.
+    // reduceOnly only matters while an order is pending, so it stays out of
+    // the persisted PaperOrder ledger record.
     private var reduceOnlyOrderIDs: Set<UUID> = []
     // Risk reservations are based on the submitted reference price. Retain
     // that amount per pending order so a normal closing/reversing order can
@@ -594,8 +594,8 @@ public actor PaperBroker {
         }
         let notional = abs(quantity * referencePrice)
         // A caller that supplies strategy-level controls must get a pool even
-        // if this is its first paper order. Legacy standalone callers may
-        // continue to use the account-only paper budget.
+        // if this is its first paper order. Standalone paper orders use the
+        // account-only paper budget.
         let hasPool = await risk.hasStrategyPool(strategyID)
         let usesStrategyControls = riskAmount != 0 || maxOpenRiskPercent != nil || maxConcurrentPositions != nil || poolAllocationPercent != 100
         let poolStrategyID = hasPool || usesStrategyControls ? strategyID : nil

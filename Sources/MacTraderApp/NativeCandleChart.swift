@@ -3,6 +3,22 @@ import TradingDomain
 
 /// A candle keeps its position in data space as the viewport is moved. The
 /// fractional bar offset is intentional: rounding here makes dragging jump.
+/// The chart redraws on every pointer move, so its date formatters are built once.
+@MainActor
+private enum ChartDateFormat {
+    static let day = formatter("yy/MM/dd")
+    static let dayTime = formatter("MM/dd HH:mm")
+    static let time = formatter("HH:mm")
+    static let full = formatter("yyyy/MM/dd HH:mm")
+
+    private static func formatter(_ pattern: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = pattern
+        return formatter
+    }
+}
+
 private struct CandleViewport {
     let total: Int
     let capacity: CGFloat
@@ -29,8 +45,8 @@ private struct CandlePriceScale {
 
     init(candles: [Candle], indices: Range<Int>) {
         let values = indices.map { candles[$0] }
-        let minimum = values.map { NSDecimalNumber(decimal: $0.low).doubleValue }.min() ?? 0
-        let maximum = values.map { NSDecimalNumber(decimal: $0.high).doubleValue }.max() ?? 1
+        let minimum = values.map(\.low.doubleValue).min() ?? 0
+        let maximum = values.map(\.high.doubleValue).max() ?? 1
         // Padding also gives a valid scale for a flat or single-candle market.
         let span = max(maximum - minimum, max(max(abs(maximum), abs(minimum)) * 0.001, 1e-16))
         low = minimum - span * 0.09
@@ -75,15 +91,13 @@ struct NativeCandleChart: View {
     @State private var zoomOrigin: CGFloat?
     @State private var pointer: CGPoint?
 
-    private let riseColor = Color(red: 0.94, green: 0.27, blue: 0.31)
-    private let fallColor = Color(red: 0.18, green: 0.76, blue: 0.56)
     private var candles: [Candle] { snapshot?.candles ?? [] }
     private var identity: String { "\(snapshot?.instrumentID ?? ""):\(snapshot?.interval.rawValue ?? "")" }
 
     var body: some View {
         GeometryReader { geometry in
             let layout = CandleChartLayout(size: geometry.size, showVolume: showVolume,
-                                           axisWidth: candles.last.map { abs(number($0.close)) < 0.001 ? 104 : 80 } ?? 80)
+                                           axisWidth: candles.last.map { abs($0.close.doubleValue) < 0.001 ? 104 : 80 } ?? 80)
             let viewport = CandleViewport(total: candles.count, capacity: visibleCount, offset: barOffset, width: layout.plotWidth)
             let scale = dragScale ?? CandlePriceScale(candles: candles, indices: viewport.indices)
             if candles.isEmpty {
@@ -181,12 +195,12 @@ struct NativeCandleChart: View {
         let selectedIndex = pointer.map { viewport.index(at: $0.x) } ?? max(0, candles.count - 1)
         if candles.indices.contains(selectedIndex) {
             let candle = candles[selectedIndex]
-            let color = candle.close >= candle.open ? riseColor : fallColor
-            let open = number(candle.open)
-            let change = open == 0 ? 0 : (number(candle.close) - open) / open * 100
+            let color = candle.close >= candle.open ? Color.marketRise : Color.marketFall
+            let open = candle.open.doubleValue
+            let change = open == 0 ? 0 : (candle.close.doubleValue - open) / open * 100
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
-                    Text(pointer == nil ? "最新" : dateText(candle.timestamp, pattern: "MM/dd HH:mm"))
+                    Text(pointer == nil ? "最新" : ChartDateFormat.dayTime.string(from: candle.timestamp))
                         .foregroundStyle(.secondary)
                     Text("开 \(price(candle.open))")
                     Text("高 \(price(candle.high))")
@@ -198,11 +212,11 @@ struct NativeCandleChart: View {
                 .lineLimit(1).minimumScaleFactor(0.75)
                 HStack(spacing: 12) {
                     if showEMA {
-                        let closes = candles.map { number($0.close) }
+                        let closes = candles.map { $0.close.doubleValue }
                         Text("EMA20 \(price(ema(closes, period: 20)[selectedIndex]))").foregroundStyle(.orange)
                         Text("EMA60 \(price(ema(closes, period: 60)[selectedIndex]))").foregroundStyle(.blue)
                     }
-                    Text("VOL \(compact(number(candle.volume)))").foregroundStyle(.secondary)
+                    Text("VOL \(formatCompact(candle.volume.doubleValue))").foregroundStyle(.secondary)
                 }
                 .lineLimit(1).minimumScaleFactor(0.75)
             }
@@ -233,23 +247,23 @@ struct NativeCandleChart: View {
         drawing.clip(to: Path(plot))
         var volumeDrawing = context
         volumeDrawing.clip(to: Path(layout.volumeRect))
-        let maxVolume = max(1, viewport.indices.map { number(candles[$0].volume) }.max() ?? 1)
+        let maxVolume = max(1, viewport.indices.map { candles[$0].volume.doubleValue }.max() ?? 1)
         for index in viewport.indices {
             let candle = candles[index]
             let x = viewport.x(index)
-            let color = candle.close >= candle.open ? riseColor : fallColor
+            let color = candle.close >= candle.open ? Color.marketRise : Color.marketFall
             let bodyWidth = max(1, min(16, viewport.step * 0.68))
-            let openY = scale.y(number(candle.open), in: plot)
-            let closeY = scale.y(number(candle.close), in: plot)
-            stroke(&drawing, from: CGPoint(x: x, y: scale.y(number(candle.high), in: plot)), to: CGPoint(x: x, y: scale.y(number(candle.low), in: plot)), color: color)
+            let openY = scale.y(candle.open.doubleValue, in: plot)
+            let closeY = scale.y(candle.close.doubleValue, in: plot)
+            stroke(&drawing, from: CGPoint(x: x, y: scale.y(candle.high.doubleValue, in: plot)), to: CGPoint(x: x, y: scale.y(candle.low.doubleValue, in: plot)), color: color)
             drawing.fill(Path(CGRect(x: x - bodyWidth / 2, y: min(openY, closeY), width: bodyWidth, height: max(1, abs(openY - closeY)))), with: .color(color))
             if showVolume {
-                let height = CGFloat(number(candle.volume) / maxVolume) * layout.volumeRect.height
+                let height = CGFloat(candle.volume.doubleValue / maxVolume) * layout.volumeRect.height
                 volumeDrawing.fill(Path(CGRect(x: x - bodyWidth / 2, y: layout.volumeRect.maxY - height, width: bodyWidth, height: height)), with: .color(color.opacity(0.42)))
             }
         }
         if showEMA {
-            let closes = candles.map { number($0.close) }
+            let closes = candles.map { $0.close.doubleValue }
             var emaContext = context
             emaContext.clip(to: Path(plot))
             for (period, color) in [(20, Color.orange), (60, Color.blue)] {
@@ -266,7 +280,7 @@ struct NativeCandleChart: View {
             let y = plot.maxY + 9
             stroke(&context, from: CGPoint(x: 0, y: y), to: CGPoint(x: plot.maxX, y: y), color: .white.opacity(0.10))
             context.draw(Text("成交量").font(axisFont).foregroundStyle(.secondary), at: CGPoint(x: 8, y: y + 9), anchor: .leading)
-            context.draw(Text(compact(maxVolume)).font(axisFont).foregroundStyle(.secondary), at: CGPoint(x: plot.maxX + 8, y: layout.volumeRect.minY + 7), anchor: .leading)
+            context.draw(Text(formatCompact(maxVolume)).font(axisFont).foregroundStyle(.secondary), at: CGPoint(x: plot.maxX + 8, y: layout.volumeRect.minY + 7), anchor: .leading)
         }
         drawLatestPrice(context: &context, layout: layout, scale: scale)
         drawCrosshair(context: &context, layout: layout, viewport: viewport, scale: scale)
@@ -274,8 +288,8 @@ struct NativeCandleChart: View {
 
     private func drawLatestPrice(context: inout GraphicsContext, layout: CandleChartLayout, scale: CandlePriceScale) {
         guard let latest = candles.last else { return }
-        let rawY = scale.y(number(latest.close), in: layout.priceRect)
-        let color = latest.close >= latest.open ? riseColor : fallColor
+        let rawY = scale.y(latest.close.doubleValue, in: layout.priceRect)
+        let color = latest.close >= latest.open ? Color.marketRise : Color.marketFall
         let inRange = rawY >= layout.priceRect.minY && rawY <= layout.priceRect.maxY
         if inRange {
             stroke(&context, from: CGPoint(x: 0, y: rawY), to: CGPoint(x: layout.plotWidth, y: rawY), color: color.opacity(0.7), dash: [4, 3])
@@ -295,7 +309,7 @@ struct NativeCandleChart: View {
             stroke(&context, from: CGPoint(x: 0, y: pointer.y), to: CGPoint(x: layout.plotWidth, y: pointer.y), color: .white.opacity(0.45), dash: [4, 3])
             axisTag(&context, text: price(scale.value(at: pointer.y, in: layout.priceRect)), center: CGPoint(x: layout.plotWidth + layout.axisWidth / 2, y: pointer.y), color: Color(white: 0.27), maxWidth: layout.axisWidth - 2)
         }
-        axisTag(&context, text: dateText(candles[index].timestamp, pattern: "yyyy/MM/dd HH:mm"), center: CGPoint(x: min(layout.plotWidth - 65, max(65, x)), y: layout.dataBottom + 14), color: Color(white: 0.22), maxWidth: 150)
+        axisTag(&context, text: ChartDateFormat.full.string(from: candles[index].timestamp), center: CGPoint(x: min(layout.plotWidth - 65, max(65, x)), y: layout.dataBottom + 14), color: Color(white: 0.22), maxWidth: 150)
     }
 
     private func axisTag(_ context: inout GraphicsContext, text: String, center: CGPoint, color: Color, maxWidth: CGFloat) {
@@ -320,20 +334,12 @@ struct NativeCandleChart: View {
     }
 
     private func axisDate(_ date: Date, viewport: CandleViewport) -> String {
-        if snapshot?.interval == .oneDay { return dateText(date, pattern: "yy/MM/dd") }
-        if intervalSeconds * Double(viewport.count) >= 86_400 { return dateText(date, pattern: "MM/dd HH:mm") }
-        return dateText(date, pattern: "HH:mm")
+        if snapshot?.interval == .oneDay { return ChartDateFormat.day.string(from: date) }
+        if intervalSeconds * Double(viewport.count) >= 86_400 { return ChartDateFormat.dayTime.string(from: date) }
+        return ChartDateFormat.time.string(from: date)
     }
 
-    private func dateText(_ date: Date, pattern: String) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = pattern
-        return formatter.string(from: date)
-    }
-
-    private func number(_ value: Decimal) -> Double { NSDecimalNumber(decimal: value).doubleValue }
-    private func price(_ value: Decimal) -> String { price(number(value)) }
+    private func price(_ value: Decimal) -> String { price(value.doubleValue) }
     private func price(_ value: Double) -> String {
         if abs(value) >= 1_000 { return String(format: "%.1f", value) }
         if abs(value) >= 1 { return String(format: "%.2f", value) }
@@ -341,11 +347,6 @@ struct NativeCandleChart: View {
         guard value != 0 else { return "0" }
         let decimals = min(16, max(8, Int(ceil(-log10(abs(value)))) + 3))
         return String(format: "%.*f", decimals, value)
-    }
-    private func compact(_ value: Double) -> String {
-        if value >= 1_000_000 { return String(format: "%.2fM", value / 1_000_000) }
-        if value >= 1_000 { return String(format: "%.2fK", value / 1_000) }
-        return String(format: "%.2f", value)
     }
     private func ema(_ values: [Double], period: Int) -> [Double] {
         guard let first = values.first else { return [] }

@@ -104,7 +104,7 @@ func strategyCreationPersistsOnlyRemainingUSDTAllocation() async throws {
     _ = try await backend.account()
 
     let first = try await backend.createStrategy(StrategyConfig(name: "第一策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 75))
-    let second = try await backend.createStrategy(StrategyConfig(name: "第二策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .emaAltcoinLong, riskPercent: 0.5, capitalPoolPercent: 75))
+    let second = try await backend.createStrategy(StrategyConfig(name: "第二策略", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .hlsr, riskPercent: 0.5, capitalPoolPercent: 75))
     #expect(first.capitalPoolPercent == 75)
     #expect(second.capitalPoolPercent == 25)
     let pools = await risk.strategyCapitals()
@@ -117,14 +117,14 @@ func strategyCreationRejectsSubMinimumRemainingUSDTAllocation() async throws {
     let runner = TradingAuditRunner(totalEquity: 10_000, usdtEquity: 1_000)
     let market = MarketDataService(client: ATKClient(runner: runner), ttl: MarketCacheTTL(ticker: 0, contracts: 60, account: 0, positions: 0, orders: 0))
     let risk = RiskEngine(initialEquity: 100_000)
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("trading-usdt-minimum-(UUID().uuidString)")
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("trading-usdt-minimum-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: directory) }
     let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory), riskEngine: risk)
     _ = try await backend.account()
 
     _ = try await backend.createStrategy(StrategyConfig(name: "主策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 99.95))
     await #expect(throws: ATKError.unavailable("USDT 资产已被其他策略占用，无法分配策略资金池")) {
-        _ = try await backend.createStrategy(StrategyConfig(name: "余量策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .emaAltcoinLong, capitalPoolPercent: 1))
+        _ = try await backend.createStrategy(StrategyConfig(name: "余量策略", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .hlsr, capitalPoolPercent: 1))
     }
 }
 

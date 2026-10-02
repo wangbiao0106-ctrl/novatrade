@@ -6,7 +6,7 @@ import TradingDomain
 @Test
 func candleStreamDecodesLiveAndClosedBarsInTimeOrder() throws {
     let frame = #"{"arg":{"channel":"candle1H","instId":"BTC-USDT-SWAP"},"data":[["1700003600000","100","110","95","104","12","12","1248","0"],["1700000000000","90","101","88","100","20","20","2000","1"]]}"#
-    let event = try OKXPublicClient.candleFrame(frame, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
+    let event = try OKXCandleSocket.candleFrame(frame, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     guard case let .candles(candles) = event else {
         Issue.record("Expected candle rows")
         return
@@ -23,29 +23,35 @@ func candleStreamDecodesLiveAndClosedBarsInTimeOrder() throws {
 @Test
 func candleStreamSeparatesAcknowledgementsAndHeartbeatFromPrices() throws {
     let subscribed = #"{"event":"subscribe","arg":{"channel":"candle1H","instId":"BTC-USDT-SWAP"},"connId":"abc"}"#
-    #expect(try OKXPublicClient.candleFrame(subscribed, instrumentID: "BTC-USDT-SWAP", interval: .oneHour) == .subscribed)
-    #expect(try OKXPublicClient.candleFrame("pong", instrumentID: "BTC-USDT-SWAP", interval: .oneHour) == .pong)
-    #expect(try OKXPublicClient.candleFrame(subscribed, instrumentID: "ETH-USDT-SWAP", interval: .oneHour) == .ignored)
-    #expect(try OKXPublicClient.candleFrame(subscribed, instrumentID: "BTC-USDT-SWAP", interval: .oneMinute) == .ignored)
+    #expect(try OKXCandleSocket.candleFrame(subscribed, instrumentID: "BTC-USDT-SWAP", interval: .oneHour) == .subscribed)
+    #expect(try OKXCandleSocket.candleFrame("pong", instrumentID: "BTC-USDT-SWAP", interval: .oneHour) == .pong)
+    #expect(try OKXCandleSocket.candleFrame(subscribed, instrumentID: "ETH-USDT-SWAP", interval: .oneHour) == .ignored)
+    #expect(try OKXCandleSocket.candleFrame(subscribed, instrumentID: "BTC-USDT-SWAP", interval: .oneMinute) == .ignored)
 }
 
 @Test
 func candleStreamRejectsSubscriptionFailuresAndTruncatedBars() {
     let error = #"{"event":"error","code":"60012","msg":"Invalid request","connId":"abc"}"#
     #expect(throws: OKXGatewayError.self) {
-        try OKXPublicClient.candleFrame(error, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
+        try OKXCandleSocket.candleFrame(error, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     }
     let truncated = #"{"arg":{"channel":"candle1H","instId":"BTC-USDT-SWAP"},"data":[["1700000000000","100","110","95","104","12"]]}"#
     #expect(throws: OKXGatewayError.self) {
-        try OKXPublicClient.candleFrame(truncated, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
+        try OKXCandleSocket.candleFrame(truncated, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     }
 }
 
-@Test
-func candleStreamRejectsNonFiniteTimestamps() {
-    let invalid = #"{"arg":{"channel":"candle1H","instId":"BTC-USDT-SWAP"},"data":[["NaN","100","110","95","104","12","12","1248","1"]]}"#
-    #expect(throws: OKXGatewayError.self) {
-        try OKXPublicClient.candleFrame(invalid, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
+@Test(arguments: [
+    #"["NaN","100","110","95","104","12","12","1248","1"]"#,
+    // A numeric prefix must not be read as a truncated price.
+    #"["1700000000000","100","110","95","104oops","12","12","1248","1"]"#,
+    // Only "0" or "1" may decide whether a bar is closed.
+    #"["1700000000000","100","110","95","104","12","12","1248","unknown"]"#
+])
+func candleStreamRejectsMalformedRows(row: String) {
+    let frame = #"{"arg":{"channel":"candle1H","instId":"BTC-USDT-SWAP"},"data":["# + row + "]}"
+    #expect(throws: OKXGatewayError.invalidResponse) {
+        try OKXCandleSocket.candleFrame(frame, instrumentID: "BTC-USDT-SWAP", interval: .oneHour)
     }
 }
 

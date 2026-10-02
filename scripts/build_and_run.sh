@@ -24,10 +24,6 @@ pkill -x "$APP_EXECUTABLE" >/dev/null 2>&1 || true
 pkill -x "okx-locald" >/dev/null 2>&1 || true
 
 cd "$ROOT_DIR"
-# Also stop bundles launched directly from SwiftPM's build directory. Their
-# process name can differ from the executable basename, leaving an old window
-# visible after the fresh dist bundle is launched.
-pkill -f "$ROOT_DIR/.build/NovaTrade.app/Contents/MacOS/$APP_EXECUTABLE" >/dev/null 2>&1 || true
 swift build --product "$APP_EXECUTABLE"
 swift build --product okx-locald
 
@@ -55,12 +51,16 @@ cat > "$INFO_PLIST" <<PLIST
   <string>$APP_NAME</string>
   <key>CFBundleIconFile</key>
   <string>NovaTrade</string>
-  <key>CFBundleIconName</key>
-  <string>NovaTrade</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
 </dict>
@@ -95,17 +95,13 @@ case "$MODE" in
     open_app
     /usr/bin/log stream --info --style compact --predicate "process == \"$APP_EXECUTABLE\""
     ;;
-  --telemetry|telemetry)
-    open_app
-    /usr/bin/log stream --info --style compact --predicate "subsystem == \"$BUNDLE_ID\""
-    ;;
   --verify|verify)
     open_app
     sleep 1
     pgrep -x "$APP_EXECUTABLE" >/dev/null
     ;;
   *)
-    echo "usage: $0 [run|package|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|package|--debug|--logs|--verify]" >&2
     exit 2
     ;;
 esac

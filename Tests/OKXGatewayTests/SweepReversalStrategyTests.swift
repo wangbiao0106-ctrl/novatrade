@@ -100,7 +100,7 @@ private func makeBTCBearishCandlesWithPriorTimestamp() -> [Candle] {
 
 private func makeSweepConfig() -> StrategyConfig {
     StrategyConfig(
-        name: "山寨币二次扫顶做空", instrumentID: "SATS-USDT-SWAP", interval: .oneHour, type: .sweepReversalShort,
+        name: "山寨币二次扫顶做空", scope: .dynamic(.sweepCandidates), interval: .oneHour, type: .sweepReversalShort,
         parameters: ["L": 10, "R": 5, "majorWindow": 288, "sweepWait": 96, "rejectWait": 5,
                      "resweepWait": 12, "rsiMin": 62, "volMult": 1.5, "rsDeep": 0.2,
                      "bufATR": 0.5, "tpMult": 2.2, "minATRPct": 0.5, "maxRiskATR": 5.0, "btcGateEnabled": 1],
@@ -146,8 +146,8 @@ private func makeSecondBarConfirmation(entryTimestamp: Date) -> [Candle] {
 @Test
 func sweepReversalKeepsIdentifierSeparateFromDisplayName() {
     let config = makeSweepConfig()
-    #expect(config.strategyIdentifier == "sweepReversalShort")
-    #expect(config.displayName == "山寨币二次扫顶做空")
+    #expect(config.type.identifier == "sweepReversalShort")
+    #expect(config.name == "山寨币二次扫顶做空")
     #expect(StrategyType.sweepReversalShort.identifier == "sweepReversalShort")
 }
 

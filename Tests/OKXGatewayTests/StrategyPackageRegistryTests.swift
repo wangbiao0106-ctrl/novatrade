@@ -47,7 +47,7 @@ func packageInstallAndUninstall() async throws {
     let installed = root.appendingPathComponent("installed", isDirectory: true)
     try fm.createDirectory(at: source.appendingPathComponent("config"), withIntermediateDirectories: true)
     let json = """
-    { "identifier": "demo", "version": "1.0.0", "displayName": "Demo", "runtimeHandler": "demo", "parameters": { "x": 1 } }
+    { "identifier": "demo", "version": "1.0.0", "display_name": "Demo", "runtime_handler": "demo", "parameters": { "x": 1 } }
     """.data(using: .utf8)!
     try json.write(to: source.appendingPathComponent("config/strategy.json"))
     defer { try? fm.removeItem(at: root) }
@@ -64,7 +64,7 @@ func packageInstallAndUninstall() async throws {
 @Test("Unknown handlers can be staged but are not treated as executable")
 func unknownHandlerIsDormant() throws {
     let json = """
-    { "identifier": "future", "version": "1", "displayName": "Future", "runtimeHandler": "future-v2" }
+    { "identifier": "future", "version": "1", "display_name": "Future", "runtime_handler": "future-v2" }
     """.data(using: .utf8)!
     let manifest = try StrategyPackageRegistry.decodeManifest(json)
     #expect(manifest.executableStrategyType == nil)
@@ -72,8 +72,8 @@ func unknownHandlerIsDormant() throws {
     #expect(manifest.enabledByDefault == false)
 }
 
-@Test("Legacy strategy names map to stable runtime adapter identifiers")
-func legacyHandlerAliases() throws {
+@Test("Research strategy names map to stable runtime adapter identifiers")
+func researchHandlerAliases() throws {
     let json = """
     { "strategy": "SWEEP_REVERSAL_SHORT", "version": "1.3", "name_zh": "扫顶做空" }
     """.data(using: .utf8)!

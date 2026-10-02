@@ -22,8 +22,6 @@ public enum ATKError: LocalizedError, Sendable, Equatable {
     case commandFailed(code: Int32, message: String)
     case invalidJSON(String)
     case invalidInput(String)
-    case notAuthenticated
-    case apiKeyConfigured(profile: String)
     case apiKeyNotConfigured
     case timedOut
     case demoProfile(profile: String)
@@ -36,8 +34,6 @@ public enum ATKError: LocalizedError, Sendable, Equatable {
         case let .commandFailed(code, message): return "ATK 命令失败（退出码 \(code)）：\(message)"
         case let .invalidJSON(message): return "ATK 返回了无法解析的 JSON：\(message)"
         case let .invalidInput(message): return "ATK 输入无效：\(message)"
-        case .notAuthenticated: return "ATK 尚未完成 OAuth 登录，请先运行 okx auth login"
-        case let .apiKeyConfigured(profile): return "ATK 检测到 API Key profile（\(profile)），OAuth 登录被跳过"
         case .apiKeyNotConfigured: return "ATK 未检测到 API Key profile，请先运行 okx config init"
         case .timedOut: return "ATK 命令超时，已终止进程"
         case let .demoProfile(profile): return "当前 OKX profile（" + profile + "）是模拟盘，已拒绝真实下单"
@@ -47,65 +43,17 @@ public enum ATKError: LocalizedError, Sendable, Equatable {
     }
 }
 
-public struct ATKAuthStatus: Codable, Equatable, Sendable {
-    public let profile: String?
-    public let site: String?
-    public let status: String
-    public let scopes: [String]?
-    public let apiKey: Bool?
-
-    public var isLoggedIn: Bool { status == "logged_in" }
-
-    public init(profile: String? = nil, site: String? = nil, status: String, scopes: [String]? = nil, apiKey: Bool? = nil) {
-        self.profile = profile
-        self.site = site
-        self.status = status
-        self.scopes = scopes
-        self.apiKey = apiKey
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case profile, site, status, scopes
-        case apiKey
-    }
+/// CLI profile metadata with every secret dropped at decode time.
+struct ATKProfileSummary: Equatable, Sendable {
+    let id: String
+    var site: String?
+    var hasAPIKey = false
+    var demo = false
 }
 
-public struct ATKLoginChallenge: Codable, Equatable, Sendable {
-    public let verificationURI: URL
-    public let userCode: String
-    public let expiresIn: Int
-
-    enum CodingKeys: String, CodingKey {
-        case verificationURI = "verificationUri"
-        case userCode
-        case expiresIn
-    }
-}
-
-public struct ATKProfileSummary: Codable, Equatable, Sendable, Identifiable {
-    public let id: String
-    public let site: String?
-    public let hasAPIKey: Bool
-    public let demo: Bool
-
-    public init(id: String, site: String? = nil, hasAPIKey: Bool = false, demo: Bool = false) {
-        self.id = id
-        self.site = site
-        self.hasAPIKey = hasAPIKey
-        self.demo = demo
-    }
-}
-
-public struct ATKConfigSummary: Codable, Equatable, Sendable {
-    public let defaultProfile: String?
-    public let profiles: [ATKProfileSummary]
-
-    public var hasAPIKeyProfile: Bool { profiles.contains(where: \.hasAPIKey) }
-
-    public init(defaultProfile: String? = nil, profiles: [ATKProfileSummary] = []) {
-        self.defaultProfile = defaultProfile
-        self.profiles = profiles
-    }
+struct ATKConfigSummary: Equatable, Sendable {
+    let defaultProfile: String?
+    let profiles: [ATKProfileSummary]
 }
 
 public struct LiveOrderCommandResult: Codable, Equatable, Sendable {
@@ -151,44 +99,8 @@ public struct ATKClient: Sendable {
         self.decoder = JSONDecoder()
     }
 
-    public func authStatus() async throws -> ATKAuthStatus {
-        let result = try await runner.run(arguments: ["auth", "status", "--json"])
-        do {
-            var status = try decoder.decode(ATKAuthStatus.self, from: Data(result.stdout.utf8))
-            if status.status == "not_logged_in" {
-                status = ATKAuthStatus(profile: status.profile, site: nil, status: status.status, scopes: status.scopes, apiKey: status.apiKey)
-            }
-            return status
-        } catch {
-            guard result.exitCode == 0 else {
-                let message = result.stderr.isEmpty ? result.stdout : result.stderr
-                throw ATKError.commandFailed(code: result.exitCode, message: message.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-            throw ATKError.invalidJSON(error.localizedDescription)
-        }
-    }
-
-    public func authLoginManual(site: String) async throws -> ATKLoginChallenge {
-        try Self.validateIdentifier(site, field: "站点")
-        let result = try await runner.run(arguments: ["auth", "login", "--manual", "--site", site])
-        if let data = result.stdout.data(using: .utf8),
-           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           object["reason"] as? String == "api_key_configured" {
-            throw ATKError.apiKeyConfigured(profile: object["profile"] as? String ?? "unknown")
-        }
-        guard result.exitCode == 0 else {
-            let message = result.stderr.isEmpty ? result.stdout : result.stderr
-            throw ATKError.commandFailed(code: result.exitCode, message: message.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
-        do {
-            return try decoder.decode(ATKLoginChallenge.self, from: Data(result.stdout.utf8))
-        } catch {
-            throw ATKError.invalidJSON(error.localizedDescription)
-        }
-    }
-
     /// Returns only profile names, sites, and whether an API key exists. Secrets are never decoded or retained.
-    public func configSummary() async throws -> ATKConfigSummary {
+    func configSummary() async throws -> ATKConfigSummary {
         let result = try await run(["config", "show", "--json"])
         guard let data = result.stdout.data(using: .utf8) else { throw ATKError.invalidJSON("不是 UTF-8") }
         do {
@@ -212,18 +124,6 @@ public struct ATKClient: Sendable {
         }
     }
 
-    public func requireAPIKeyProfile() async throws -> ATKConfigSummary {
-        let summary = try await configSummary()
-        // All authenticated commands use the CLI's default profile. An API
-        // key in a different profile cannot authorize those commands and must
-        // not make this preflight check report a false positive.
-        guard let defaultProfile = summary.defaultProfile,
-              summary.profiles.first(where: { $0.id == defaultProfile })?.hasAPIKey == true else {
-            throw ATKError.apiKeyNotConfigured
-        }
-        return summary
-    }
-
     public func marketTicker(instrumentID: String) async throws -> MarketTicker {
         try Self.validateInstrumentID(instrumentID)
         let result = try await run(["market", "ticker", instrumentID, "--json"])
@@ -232,7 +132,7 @@ public struct ATKClient: Sendable {
 
     public func marketCandles(instrumentID: String, interval: KlineInterval, limit: Int = 300) async throws -> [Candle] {
         try Self.validateInstrumentID(instrumentID)
-        let root = try await runJSON(["market", "candles", instrumentID, "--bar", interval.okxBar, "--limit", String(min(max(limit, 1), 300))])
+        let root = try await runJSON(["market", "candles", instrumentID, "--bar", interval.rawValue, "--limit", String(min(max(limit, 1), 300))])
         guard let rows = root as? [[Any]] else { throw ATKError.invalidJSON("K 线数据格式无效") }
         return try rows.enumerated().map { index, row in
             guard let candle = Self.decodeCandle(row) else {
@@ -256,9 +156,9 @@ public struct ATKClient: Sendable {
             guard let id = row["instId"] as? String,
                   let last = Self.decimal(row["last"]), last > 0 else { return nil }
             // OKX exposes both UTC and UTC+8 day-open prices.  The market
-            // sidebar's daily move must use the UTC day boundary; keep the
-            // rolling 24h value as a compatibility fallback for older CLI
-            // payloads that do not include `sodUtc0`.
+            // sidebar's daily move must use the UTC day boundary.  Contracts
+            // listed during the current UTC day report `sodUtc0` as 0, so they
+            // fall back to the rolling 24h open.
             let utcDayOpen = Self.decimal(row["sodUtc0"]).flatMap { $0 > 0 ? $0 : nil }
             let rollingOpen = Self.decimal(row["open24h"]).flatMap { $0 > 0 ? $0 : nil }
             let open = utcDayOpen ?? rollingOpen ?? last
@@ -807,18 +707,15 @@ public struct ATKClient: Sendable {
     }
 
     private static func validateIdentifier(_ value: String, field: String) throws {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed == value, value.count <= 100,
-              !value.hasPrefix("-"),
-              value.unicodeScalars.allSatisfy({ !$0.properties.isWhitespace && $0.value >= 0x20 && $0.value != 0x7F }) else {
+        guard isSafeIdentifier(value) else {
             throw ATKError.invalidInput("\(field)包含空值、控制字符或非法前缀")
         }
     }
 
+    /// Values are passed to the CLI as separate arguments; rejecting a
+    /// leading dash keeps an exchange-supplied value from becoming a flag.
     private static func isSafeIdentifier(_ value: String) -> Bool {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && trimmed == value && value.count <= 100
-            && !value.hasPrefix("-")
+        !value.isEmpty && value.count <= 100 && !value.hasPrefix("-")
             && value.unicodeScalars.allSatisfy { !$0.properties.isWhitespace && $0.value >= 0x20 && $0.value != 0x7F }
     }
 
@@ -853,7 +750,6 @@ public struct ATKClient: Sendable {
     }
 }
 
-#if os(macOS)
 private final class ATKProcessCompletion: @unchecked Sendable {
     private let lock = NSLock()
     private var completed = false
@@ -1010,12 +906,3 @@ public struct LocalATKCommandRunner: ATKCommandRunning {
         }
     }
 }
-#else
-public struct LocalATKCommandRunner: ATKCommandRunning {
-    public init(executableURL: URL? = nil, environment: [String: String]? = nil) {}
-
-    public func run(arguments: [String]) async throws -> ATKCommandResult {
-        throw ATKError.unavailable("ATK CLI 仅在本地 Mac 交易服务上运行")
-    }
-}
-#endif
