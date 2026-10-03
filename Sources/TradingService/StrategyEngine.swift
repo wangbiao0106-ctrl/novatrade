@@ -167,17 +167,8 @@ public struct StrategyEngine: Sendable {
             signal = Self.evaluateSweepReversal(config: config, confirmed: confirmed, closes: closes, btcCandles: btcCandles)
             if signal != nil { direction = "short" }
         }
-        if config.type == .doublePumpExhaustionShort {
-            signal = Self.evaluateDoublePumpExhaustionShort(config: config, confirmed: confirmed, closes: closes, rsi: rsi, atr: atr)
-            if signal != nil { direction = "short" }
-        }
         let indicators: [String: [Double]] = ["rsi": Self.trimmed(rsi), "atr": Self.trimmed(atr)]
-        // Double pump cools down only after an exit (STRATEGY.md §6); the
-        // backend sets that cooldown when the position closes. Starting it at
-        // the signal would also silence the symbol after a signal that was
-        // skipped (global single position, entry slippage guard).
-        let signalCooldown = config.type == .doublePumpExhaustionShort ? 0 : config.cooldownBars
-        return StrategyStatus(id: config.id, state: .running, direction: direction, cooldown: signal == nil ? max(0, status.cooldown - 1) : signalCooldown, pnl: status.pnl, lastSignal: signal ?? status.lastSignal, indicators: indicators, lastEvaluatedBar: latestBar)
+        return StrategyStatus(id: config.id, state: .running, direction: direction, cooldown: signal == nil ? max(0, status.cooldown - 1) : config.cooldownBars, pnl: status.pnl, lastSignal: signal ?? status.lastSignal, indicators: indicators, lastEvaluatedBar: latestBar)
     }
 
     /// Production execution path: the 1h candles establish the sweep/resweep
@@ -355,81 +346,6 @@ public struct StrategyEngine: Sendable {
     private static func evaluateSweepReversal(config: StrategyConfig, confirmed: [Candle], closes: [Double], btcCandles: [Candle]?) -> StrategySignal? {
         guard let setup = findSweepSetup(config: config, confirmed: confirmed, closes: closes, btcCandles: btcCandles) else { return nil }
         return makeSweepSignal(config: config, setup: setup, entry: setup.structureEntry, timestamp: setup.timestamp, reason: "高位二次扫顶反转（12天高点被两次假突破，收盘回落）")
-    }
-
-    /// 日内翻倍动能衰竭确认做空（DME Short）。所有条件只使用已确认的
-    /// 15m K 线及其左侧历史；报价成交额缺失时 fail-closed。该实现与
-    /// strategies/double_pump_exhaustion_short/config/strategy.json 的正式
-    /// 规则保持一一对应，运行时不读取策略目录。
-    private static func evaluateDoublePumpExhaustionShort(config: StrategyConfig,
-                                                           confirmed: [Candle],
-                                                           closes: [Double],
-                                                           rsi: [Double],
-                                                           atr: [Double]) -> StrategySignal? {
-        let minimumHistory = period(config.parameters["minimumHistoryBars"], fallback: 97)
-        guard confirmed.count >= minimumHistory,
-              closes.count == confirmed.count,
-              rsi.count == confirmed.count,
-              atr.count == confirmed.count else { return nil }
-        let index = confirmed.count - 1
-        guard index >= 96, closes[index] > 0, closes[index - 96] > 0 else { return nil }
-        // The 24h window must be contiguous. A missing 15m bar cannot be
-        // silently treated as a stale close from a different session.
-        let start = index - 96
-        for cursor in (start + 1)...index {
-            guard confirmed[cursor].timestamp.timeIntervalSince(confirmed[cursor - 1].timestamp) == 15 * 60 else { return nil }
-        }
-        let gain24 = (NSDecimalNumber(decimal: confirmed[index].high).doubleValue / closes[start]) - 1
-        let gainThreshold = config.parameters["gain24Gt"] ?? 1.0
-        guard gain24 > gainThreshold else { return nil }
-
-        let open = NSDecimalNumber(decimal: confirmed[index].open).doubleValue
-        let high = NSDecimalNumber(decimal: confirmed[index].high).doubleValue
-        let low = NSDecimalNumber(decimal: confirmed[index].low).doubleValue
-        let close = closes[index]
-        let range = high - low
-        guard range > 0, close < open else { return nil }
-        let upperWick = high - max(open, close)
-        let closePosition = (close - low) / range
-        guard upperWick / range >= (config.parameters["upperWickMin"] ?? 0.4),
-              closePosition <= (config.parameters["closePositionMax"] ?? 0.5),
-              rsi[index] >= (config.parameters["rsiMin"] ?? 50.0),
-              index > 0, rsi[index] < rsi[index - 1] else { return nil }
-
-        let volumePeriod = period(config.parameters["volumePeriod"], fallback: 20)
-        guard index >= volumePeriod else { return nil }
-        var priorVolumes: [Double] = []
-        priorVolumes.reserveCapacity(volumePeriod)
-        for cursor in (index - volumePeriod)..<index {
-            guard let quote = confirmed[cursor].quoteVolume else { return nil }
-            let value = NSDecimalNumber(decimal: quote).doubleValue
-            guard value.isFinite, value >= 0 else { return nil }
-            priorVolumes.append(value)
-        }
-        guard let currentQuote = confirmed[index].quoteVolume else { return nil }
-        let currentVolume = NSDecimalNumber(decimal: currentQuote).doubleValue
-        let priorMean = priorVolumes.reduce(0, +) / Double(volumePeriod)
-        guard currentVolume.isFinite, currentVolume >= 0,
-              priorMean.isFinite,
-              currentVolume >= priorMean * (config.parameters["volumeMultiple"] ?? 0.5) else { return nil }
-
-        let atrValue = atr[index]
-        guard atrValue.isFinite, atrValue > 0 else { return nil }
-        let stop = high + (config.parameters["stopATR"] ?? 0.45) * atrValue
-        let risk = stop - close
-        let minRisk = config.parameters["minRiskATR"] ?? 0.5
-        let maxRisk = config.parameters["maxRiskATR"] ?? 3.0
-        guard risk > 0, risk / atrValue >= minRisk, risk / atrValue <= maxRisk else { return nil }
-        let targetR = config.parameters["targetR"] ?? 1.0
-        let take = close - targetR * risk
-        guard take > 0 else { return nil }
-        return StrategySignal(strategyID: config.id,
-                              type: "entry_short",
-                              price: Decimal(close),
-                              reason: "滚动24小时涨幅超过100%，15分钟上影线动能衰竭确认",
-                              timestamp: confirmed[index].timestamp,
-                              stopPrice: Decimal(stop),
-                              takePrice: Decimal(take))
     }
 
 }

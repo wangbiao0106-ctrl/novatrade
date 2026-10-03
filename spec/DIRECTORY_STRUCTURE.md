@@ -58,15 +58,16 @@ spec/                               稳定的工程规范和接口约定
 
 | 目录 | 用途 | 状态 |
 | --- | --- | --- |
-| `strategies/sweep_reversal_short/` | 山寨币二次扫顶做空 | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.4）|
-| `strategies/ema_3line_pullback/` | EMA 20/60/120 回踩策略族历史研究（四方向） | 研究归档，不是规则真源，未接入运行时 |
-| `strategies/extreme_wick_short/` | 山寨日内涨幅超过 100% 的 15m 动能衰竭做空 | 研究候选，未接入运行时 |
-| `strategies/double_pump_exhaustion_short/` | 从翻倍动能衰竭研究中固定出的正式核心规则 | 正式规则；已接入运行时，按账号类型路由模拟或实盘，默认停用 |
-| `strategies/intraday_pump_retest_short/` | 山寨日内涨幅超过 60% 后高点回落、二次突涨缩量做空 | 研究候选，未接入运行时 |
-| `strategies/personal_trading_style_backtest/` | OKX 统一账单回放、个人交易风格验证和候选策略筛选 | 研究候选，未接入运行时 |
-| `strategies/personal_style_strategy_variants/` | 将个人做单偏好拆成多空多分支并用全量行情回顾验证 | 研究候选，未接入运行时 |
-| `strategies/range_rejection_confirmation_short/` | 突破近期高点后的大实体阴线回落，确认跌破 EMA20 后做空 | 研究候选，未接入运行时 |
-| `strategies/liquid_crypto_trend_long/` | 逐时点 24h 报价成交额 ≥ 3000 万 USDT 的加密永续纯多头 1h 趋势跟随 | 研究候选，未接入运行时 |
+| `strategies/sweep_reversal_short/` | 山寨币二次扫顶 | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.4）|
+| `strategies/ema_3line_pullback/` | 三线突破回踩（EMA 20/60/120，四方向历史研究） | 研究归档，不是规则真源，未接入运行时 |
+| `strategies/intraday_pump_retest_short/` | 缩量二次拉升（山寨日内涨幅超过 60% 后回落再突涨） | 研究候选，未接入运行时 |
+| `strategies/personal_trading_style_backtest/` | 交易风格回放（OKX 统一账单回放、风格验证和候选筛选） | 研究候选，未接入运行时 |
+| `strategies/personal_style_strategy_variants/` | 交易偏好分支（个人偏好拆分与全量行情回顾验证） | 研究候选，未接入运行时 |
+| `strategies/range_rejection_confirmation_short/` | 冲高阴线确认（前高突破失败、确认跌破 EMA20） | 研究候选，未接入运行时 |
+| `strategies/liquid_crypto_trend_long/` | 高流动性趋势（逐时点 24h 报价成交额 ≥ 3000 万 USDT 的 1h 信号） | 研究候选，未接入运行时 |
+| `strategies/five_minute_surge_waterfall_short/` | 5m 大涨与前 4 小时高点状态组合、开盘/72 根实体顶部限价做空 | 研究候选，未接入运行时 |
+| `strategies/extreme_negative_funding_110_short/` | 独立验证 5m 日内涨幅、+110% 限价做空、极端负资金费率过滤与分段止盈 | 研究候选，资金费历史缺失，未接入运行时 |
+| `strategies/spot_perp_hedged_accumulation/` | 单主流币 1:1 现货多头 + USDT 永续空头的 1h 背离/均线回踩激活与有界再平衡 | 研究候选，名义偏离硬限 20%，资金费/基差缺失，未接入运行时 |
 
 ## 迁移检查
 

@@ -30,50 +30,6 @@ func disabledStrategyCannotKeepRunningStatus() {
     #expect(status.direction == "short")
 }
 
-private func doublePumpConfig() -> StrategyConfig {
-    StrategyConfig(id: UUID(), name: StrategyType.doublePumpExhaustionShort.displayName,
-                   scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes,
-                   type: .doublePumpExhaustionShort,
-                   parameters: StrategyType.doublePumpExhaustionShort.defaultParameters,
-                   enabled: true, cooldownBars: 16)
-}
-
-private func doublePumpCandles(quoteVolume: Decimal? = 50, contiguous: Bool = true, boundary: Bool = false) -> [Candle] {
-    let start = Date(timeIntervalSince1970: 1_700_000_000)
-    var candles: [Candle] = []
-    for index in 0..<97 {
-        let timestamp = start.addingTimeInterval(Double(index) * (contiguous ? 15 * 60 : (index == 96 ? 30 * 60 : 15 * 60)))
-        if index < 76 {
-            let close = 100.0 + Double(index) * 0.8
-            candles.append(Candle(timestamp: timestamp, open: Decimal(close - 0.2), high: Decimal(close + 1), low: Decimal(close - 1), close: Decimal(close), quoteVolume: 100))
-        } else if index < 96 {
-            let close = 160.0 + Double(index - 76) * 2.45
-            candles.append(Candle(timestamp: timestamp, open: Decimal(close - 0.2), high: Decimal(close + 1), low: Decimal(close - 1), close: Decimal(close), quoteVolume: 100))
-        } else {
-            let high = boundary ? 200.0 : 210.0
-            candles.append(Candle(timestamp: timestamp, open: 206.5, high: Decimal(high), low: 202, close: 205.8, quoteVolume: quoteVolume))
-        }
-    }
-    return candles
-}
-
-@Test("Double pump exhaustion short requires strict gain, wick, RSI and quote volume")
-func doublePumpExhaustionEmitsShortSignal() {
-    let status = StrategyEngine().evaluate(config: doublePumpConfig(), candles: doublePumpCandles())
-    #expect(status.lastSignal?.type == "entry_short")
-    #expect(status.lastSignal?.stopPrice != nil)
-    #expect(status.lastSignal?.takePrice != nil)
-    #expect(status.direction == "short")
-}
-
-@Test("Double pump exhaustion rejects the 100 percent boundary, gaps and missing quote volume")
-func doublePumpExhaustionFailsClosed() {
-    let engine = StrategyEngine()
-    #expect(engine.evaluate(config: doublePumpConfig(), candles: doublePumpCandles(boundary: true)).lastSignal == nil)
-    #expect(engine.evaluate(config: doublePumpConfig(), candles: doublePumpCandles(contiguous: false)).lastSignal == nil)
-    #expect(engine.evaluate(config: doublePumpConfig(), candles: doublePumpCandles(quoteVolume: nil)).lastSignal == nil)
-}
-
 private func sweepAuditCandles() -> [Candle] {
     let start = Date(timeIntervalSince1970: 1_700_000_000)
     var candles: [Candle] = []

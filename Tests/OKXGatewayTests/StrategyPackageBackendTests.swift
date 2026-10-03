@@ -13,9 +13,9 @@ func backendStrategyPackageLifecycle() async throws {
     try fm.createDirectory(at: staging.appendingPathComponent("config"), withIntermediateDirectories: true)
     let config = """
     {
-      "identifier": "double_pump_exhaustion_short", "version": "1.0.0", "display_name": "DME",
-      "runtime": { "runtime_handler": "doublePumpExhaustionShort", "scope": "dynamic.doublePumpCandidates", "enabled_by_default": false },
-      "entry_timeframe_minutes": 15,
+      "identifier": "sweep_reversal_short", "version": "1.0.0", "display_name": "Sweep",
+      "runtime": { "runtime_handler": "sweepReversalShort", "scope": "dynamic.sweepCandidates", "enabled_by_default": false },
+      "entry_timeframe_minutes": 60,
       "signal_parameters": { "swing_lookback": 6 }
     }
     """.data(using: .utf8)!
@@ -28,12 +28,12 @@ func backendStrategyPackageLifecycle() async throws {
     await risk.synchronizeStrategyCapital(100_000)
     let backend = TradingBackend(paper: paper, riskEngine: risk, strategyPackages: registry)
     let installed = try await backend.installStrategyPackage(StrategyPackageInstallRequest(path: "demo"))
-    #expect(installed.identifier == "double_pump_exhaustion_short")
+    #expect(installed.identifier == "sweep_reversal_short")
     #expect((await backend.strategyPackageManifests()).count == 1)
-    let created = try await backend.createStrategyFromPackage(identifier: "double_pump_exhaustion_short")
-    #expect(created.type == .doublePumpExhaustionShort)
+    let created = try await backend.createStrategyFromPackage(identifier: "sweep_reversal_short")
+    #expect(created.type == .sweepReversalShort)
     #expect(created.enabled == false)
-    _ = try await backend.uninstallStrategyPackage(identifier: "double_pump_exhaustion_short")
+    _ = try await backend.uninstallStrategyPackage(identifier: "sweep_reversal_short")
     #expect((await backend.strategyPackageManifests()).isEmpty)
     #expect((await backend.strategies()).isEmpty)
 }

@@ -445,8 +445,6 @@ public struct LiveTradingStatus: Codable, Equatable, Sendable {
 
 public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sendable {
     case sweepReversalShort
-    /// 日内翻倍后 15m 动能衰竭确认做空。
-    case doublePumpExhaustionShort
     /// Preserve a package identifier when its runtime handler is unavailable.
     /// Removing a package must never make the entire trading ledger undecodable.
     case external(String)
@@ -454,7 +452,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public init?(rawValue: String) {
         switch rawValue {
         case "sweepReversalShort": self = .sweepReversalShort
-        case "doublePumpExhaustionShort": self = .doublePumpExhaustionShort
         default: self = .external(rawValue)
         }
     }
@@ -462,7 +459,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var rawValue: String {
         switch self {
         case .sweepReversalShort: return "sweepReversalShort"
-        case .doublePumpExhaustionShort: return "doublePumpExhaustionShort"
         case .external(let identifier): return identifier
         }
     }
@@ -484,7 +480,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
 
     public static var allCases: [StrategyType] { availableCases }
 
-    public static var availableCases: [StrategyType] { [.sweepReversalShort, .doublePumpExhaustionShort] }
+    public static var availableCases: [StrategyType] { [.sweepReversalShort] }
 
     /// Stable machine-readable identifier. Keep this independent from UI copy.
     public var identifier: String { rawValue }
@@ -504,7 +500,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var defaultUniverseCategory: StrategyUniverseCategory {
         switch self {
         case .sweepReversalShort: return .sweepCandidates
-        case .doublePumpExhaustionShort: return .doublePumpCandidates
         case .external: return .hotAltcoins
         }
     }
@@ -513,8 +508,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
 
     public var displayName: String {
         switch self {
-        case .sweepReversalShort: return "山寨币二次扫顶做空"
-        case .doublePumpExhaustionShort: return "日内翻倍动能衰竭确认做空"
+        case .sweepReversalShort: return "山寨币二次扫顶"
         case .external(let identifier): return identifier
         }
     }
@@ -523,7 +517,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var englishName: String {
         switch self {
         case .sweepReversalShort: return "Sweep Reversal Short"
-        case .doublePumpExhaustionShort: return "Double Pump Exhaustion Short"
         case .external(let identifier): return identifier
         }
     }
@@ -545,15 +538,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "leverage": 2,
                 "maxConcurrentPositions": 1,
             ]
-        case .doublePumpExhaustionShort:
-            return [
-                "atrPeriod": 14, "rsiPeriod": 14, "volumePeriod": 20,
-                "gain24Gt": 1.0, "upperWickMin": 0.4, "closePositionMax": 0.5,
-                "rsiMin": 50.0, "volumeMultiple": 0.5, "stopATR": 0.45,
-                "targetR": 1.0, "minRiskATR": 0.5, "maxRiskATR": 3.0,
-                "minimumHistoryBars": 97, "leverage": 2,
-                "maxConcurrentPositions": 1,
-            ]
         case .external: return [:]
         }
     }
@@ -572,6 +556,25 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// 单笔最坏亏损占本策略资金池权益的上限（= 止损距离上限 × 名义倍数）。
     public static var maxLossPerTradePercent: Double { maxStopDistancePercent * notionalPoolMultiple }
 
+    /// Maximum account allocation for this strategy under the production
+    /// account-level daily circuit breaker. A full-pool stop must remain
+    /// below the fixed 5% account breaker, so the UI and backend share this
+    /// same derived ceiling.
+    public var maxCapitalPoolPercent: Double {
+        switch self {
+        case .sweepReversalShort:
+            guard Self.maxLossPerTradePercent > 0 else { return 0 }
+            let breaker = NSDecimalNumber(decimal: RiskLimits.productionDailyLossPercent).doubleValue
+            // Keep two decimal places and round down so the strict headroom
+            // check remains true after the value is persisted.
+            return floor(min(100, breaker / Self.maxLossPerTradePercent * 100) * 100) / 100
+        case .external:
+            // External package rules must publish their own runtime risk
+            // contract before they become selectable in the UI.
+            return 0
+        }
+    }
+
     /// This rule supplies its own ATR-based protective stop. It is deliberately
     /// descriptive because the stop distance is calculated per signal, not a
     /// fixed percentage that a strategy instance can override.
@@ -579,8 +582,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
         switch self {
         case .sweepReversalShort:
             return "扫顶期间最高价 + 0.5 × ATR14，按每个信号计算"
-        case .doublePumpExhaustionShort:
-            return "确认 K 线高点 + 0.45 × ATR14"
         case .external:
             return "运行时处理器不可用，策略已暂停"
         }
@@ -591,8 +592,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
         switch self {
         case .sweepReversalShort:
             return "2.2R，按入场价与止损距离计算"
-        case .doublePumpExhaustionShort:
-            return "1R，最长持有 24 根 15 分钟 K 线（6 小时）"
         case .external:
             return "不可用"
         }
@@ -604,7 +603,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var signalCycleDescription: String {
         switch self {
         case .sweepReversalShort: return "1 小时结构 + 15 分钟收盘确认"
-        case .doublePumpExhaustionShort: return "15 分钟收盘确认；滚动 24 小时翻倍后生效"
         case .external: return "运行时处理器不可用"
         }
     }
@@ -613,7 +611,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var signalCycleShortLabel: String {
         switch self {
         case .sweepReversalShort: return "1H + 15m"
-        case .doublePumpExhaustionShort: return "15m"
         case .external: return "--"
         }
     }
@@ -623,7 +620,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// 96 one-hour bars are tracked as 384 fifteen-minute steps.
     public var cooldownBarInterval: KlineInterval {
         switch self {
-        case .sweepReversalShort, .doublePumpExhaustionShort: return .fifteenMinutes
+        case .sweepReversalShort: return .fifteenMinutes
         case .external: return entryInterval
         }
     }
@@ -638,7 +635,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// Entry bars consumed by the runtime monitor.
     public var entryInterval: KlineInterval {
         switch self {
-        case .doublePumpExhaustionShort: return .fifteenMinutes
         case .sweepReversalShort, .external: return .oneHour
         }
     }
@@ -647,7 +643,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// exit.
     public var defaultCooldownBars: Int {
         switch self {
-        case .doublePumpExhaustionShort: return 16
         case .sweepReversalShort: return 96
         case .external: return 0
         }
@@ -664,13 +659,11 @@ public enum StrategyScopeMode: String, Codable, CaseIterable, Sendable {
 public enum StrategyUniverseCategory: String, Codable, CaseIterable, Sendable {
     case hotAltcoins
     case sweepCandidates
-    case doublePumpCandidates
 
     public var displayName: String {
         switch self {
         case .hotAltcoins: return "热门榜前 20 个山寨币"
         case .sweepCandidates: return "扫顶候选（24h 成交额前 100、≥300 万 USDT）"
-        case .doublePumpCandidates: return "翻倍衰竭候选（24h 涨幅 >100%、成交额 ≥1000 万）"
         }
     }
 
@@ -679,7 +672,6 @@ public enum StrategyUniverseCategory: String, Codable, CaseIterable, Sendable {
         switch self {
         case .hotAltcoins: return "热门榜前 20"
         case .sweepCandidates: return "扫顶候选"
-        case .doublePumpCandidates: return "翻倍衰竭候选"
         }
     }
 }
@@ -722,8 +714,6 @@ public struct StrategyScope: Codable, Equatable, Sendable {
                 return ranked.prefix(20).map(\.id)
             case .sweepCandidates:
                 return ranked.prefix(StrategyUniverseRules.sweepCandidateLimit).map(\.id)
-            case .doublePumpCandidates:
-                return ranked.map(\.id)
             }
         }
     }
@@ -737,10 +727,6 @@ public struct StrategyScope: Codable, Equatable, Sendable {
             return contracts
                 .filter(StrategyUniverseRules.isEligibleSweep)
                 .sorted { $0.volume24h > $1.volume24h }
-        case .doublePumpCandidates:
-            return contracts
-                .filter(StrategyUniverseRules.isEligibleDoublePump)
-                .sorted { $0.rollingChangePercent > $1.rollingChangePercent }
         }
     }
 }
@@ -804,7 +790,7 @@ public struct StrategyConfig: Codable, Equatable, Sendable, Identifiable {
         set { parameters["leverage"] = newValue }
     }
 
-    public init(id: UUID = UUID(), name: String, scope: StrategyScope, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, capitalPoolPercent: Double = 100, cooldownBars: Int = 3) {
+    public init(id: UUID = UUID(), name: String, scope: StrategyScope, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, capitalPoolPercent: Double = StrategyType.sweepReversalShort.maxCapitalPoolPercent, cooldownBars: Int = 3) {
         self.id = id; self.name = name; self.interval = interval; self.type = type; self.parameters = parameters; self.enabled = enabled
         self.capitalPoolPercent = capitalPoolPercent; self.cooldownBars = cooldownBars; self.scope = scope
     }
@@ -1057,6 +1043,10 @@ public struct PaperPosition: Codable, Equatable, Sendable, Identifiable {
 }
 
 public struct RiskLimits: Equatable, Sendable {
+    /// Production account-level daily loss circuit breaker. This is a fixed
+    /// safety boundary; strategy allocation ceilings are derived from it.
+    public static let productionDailyLossPercent: Decimal = 5
+
     public var maxInstrumentNotional: Decimal
     public var maxTotalNotional: Decimal
     public var maxMarginPercent: Decimal
@@ -1068,13 +1058,11 @@ public struct RiskLimits: Equatable, Sendable {
     /// Account-level limits. Strategy-pool orders are bounded by their own
     /// pool (`RiskEngine.authorize` skips the notional and margin ceilings
     /// for them); the daily-loss circuit breaker applies to everything. The
-    /// default daily limit must exceed the sum over enabled strategies of
-    /// `capitalPoolPercent × StrategyType.maxLossPerTradePercent`, which
-    /// `TradingBackend` checks before a strategy is enabled. The cumulative
+    /// production default is the fixed 5% daily limit. The cumulative
     /// drawdown breaker is off by default: it measures from the all-time
     /// equity peak and cannot be reset, so with full-pool sizing a normal
     /// losing streak would latch the account permanently.
-    public init(maxInstrumentNotional: Decimal = 25_000, maxTotalNotional: Decimal = 100_000, maxMarginPercent: Decimal = 25, minOrderIntervalSeconds: Int = 15, maxOrdersPerHour: Int = 60, maxDailyLossPercent: Decimal = 20, maxDrawdownPercent: Decimal = 0) {
+    public init(maxInstrumentNotional: Decimal = 25_000, maxTotalNotional: Decimal = 100_000, maxMarginPercent: Decimal = 25, minOrderIntervalSeconds: Int = 15, maxOrdersPerHour: Int = 60, maxDailyLossPercent: Decimal = 5, maxDrawdownPercent: Decimal = 0) {
         // Limits are an input boundary.  A negative or non-finite ceiling can
         // otherwise make the comparison logic wrap into an unintended allow
         // path (or disable throttling entirely).  Invalid values fail closed

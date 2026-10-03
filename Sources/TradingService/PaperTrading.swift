@@ -72,7 +72,7 @@ public actor RiskEngine {
         }
     }
 
-    public let limits: RiskLimits
+    public private(set) var limits: RiskLimits
     private var equity: Decimal
     private var unrealizedPnL: Decimal = 0
     private var equityPeak: Decimal
@@ -110,6 +110,14 @@ public actor RiskEngine {
         self.equity = initialEquity
         self.equityPeak = initialEquity
         self.dayStartEquity = initialEquity
+    }
+
+    /// The production backend owns the account-level breaker. Test-only
+    /// RiskEngine instances may still inject other limits for isolated risk
+    /// behavior tests, but a live/paper TradingBackend always normalizes this
+    /// boundary back to the fixed 5% policy before restoring or authorizing.
+    public func enforceProductionDailyLossLimit() {
+        limits.maxDailyLossPercent = RiskLimits.productionDailyLossPercent
     }
 
     public func registerStrategy(_ strategyID: UUID, allocationPercent: Decimal = 100, now: Date = .now) -> StrategyCapitalSnapshot {

@@ -14,8 +14,6 @@ public enum StrategyUniverseRules {
     /// quote-volume floor, then keep the top `limit` by 24h quote volume.
     public static let sweepCandidateLimit = 100
     public static let sweepMinimumQuoteVolume24h: Decimal = 3_000_000
-    public static let doublePumpMinimumGainPercent: Decimal = 100
-    public static let doublePumpMinimumQuoteVolume24h: Decimal = 10_000_000
     public static let mainstreamSymbols: Set<String> = [
         "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "TON", "AVAX",
         "LINK", "DOT", "LTC", "BCH", "ETC", "UNI", "ATOM", "NEAR", "APT", "SUI"
@@ -60,12 +58,6 @@ public enum StrategyUniverseRules {
     public static func isEligibleSweep(_ contract: ContractMarket) -> Bool {
         isEligibleHotAltcoin(contract)
             && contract.volume24h >= sweepMinimumQuoteVolume24h
-    }
-
-    public static func isEligibleDoublePump(_ contract: ContractMarket) -> Bool {
-        isEligibleHotAltcoin(contract)
-            && contract.rollingChangePercent > doublePumpMinimumGainPercent
-            && contract.volume24h >= doublePumpMinimumQuoteVolume24h
     }
 
 }

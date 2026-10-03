@@ -53,7 +53,6 @@ public actor PaperTradingStore {
     /// every incoming bar was the previous hot path for dynamic strategies.
     private var resolvedTargetsByStrategy: [UUID: Set<String>] = [:]
     private var resolvedUniverseSnapshots: [UUID: StrategyUniverseSnapshot] = [:]
-    private var resolvedContractsByID: [String: ContractMarket] = [:]
     private var universeResolved = false
 
     public nonisolated var stateDirectory: URL { directory }
@@ -82,11 +81,6 @@ public actor PaperTradingStore {
             // Strategy instances scan their own live universe; stale generic
             // scopes converge to the strategy's canonical scope.
             normalized.scope = config.type.defaultScope
-        case .doublePumpExhaustionShort:
-            normalized.name = config.type.displayName
-            normalized.interval = config.type.entryInterval
-            normalized.scope = config.type.defaultScope
-            normalized.cooldownBars = config.type.defaultCooldownBars
         case .external:
             // Keep an orphaned package instance visible so its ledger and
             // protective history survive an uninstall. It can never be
@@ -99,6 +93,11 @@ public actor PaperTradingStore {
         normalized.parameters["maxConcurrentPositions"] = 1
         normalized.parameters.removeValue(forKey: "maxOpenRiskPercent")
         normalized.capitalPoolPercent = min(max(normalized.capitalPoolPercent, 0.1), 100.0)
+        if config.type.hasRuntimeHandler {
+            // Migrate persisted configurations created before the fixed
+            // account-breaker pool ceiling was introduced.
+            normalized.capitalPoolPercent = min(normalized.capitalPoolPercent, config.type.maxCapitalPoolPercent)
+        }
         return normalized
     }
 
@@ -206,7 +205,6 @@ public actor PaperTradingStore {
         }
         resolvedTargetsByStrategy = targets
         resolvedUniverseSnapshots = snapshots
-        resolvedContractsByID = Dictionary(uniqueKeysWithValues: contracts.map { ($0.id, $0) })
         universeResolved = true
     }
 
@@ -218,7 +216,6 @@ public actor PaperTradingStore {
     private func invalidateStrategyUniverse() {
         resolvedTargetsByStrategy.removeAll(keepingCapacity: true)
         resolvedUniverseSnapshots.removeAll(keepingCapacity: true)
-        resolvedContractsByID.removeAll(keepingCapacity: true)
         universeResolved = false
     }
     public func status(for id: UUID) -> StrategyStatus? { statuses[id] }
@@ -462,15 +459,6 @@ public actor PaperTradingStore {
         var changed = false
         var evaluatedStatuses: [StrategyStatus] = []
         for config in strategies where resolvedTargetsByStrategy[config.id]?.contains(snapshot.instrumentID) == true {
-            if config.type == .doublePumpExhaustionShort {
-                // The formal DME rule requires at least 10m USDT rolling
-                // quote volume. Fail closed when the contract snapshot is
-                // missing or below the guardrail; this keeps low-liquidity
-                // instruments out even if a stale resolved target list still
-                // contains them.
-                guard let contract = resolvedContractsByID[snapshot.instrumentID],
-                      StrategyUniverseRules.isEligibleDoublePump(contract) else { continue }
-            }
             if !config.type.hasRuntimeHandler {
                 // An installed package can outlive its compiled adapter. Keep
                 // the orphan visible and paused, while leaving its orders,
@@ -507,24 +495,6 @@ public actor PaperTradingStore {
                 let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
                     ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
                 let next = engine.evaluateWithConfirmation(config: config, structureCandles: structure, confirmationCandles: snapshot.candles, previous: previous, btcCandles: btcHourlyCandles)
-                statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
-                evaluatedStatuses.append(next)
-                if statuses[config.id] != next {
-                    statuses[config.id] = next
-                    changed = true
-                }
-                continue
-            }
-            if config.type == .doublePumpExhaustionShort {
-                guard snapshot.interval == .fifteenMinutes else {
-                    let current = statusesByInstrument[config.id]?[snapshot.instrumentID]
-                        ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
-                    evaluatedStatuses.append(current)
-                    continue
-                }
-                let previous = statusesByInstrument[config.id]?[snapshot.instrumentID]
-                    ?? StrategyStatus(id: config.id, state: config.enabled ? .running : .paused)
-                let next = engine.evaluate(config: config, candles: snapshot.candles, previous: previous)
                 statusesByInstrument[config.id, default: [:]][snapshot.instrumentID] = next
                 evaluatedStatuses.append(next)
                 if statuses[config.id] != next {
@@ -1411,6 +1381,7 @@ public actor TradingBackend {
     }
 
     private func restoreRiskIfNeeded() async {
+        await riskEngine.enforceProductionDailyLossLimit()
         guard !riskRestored else { return }
         let persisted = await paper.riskSnapshot()
         // A newly initialized store uses the empty snapshot as an absence
@@ -1529,6 +1500,12 @@ public actor TradingBackend {
     /// ordinary adverse move before the stop does and latches the account.
     private func requireCircuitBreakerHeadroom(enabling config: StrategyConfig) async throws {
         let limit = await riskEngine.limits.maxDailyLossPercent
+        guard limit == RiskLimits.productionDailyLossPercent else {
+            throw ATKError.unavailable("生产账户日内熔断固定为 \(RiskLimits.productionDailyLossPercent)%，不能使用其他阈值")
+        }
+        guard !config.type.hasRuntimeHandler || config.capitalPoolPercent <= config.type.maxCapitalPoolPercent else {
+            throw ATKError.unavailable("策略资金池比例 \(config.capitalPoolPercent)% 超过该策略安全上限 \(config.type.maxCapitalPoolPercent)%（账户日内熔断 \(limit)% ÷ 单笔最坏亏损 \(StrategyType.maxLossPerTradePercent)%）")
+        }
         let others = await paper.allStrategies().filter { $0.enabled && $0.id != config.id }
         let perTrade = Decimal(StrategyType.maxLossPerTradePercent) / 100
         let exposure = (others + [config]).reduce(Decimal(0)) { $0 + Decimal($1.capitalPoolPercent) * perTrade }
@@ -1686,6 +1663,9 @@ public actor TradingBackend {
             // Preserve the store's existing validation contract for malformed
             // user input; allocation clamping only applies to valid requests.
             throw PaperTradingStore.StoreError.unsupported
+        }
+        guard !config.type.hasRuntimeHandler || config.capitalPoolPercent <= config.type.maxCapitalPoolPercent else {
+            throw ATKError.unavailable("策略资金池比例 (config.capitalPoolPercent)% 超过该策略安全上限 (config.type.maxCapitalPoolPercent)%（账户日内熔断固定为 (RiskLimits.productionDailyLossPercent)%）")
         }
         var snapshot = await riskEngine.snapshot()
         if snapshot.strategyCapitalBase == nil {
@@ -2035,17 +2015,10 @@ public actor TradingBackend {
         }
     }
 
-    /// Time exit measured from the entry order's signal bar. Mirrors each
-    /// lab's `max_hold_bars` on its entry timeframe: double pump holds at
-    /// most 24 × 15m after the signal bar closes, the 1h sweep rule 96 hours.
+    /// Time exit measured from the entry order's signal bar. The sweep rule
+    /// holds at most 96 one-hour bars.
     static func strategyMaxHoldSeconds(_ config: StrategyConfig) -> TimeInterval {
-        switch config.type {
-        case .doublePumpExhaustionShort:
-            let bars = max(1, config.parameters["maxHoldBars"] ?? 24)
-            return (bars + 1) * 15 * 60
-        default:
-            return 96 * 3600
-        }
+        96 * 3600
     }
 
     /// Reduce-only exits are asynchronous. Keep the strategy pool reserved
@@ -2124,12 +2097,6 @@ public actor TradingBackend {
                 let realized = historyRealized ?? pending.realizedPnL ?? fallbackRealized
                 await riskEngine.recordStrategyRealized(realized, strategyID: pending.strategyID, now: timestamp)
                 await riskEngine.release(instrumentID: pending.instrumentID, notional: reservedNotional, strategyID: pending.strategyID, margin: reservedMargin, riskAmount: reservedRisk, closedPosition: true)
-                // Both 15m short rules define their cooldown from the exit,
-                // not from the signal (double pump STRATEGY.md §5.6).
-                if let config = await paper.allStrategies().first(where: { $0.id == pending.strategyID }),
-                   config.type == .doublePumpExhaustionShort {
-                    await paper.setCooldown(strategyID: pending.strategyID, instrumentID: pending.instrumentID, bars: config.type.defaultCooldownBars)
-                }
                 appendLog("策略平仓已成交并结算：\(pending.instrumentID)，已实现盈亏 \(realized)", level: "fill")
             }
             await paper.setRisk(await riskEngine.snapshot(now: timestamp))
@@ -2396,8 +2363,6 @@ public actor TradingBackend {
                 await paper.markRemoteOrderTerminal(orderID)
                 releases.append((reservation, realizedPnL))
             }
-            var strategyConfigs: [StrategyConfig] = []
-            if !releases.isEmpty { strategyConfigs = await paper.allStrategies() }
             for (reservation, realizedPnL) in releases {
                 await riskEngine.release(
                     instrumentID: reservation.instrumentID,
@@ -2409,12 +2374,6 @@ public actor TradingBackend {
                 )
                 if let strategyID = reservation.strategyID, let realizedPnL {
                     await riskEngine.recordStrategyRealized(realizedPnL, strategyID: strategyID)
-                    // A native SL/TP close is still an exit; apply the same
-                    // post-exit cooldown as a service-submitted exit.
-                    if let config = strategyConfigs.first(where: { $0.id == strategyID }),
-                       config.type == .doublePumpExhaustionShort {
-                        await paper.setCooldown(strategyID: strategyID, instrumentID: reservation.instrumentID, bars: config.type.defaultCooldownBars)
-                    }
                 }
             }
 
@@ -2799,16 +2758,6 @@ public actor TradingBackend {
         // a gap and can exceed the strategy's risk budget.
         let entry = ticker.last
         let isLong = signal.type == "entry_long"
-        // DME 规则：入场价相对信号收盘价偏离超过滑点上限时放弃该笔交易，
-        // 不追价（double_pump_exhaustion_short STRATEGY.md §4，max_entry_slippage_pct）。
-        if config.type == .doublePumpExhaustionShort, signal.price > 0 {
-            let limit = Decimal(config.parameters["maxEntrySlippage"] ?? 0.003)
-            let deviation = abs(entry - signal.price) / signal.price
-            guard deviation <= limit else {
-                appendLog("策略 \(config.name) 未发送：\(instrumentID) 当前价 \(entry) 偏离信号收盘价 \(signal.price) 超过 \(limit * 100)%，不追价", level: "warning")
-                return false
-            }
-        }
         // Move protection towards the entry when rounding. This preserves the
         // risk budget and prevents ATR-derived off-tick prices being rejected.
         let stopPrice = signal.stopPrice.flatMap { spec.alignedPrice($0, roundingUp: isLong) }

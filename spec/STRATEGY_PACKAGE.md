@@ -22,7 +22,7 @@ src/、research/、tests/  # 可选，随实验定稿一起留档
   "package_id": "sweep_reversal_short",
   "strategy_id": "sweep_reversal_short",
   "version": "1.4.0",
-  "display_name": "山寨币二次扫顶做空",
+  "display_name": "山寨币二次扫顶",
   "lifecycle": "finalized",
   "source_of_truth": "strategies/sweep_reversal_short/STRATEGY.md",
   "artifacts": [

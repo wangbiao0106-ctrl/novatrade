@@ -1,0 +1,1274 @@
+{
+  "basis": "生产范围单仓；名义仓位 = 1 × 资金池可用余额；单笔池净收益 = pnl / entry；平仓后复投",
+  "trades": 54,
+  "span_days": 548.3333333333334,
+  "coverage": {
+    "start_ts": 1743638400000,
+    "end_exclusive_ts": 1791014400000,
+    "start_utc": "2025-04-03 00:00",
+    "end_utc": "2026-10-03 08:00",
+    "end_semantics": "report.data.end + 1h；最后完整 1h K 线的收盘边界"
+  },
+  "trades_per_year_observed": 35.94528875379939,
+  "per_trade_pool_return": {
+    "mean": 0.023148804410251647,
+    "median": 0.026884468200180436,
+    "std": 0.09649113293766086,
+    "geometric_mean": 0.01870377141699566,
+    "win_rate": 0.5370370370370371,
+    "worst": -0.1455803104044329,
+    "best": 0.22223421084556555,
+    "median_loss": 0.06377328032788708,
+    "max_consecutive_losses": 6
+  },
+  "stop_distance_pct": {
+    "median": 6.465522841424379,
+    "p90": 11.605295392484095,
+    "max": 14.450805637624473
+  },
+  "r_distribution_live_pool": {
+    "basis": "所有生产范围候选成交，允许跨币重叠；不等同单仓资金池路径",
+    "trades": 108,
+    "mean_R": 0.3118412852456165,
+    "buckets": {
+      "< -1R": 52,
+      "[-1,-0.5)R": 1,
+      "[-0.5,0)R": 1,
+      "[0,0.5)R": 8,
+      "[0.5,1)R": 4,
+      "[1,2)R": 11,
+      ">= 2R": 31
+    },
+    "exit_mix": {
+      "sl": 0.48148148148148145,
+      "tp": 0.28703703703703703,
+      "time": 0.23148148148148148
+    }
+  },
+  "full_period": {
+    "final_multiple": 2.7201155657947353,
+    "total_return": 1.7201155657947353,
+    "annualized": 0.9466352903636381,
+    "max_drawdown_pct": 43.48938005210257
+  },
+  "monthly_realized_returns": [
+    {
+      "month_utc": "2025-04",
+      "trades": 1,
+      "wins": 0,
+      "losses": 1,
+      "return": -0.045867643053832285,
+      "complete_calendar_month": false,
+      "equity_start": 1.0,
+      "equity_end": 0.9541323569461677,
+      "max_realized_drawdown_pct": 4.5867643053832285
+    },
+    {
+      "month_utc": "2025-05",
+      "trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "return": 0.0,
+      "complete_calendar_month": true,
+      "equity_start": 0.9541323569461677,
+      "equity_end": 0.9541323569461677,
+      "max_realized_drawdown_pct": 0.0
+    },
+    {
+      "month_utc": "2025-06",
+      "trades": 2,
+      "wins": 1,
+      "losses": 1,
+      "return": 0.07442454572287072,
+      "complete_calendar_month": true,
+      "equity_start": 0.9541323569461677,
+      "equity_end": 1.0251432241713783,
+      "max_realized_drawdown_pct": 7.908491155547015
+    },
+    {
+      "month_utc": "2025-07",
+      "trades": 3,
+      "wins": 3,
+      "losses": 0,
+      "return": 0.23551045572410034,
+      "complete_calendar_month": true,
+      "equity_start": 1.0251432241713783,
+      "equity_end": 1.266575172078453,
+      "max_realized_drawdown_pct": 0.0
+    },
+    {
+      "month_utc": "2025-08",
+      "trades": 2,
+      "wins": 0,
+      "losses": 2,
+      "return": -0.14361863587630053,
+      "complete_calendar_month": true,
+      "equity_start": 1.266575172078453,
+      "equity_end": 1.084671373629755,
+      "max_realized_drawdown_pct": 14.361863587630042
+    },
+    {
+      "month_utc": "2025-09",
+      "trades": 3,
+      "wins": 2,
+      "losses": 1,
+      "return": 0.1744896581515778,
+      "complete_calendar_month": true,
+      "equity_start": 1.084671373629755,
+      "equity_end": 1.2739353108212133,
+      "max_realized_drawdown_pct": 14.558031040443286
+    },
+    {
+      "month_utc": "2025-10",
+      "trades": 1,
+      "wins": 1,
+      "losses": 0,
+      "return": 0.203515526800641,
+      "complete_calendar_month": true,
+      "equity_start": 1.2739353108212133,
+      "equity_end": 1.5332009267129307,
+      "max_realized_drawdown_pct": 0.0
+    },
+    {
+      "month_utc": "2025-11",
+      "trades": 1,
+      "wins": 1,
+      "losses": 0,
+      "return": 0.16147267166535118,
+      "complete_calendar_month": true,
+      "equity_start": 1.5332009267129307,
+      "equity_end": 1.78077097654906,
+      "max_realized_drawdown_pct": 0.0
+    },
+    {
+      "month_utc": "2025-12",
+      "trades": 3,
+      "wins": 2,
+      "losses": 1,
+      "return": 0.16715617656465032,
+      "complete_calendar_month": true,
+      "equity_start": 1.78077097654906,
+      "equity_end": 2.0784378443262996,
+      "max_realized_drawdown_pct": 7.304561988601965
+    },
+    {
+      "month_utc": "2026-01",
+      "trades": 6,
+      "wins": 3,
+      "losses": 3,
+      "return": 0.14473188031539275,
+      "complete_calendar_month": true,
+      "equity_start": 2.0784378443262996,
+      "equity_end": 2.3792540616543167,
+      "max_realized_drawdown_pct": 7.662743506493519
+    },
+    {
+      "month_utc": "2026-02",
+      "trades": 4,
+      "wins": 1,
+      "losses": 3,
+      "return": -0.1587192981727551,
+      "complete_calendar_month": true,
+      "equity_start": 2.3792540616543167,
+      "equity_end": 2.0016205268138667,
+      "max_realized_drawdown_pct": 23.120562496204688
+    },
+    {
+      "month_utc": "2026-03",
+      "trades": 3,
+      "wins": 1,
+      "losses": 2,
+      "return": -0.13264230254032272,
+      "complete_calendar_month": true,
+      "equity_start": 2.0016205268138667,
+      "equity_end": 1.7361209713253016,
+      "max_realized_drawdown_pct": 13.783893128165092
+    },
+    {
+      "month_utc": "2026-04",
+      "trades": 2,
+      "wins": 1,
+      "losses": 1,
+      "return": -0.017264434431123465,
+      "complete_calendar_month": true,
+      "equity_start": 1.7361209713253016,
+      "equity_end": 1.7061478246513575,
+      "max_realized_drawdown_pct": 8.708345392889472
+    },
+    {
+      "month_utc": "2026-05",
+      "trades": 4,
+      "wins": 1,
+      "losses": 3,
+      "return": 0.002040702937283978,
+      "complete_calendar_month": true,
+      "equity_start": 1.7061478246513575,
+      "equity_end": 1.7096295655285643,
+      "max_realized_drawdown_pct": 14.48312373117563
+    },
+    {
+      "month_utc": "2026-06",
+      "trades": 6,
+      "wins": 3,
+      "losses": 3,
+      "return": -0.041091016994807994,
+      "complete_calendar_month": true,
+      "equity_start": 1.7096295655285643,
+      "equity_end": 1.6393791479966038,
+      "max_realized_drawdown_pct": 21.355406604664275
+    },
+    {
+      "month_utc": "2026-07",
+      "trades": 4,
+      "wins": 2,
+      "losses": 2,
+      "return": 0.02606991318611329,
+      "complete_calendar_month": true,
+      "equity_start": 1.6393791479966038,
+      "equity_end": 1.6821176200639996,
+      "max_realized_drawdown_pct": 6.25942775781364
+    },
+    {
+      "month_utc": "2026-08",
+      "trades": 4,
+      "wins": 3,
+      "losses": 1,
+      "return": 0.2736756929477886,
+      "complete_calendar_month": true,
+      "equity_start": 1.6821176200639996,
+      "equity_end": 2.1424723253547,
+      "max_realized_drawdown_pct": 5.376787082299539
+    },
+    {
+      "month_utc": "2026-09",
+      "trades": 4,
+      "wins": 4,
+      "losses": 0,
+      "return": 0.37040593957252166,
+      "complete_calendar_month": true,
+      "equity_start": 2.1424723253547,
+      "equity_end": 2.9360568000358325,
+      "max_realized_drawdown_pct": 0.0
+    },
+    {
+      "month_utc": "2026-10",
+      "trades": 1,
+      "wins": 0,
+      "losses": 1,
+      "return": -0.07354804383840963,
+      "complete_calendar_month": false,
+      "equity_start": 2.9360568000358325,
+      "equity_end": 2.7201155657947362,
+      "max_realized_drawdown_pct": 7.354804383840962
+    }
+  ],
+  "rolling_12m_windows": {
+    "method": "完整 365 天，按 UTC 月初、覆盖起点及最后可完整覆盖的起点取窗；按离场确认时间计收益；窗口高度重叠",
+    "count": 8,
+    "windows": [
+      {
+        "start_ts": 1743638400000,
+        "end_ts": 1775174400000,
+        "trades": 29,
+        "return": 0.7361209713253001,
+        "max_realized_drawdown_pct": 27.03087075458597
+      },
+      {
+        "start_ts": 1746057600000,
+        "end_ts": 1777593600000,
+        "trades": 30,
+        "return": 0.7881668221714213,
+        "max_realized_drawdown_pct": 28.290641501939582
+      },
+      {
+        "start_ts": 1748736000000,
+        "end_ts": 1780272000000,
+        "trades": 34,
+        "return": 0.7918159394577802,
+        "max_realized_drawdown_pct": 28.290641501939582
+      },
+      {
+        "start_ts": 1751328000000,
+        "end_ts": 1782864000000,
+        "trades": 38,
+        "return": 0.599170837149815,
+        "max_realized_drawdown_pct": 43.48938005210257
+      },
+      {
+        "start_ts": 1754006400000,
+        "end_ts": 1785542400000,
+        "trades": 39,
+        "return": 0.3280835256731278,
+        "max_realized_drawdown_pct": 43.48938005210257
+      },
+      {
+        "start_ts": 1756684800000,
+        "end_ts": 1788220800000,
+        "trades": 41,
+        "return": 0.975227130946684,
+        "max_realized_drawdown_pct": 43.489380052102575
+      },
+      {
+        "start_ts": 1759276800000,
+        "end_ts": 1790812800000,
+        "trades": 42,
+        "return": 1.3047141994542648,
+        "max_realized_drawdown_pct": 43.48938005210259
+      },
+      {
+        "start_ts": 1759478400000,
+        "end_ts": 1791014400000,
+        "trades": 43,
+        "return": 1.1352069784777976,
+        "max_realized_drawdown_pct": 43.48938005210259
+      }
+    ],
+    "percentiles": {
+      "p10": 0.5178446437068088,
+      "p25": 0.7018834377814288,
+      "p50": 0.7899913808146007,
+      "p75": 1.0152220928294624,
+      "p90": 1.1860591447707378
+    },
+    "min": 0.3280835256731278,
+    "max": 1.3047141994542648,
+    "p_positive": 1.0
+  },
+  "bootstrap_one_year": {
+    "pessimistic_bull_gate_mostly_closed": {
+      "trades_per_year": 24,
+      "percentiles": {
+        "p5": -0.2676282659758802,
+        "p10": -0.13377603901879723,
+        "p25": 0.14655156668561653,
+        "p50": 0.5641981442082508,
+        "p75": 1.1210658379585583,
+        "p90": 1.8034129910833887,
+        "p95": 2.307312755647884
+      },
+      "mean": 0.7317681432743959,
+      "geometric_mean": 0.5606280142463547,
+      "p_loss": 0.167475,
+      "p_loss_over_30pct": 0.040425,
+      "p_loss_over_50pct": 0.005675,
+      "p_double": 0.292325
+    },
+    "neutral_18m_average": {
+      "trades_per_year": 36,
+      "percentiles": {
+        "p5": -0.2231904369487626,
+        "p10": -0.044957284556054994,
+        "p25": 0.3340148142033297,
+        "p50": 0.9326906430235979,
+        "p75": 1.8308783579075736,
+        "p90": 2.9869855893667343,
+        "p95": 3.894628801042171
+      },
+      "mean": 1.2760915739212133,
+      "geometric_mean": 0.9446212831447798,
+      "p_loss": 0.116,
+      "p_loss_over_30pct": 0.033375,
+      "p_loss_over_50pct": 0.00685,
+      "p_double": 0.476025
+    },
+    "optimistic_bear_gate_mostly_open": {
+      "trades_per_year": 48,
+      "percentiles": {
+        "p5": -0.16062734722264135,
+        "p10": 0.06534860500848101,
+        "p25": 0.5848579130996809,
+        "p50": 1.4342457078026403,
+        "p75": 2.76009045338177,
+        "p90": 4.5596119275407,
+        "p95": 6.077517030775063
+      },
+      "mean": 1.999362091085927,
+      "geometric_mean": 1.4367356988626667,
+      "p_loss": 0.0834,
+      "p_loss_over_30pct": 0.027175,
+      "p_loss_over_50pct": 0.00685,
+      "p_double": 0.6211
+    }
+  },
+  "bootstrap_one_year_max_drawdown_neutral": {
+    "p50": 29.805261479490696,
+    "p75": 37.948762659579636,
+    "p90": 47.001130983680966,
+    "p95": 52.386933217727446
+  },
+  "cost_sensitivity": {
+    "method": "冻结成交序列；额外每边成本 × (入场价 + 回测出场价) / 入场价；可作为滑点/费用的等价压力，不是重撮合",
+    "scenarios": [
+      {
+        "additional_cost_bps_per_side": 0,
+        "total_fee_equivalent_bps_per_side": 5.0,
+        "final_multiple": 2.7201155657947353,
+        "total_return": 1.7201155657947353,
+        "annualized": 0.9466352903636381,
+        "max_drawdown_pct": 43.48938005210257,
+        "mean_trade_pool_return": 0.023148804410251647,
+        "win_rate": 0.5370370370370371
+      },
+      {
+        "additional_cost_bps_per_side": 2,
+        "total_fee_equivalent_bps_per_side": 7.0,
+        "final_multiple": 2.6632237164703594,
+        "total_return": 1.6632237164703594,
+        "annualized": 0.9194380021424131,
+        "max_drawdown_pct": 43.870975350848596,
+        "mean_trade_pool_return": 0.022753631757460088,
+        "win_rate": 0.5370370370370371
+      },
+      {
+        "additional_cost_bps_per_side": 5,
+        "total_fee_equivalent_bps_per_side": 10.0,
+        "final_multiple": 2.580068382687928,
+        "total_return": 1.5800683826879278,
+        "annualized": 0.8793330799528525,
+        "max_drawdown_pct": 44.438844919149226,
+        "mean_trade_pool_return": 0.022160872778272764,
+        "win_rate": 0.5370370370370371
+      },
+      {
+        "additional_cost_bps_per_side": 10,
+        "total_fee_equivalent_bps_per_side": 15.0,
+        "final_multiple": 2.4471023849495883,
+        "total_return": 1.4471023849495883,
+        "annualized": 0.8142939639308107,
+        "max_drawdown_pct": 45.37335026090441,
+        "mean_trade_pool_return": 0.02117294114629387,
+        "win_rate": 0.5370370370370371
+      }
+    ]
+  },
+  "method": {
+    "rng": "numpy.random.default_rng",
+    "seed": 7,
+    "bootstrap_draws": 40000,
+    "drawdown_draws": 20000,
+    "year_days": 365,
+    "sampling": "with replacement, IID empirical per-trade pool returns",
+    "annualization": "final_multiple ** (365 / coverage_days) - 1",
+    "frequency": "single_slot_trade_count / coverage_days * 365",
+    "r_bucket_boundaries": "左闭右开；首尾覆盖正负无穷；等于 -1R 归入 [-1,-0.5)R",
+    "equity_timestamp": "exit candle close boundary; initial equity 1.0 at coverage start",
+    "numpy_version": "2.0.2",
+    "pandas_version": "2.3.3",
+    "source_files": [
+      {
+        "path": "results/full_history/report_fee5bps.json",
+        "sha256": "ea840208401cb1f798424e4aa0aedcdfbeddc4f7f00b39ef5b3fc9fa884e0775",
+        "bytes": 23790
+      },
+      {
+        "path": "results/full_history/live_pool_fee5bps.csv",
+        "sha256": "165f12b89be817cdc6e825f046ea759523d1c5bc40686185072f135880d8331a",
+        "bytes": 23300
+      },
+      {
+        "path": "results/full_history/live_single_slot_fee5bps.csv",
+        "sha256": "22dd84738324c2afed266c157bf6c894ca272303d2af03ba3fa2c221648f7b23",
+        "bytes": 11745
+      },
+      {
+        "path": "config/strategy.json",
+        "sha256": "957f0a3ec04f13300a339a087a2db6d888159ed9084825009ae7bc0256380ea3",
+        "bytes": 6890
+      },
+      {
+        "path": "results/full_history/data/15m/2Z.npz",
+        "sha256": "6657b884a4b414c6dcd80d35f45be7ff0c1e6d7da12445af5c46dbf7227c2835",
+        "bytes": 779146
+      },
+      {
+        "path": "results/full_history/data/15m/ACH.npz",
+        "sha256": "b90faa520f840c823cb664bdce892e09104595e79abaaeffcb51e630c9c9c109",
+        "bytes": 1193850
+      },
+      {
+        "path": "results/full_history/data/15m/ACT.npz",
+        "sha256": "f81d56cbf7ccd7208ae046fc9e9660855f547302ce4f27aa35dbff23c9896369",
+        "bytes": 1322148
+      },
+      {
+        "path": "results/full_history/data/15m/ANIME.npz",
+        "sha256": "a2ac8f5a6bfa6a90b7c803e55b872a263db3d97432864e878bb9beee331622ca",
+        "bytes": 1279664
+      },
+      {
+        "path": "results/full_history/data/15m/APE.npz",
+        "sha256": "1a197b867e239c9904db281e30f0bd01c8a8bb58b96f4b48eb0c072b9c080934",
+        "bytes": 1276872
+      },
+      {
+        "path": "results/full_history/data/15m/AR.npz",
+        "sha256": "520fc4fa41f9dd040941bc379d3e9c851065e760580c3f4dc970b985a52d4870",
+        "bytes": 1060597
+      },
+      {
+        "path": "results/full_history/data/15m/AT.npz",
+        "sha256": "149a18064a674dfc8c2f86db315e9fa2860320940b7f752c1f20e190aab6cc54",
+        "bytes": 653315
+      },
+      {
+        "path": "results/full_history/data/15m/BABY.npz",
+        "sha256": "af0fc98197dc976b6daac0b5ef1671dbd3241d5101d89515d2fd54a9cae63186",
+        "bytes": 1184866
+      },
+      {
+        "path": "results/full_history/data/15m/BAND.npz",
+        "sha256": "1e05a560bfe51fd3fb7d17cb4756a6a49d0695941943c15c6be6616c0c241232",
+        "bytes": 1024946
+      },
+      {
+        "path": "results/full_history/data/15m/BAT.npz",
+        "sha256": "c806b5bf306eca196ae3e44d07fe73ad34efa70ef43d837466f234b07b15cd03",
+        "bytes": 1061546
+      },
+      {
+        "path": "results/full_history/data/15m/BEAT.npz",
+        "sha256": "a38113ff47e1d4ddf9564e82b02d02693d1fe620959fb7ea1573f15ac1106c7c",
+        "bytes": 850514
+      },
+      {
+        "path": "results/full_history/data/15m/BERA.npz",
+        "sha256": "6b9babdb6b9a7dda7fc15e3b0d938a90f651b7b50c2e83227521ed396cc70058",
+        "bytes": 1136805
+      },
+      {
+        "path": "results/full_history/data/15m/CC.npz",
+        "sha256": "719d68a3832956ad12e5dd0ca348874040c0f6db594da9612cd312b7e1eceb5c",
+        "bytes": 783920
+      },
+      {
+        "path": "results/full_history/data/15m/CFX.npz",
+        "sha256": "2626ef5bc8c9e566cd35e0e21aad6e827f30984e723831170d6e2b046bc94a70",
+        "bytes": 1257699
+      },
+      {
+        "path": "results/full_history/data/15m/COAI.npz",
+        "sha256": "6141b6279038aa59bb8d2ff779bc73cd06715912f4c65aacf7b482b26fc22442",
+        "bytes": 751875
+      },
+      {
+        "path": "results/full_history/data/15m/CRO.npz",
+        "sha256": "3e9a80659bf28e7b9ee4b89e5d20e46a2ccf3ec06c74c20c5996a723a9370efa",
+        "bytes": 1237804
+      },
+      {
+        "path": "results/full_history/data/15m/CRV.npz",
+        "sha256": "59d83ebd8045dda61b72b68e74109b30ff8eb0757509359760040e7816448f57",
+        "bytes": 1121820
+      },
+      {
+        "path": "results/full_history/data/15m/DYDX.npz",
+        "sha256": "456bc37ede2e03a16bb69735266b8086a2963e0742f5b8b700f6719b8c8cbfd0",
+        "bytes": 1232114
+      },
+      {
+        "path": "results/full_history/data/15m/ENJ.npz",
+        "sha256": "8f0cbdfb5381c454bce5dd115e06e82d6d7ab4019ce14aa75f12c39c320ad347",
+        "bytes": 1188435
+      },
+      {
+        "path": "results/full_history/data/15m/ENSO.npz",
+        "sha256": "07af8ade0adb9ffae1af6349572494305ba47dbecb0c06b800dc28aa55f8394b",
+        "bytes": 704017
+      },
+      {
+        "path": "results/full_history/data/15m/FARTCOIN.npz",
+        "sha256": "61412e986c41bc2a771d87ba16679c02721eb7b75e761e0ec69d396c65791aca",
+        "bytes": 1133411
+      },
+      {
+        "path": "results/full_history/data/15m/FET.npz",
+        "sha256": "dda14b36e39e6072ef59fe550067b951b8f3b9fa0aabdbe041585af31b9cb880",
+        "bytes": 56425
+      },
+      {
+        "path": "results/full_history/data/15m/FLOW.npz",
+        "sha256": "f73ab8565d9266f412d70c4a2a6313509233584343cb34cec98d8dc2e97845d8",
+        "bytes": 1090301
+      },
+      {
+        "path": "results/full_history/data/15m/GPS.npz",
+        "sha256": "00e842df627d627e376219eac5a9b348868f82b0f39f8a6ef2bc1c6c1b91d803",
+        "bytes": 1428515
+      },
+      {
+        "path": "results/full_history/data/15m/GRAM.npz",
+        "sha256": "dc7e7af3befc91423d10a1b5dff2771505157a92682f459715ea803eb849a111",
+        "bytes": 178862
+      },
+      {
+        "path": "results/full_history/data/15m/GRASS.npz",
+        "sha256": "0be6003cfc0b39b6a52a6f06ce7ddfdcbf3d4df94ff42ef197505a98c4a4676c",
+        "bytes": 1128821
+      },
+      {
+        "path": "results/full_history/data/15m/H.npz",
+        "sha256": "361e516944c4aa47f5c1c04e0ec9d32ef96d31edf65c65772519ac2e8bc1049b",
+        "bytes": 1144467
+      },
+      {
+        "path": "results/full_history/data/15m/HMSTR.npz",
+        "sha256": "ee6ec18f8158b5469273415a3465c961ea44b3fc175fc80bb26929fafb90d802",
+        "bytes": 1236783
+      },
+      {
+        "path": "results/full_history/data/15m/HOME.npz",
+        "sha256": "36057f11e283dedf2f62bc157dcfbb647198179822f7862bcf28302203e3f7f0",
+        "bytes": 1021836
+      },
+      {
+        "path": "results/full_history/data/15m/HUMA.npz",
+        "sha256": "8a6d47c09647c67f02f3821d09610ae598a04543969899efb185ec3b190f013b",
+        "bytes": 980877
+      },
+      {
+        "path": "results/full_history/data/15m/ICP.npz",
+        "sha256": "950849f850b7911a09f29c37baa5c38a548b0d5b2fcd03ced8c49a28e7042cdb",
+        "bytes": 1150067
+      },
+      {
+        "path": "results/full_history/data/15m/IMX.npz",
+        "sha256": "ec90e71424b16dce58476ce15b1067e69f6e1c70e657acae5742264dede7d75e",
+        "bytes": 1092858
+      },
+      {
+        "path": "results/full_history/data/15m/INJ.npz",
+        "sha256": "7f688e3108aa8e8c56016c1bafcd019dad43e686e8713f9a93e29fdfdd697304",
+        "bytes": 1124863
+      },
+      {
+        "path": "results/full_history/data/15m/IOTA.npz",
+        "sha256": "628d4ed651eae4659685c271f29ea1c3d5b74a2cbd278933081b376cf2931652",
+        "bytes": 1095622
+      },
+      {
+        "path": "results/full_history/data/15m/IRYS.npz",
+        "sha256": "fbdd7cfbf7d46ff48e6a1832df97573d986b2ea234e3953b65c3e9af5651bf20",
+        "bytes": 231667
+      },
+      {
+        "path": "results/full_history/data/15m/JTO.npz",
+        "sha256": "6c5bf86347a9b718c38228712e645bfccbbad1e4d387c3bd2817c10ce51921bd",
+        "bytes": 1064012
+      },
+      {
+        "path": "results/full_history/data/15m/KAT.npz",
+        "sha256": "51fd3db0baa0fcd0ba1a400fee3e3fd6c3f52a7888d7ebaee0496ec908488fbe",
+        "bytes": 525504
+      },
+      {
+        "path": "results/full_history/data/15m/LAB.npz",
+        "sha256": "02b1201e171a05b2ffbcfe22e6bd5ae0166a2eab116ddaadd6952e2eb41809c5",
+        "bytes": 848399
+      },
+      {
+        "path": "results/full_history/data/15m/LIGHT.npz",
+        "sha256": "62c189e00a145c7cb17471708c3d5c44e26f2167055515cbafa58817b1975844",
+        "bytes": 574093
+      },
+      {
+        "path": "results/full_history/data/15m/LQTY.npz",
+        "sha256": "f86e91ec072a5ecb82a0a093f1b5636f872893950076dfb7c18f68b0982fb55e",
+        "bytes": 1052785
+      },
+      {
+        "path": "results/full_history/data/15m/LUNA.npz",
+        "sha256": "098df1cb3f4475a0ff59ca640e70014266eae30527a1cd21eee95868b2fc36f7",
+        "bytes": 1201891
+      },
+      {
+        "path": "results/full_history/data/15m/MASK.npz",
+        "sha256": "976edd798732b1bf3f141fb5cf4b263924af8275d876700978d22ce56cdc1d50",
+        "bytes": 1017918
+      },
+      {
+        "path": "results/full_history/data/15m/MEME.npz",
+        "sha256": "4a5886cfb1c6c5bd9c54c89215cdf5a40a9ea0b9f81951e37239cb2b378d1b6a",
+        "bytes": 1308325
+      },
+      {
+        "path": "results/full_history/data/15m/MERL.npz",
+        "sha256": "494341638dcf72d11d2b9d12f0700331f8e5427e6c2d9d3f6b72cdeee3133b19",
+        "bytes": 1374902
+      },
+      {
+        "path": "results/full_history/data/15m/MMT.npz",
+        "sha256": "ef4f5896d6e208cff94dd0441b763e149909fbf9e4cca12bde94f8f12777e1b3",
+        "bytes": 600619
+      },
+      {
+        "path": "results/full_history/data/15m/NEIRO.npz",
+        "sha256": "eea3eed23ca6cf1a19fdda6e909cdedaf91e38624efbabe5c5d73e40993acf7d",
+        "bytes": 1376792
+      },
+      {
+        "path": "results/full_history/data/15m/NIGHT.npz",
+        "sha256": "5159bf6152a06deab70e955efcea6d35d85fcfd67ba0424152aa5edca2dfa37e",
+        "bytes": 898028
+      },
+      {
+        "path": "results/full_history/data/15m/O.npz",
+        "sha256": "3a2e9a64f54c803843f869d71073988d99257be2efe36db3b9ed44165b662b2d",
+        "bytes": 209161
+      },
+      {
+        "path": "results/full_history/data/15m/ONT.npz",
+        "sha256": "f11211d7ecfe7e0e5ee9d50e51f8bf072866370091effcb5a0e0d10771612337",
+        "bytes": 1138775
+      },
+      {
+        "path": "results/full_history/data/15m/ORDI.npz",
+        "sha256": "6866bb56ffeb15c81793142c1c565e1b3a4414e9186c446de3b2953e5b2670c5",
+        "bytes": 1124884
+      },
+      {
+        "path": "results/full_history/data/15m/PI.npz",
+        "sha256": "045338c72ed4c934feba878b0127e1c2c710d7d469edbd2b36198487f288ceef",
+        "bytes": 1124334
+      },
+      {
+        "path": "results/full_history/data/15m/POL.npz",
+        "sha256": "99d48fb17c779a6fab26223fd1f3fa170220578e2f9d742d2c11d9119d4da936",
+        "bytes": 1114115
+      },
+      {
+        "path": "results/full_history/data/15m/PUMP.npz",
+        "sha256": "2103b5f4fd5730235849b2350cdda18bd664ad6362d69fafd4c21defd0948f33",
+        "bytes": 1040282
+      },
+      {
+        "path": "results/full_history/data/15m/RAVE.npz",
+        "sha256": "df7d096b788af002df572cd010ea254d91f1f61191124ce4853a28c2c43a3dfc",
+        "bytes": 718689
+      },
+      {
+        "path": "results/full_history/data/15m/RECALL.npz",
+        "sha256": "7b806c72e03c98b20fa09f964409cf7efa3ae5fc1cbd387d87186fdbb619a4cc",
+        "bytes": 739706
+      },
+      {
+        "path": "results/full_history/data/15m/RIVER.npz",
+        "sha256": "b76b2419cfe0a04f774bb6941895d4b90ce1977d5512ba3f70f906e62e459dd8",
+        "bytes": 582750
+      },
+      {
+        "path": "results/full_history/data/15m/SAPIEN.npz",
+        "sha256": "9ea25a157dbdb0678f7d3f45a7d3de1b43a37b35484caf21bb2198f5a698eb71",
+        "bytes": 696963
+      },
+      {
+        "path": "results/full_history/data/15m/SHELL.npz",
+        "sha256": "fab81142379c8a27176c2afeaf6fe2e3928bfae245fa95d22d52549314e8c19a",
+        "bytes": 1098254
+      },
+      {
+        "path": "results/full_history/data/15m/SKY.npz",
+        "sha256": "b6a000bf1fe5bab66f8d57f7521e96ad1a062300aaaa7246a5a49c685d680a54",
+        "bytes": 808567
+      },
+      {
+        "path": "results/full_history/data/15m/SOON.npz",
+        "sha256": "82f10637aacabd491586d8a831f6aca791d96cf8d0b62f8524759ef15898c196",
+        "bytes": 1103716
+      },
+      {
+        "path": "results/full_history/data/15m/SOPH.npz",
+        "sha256": "068018057cec70f12c48f2da86074088261241fbefbe10f4e09b26044b5ae728",
+        "bytes": 1087178
+      },
+      {
+        "path": "results/full_history/data/15m/SPACE.npz",
+        "sha256": "332faa4eb0327527f5b9077d82c470cb2481b3e4a75bf6f87e997a9029dcd94a",
+        "bytes": 663937
+      },
+      {
+        "path": "results/full_history/data/15m/SPK.npz",
+        "sha256": "cd3254ae8193afe2419633a6d074d7d71469f3649000c283157a0c6f18535d1d",
+        "bytes": 976655
+      },
+      {
+        "path": "results/full_history/data/15m/TAO.npz",
+        "sha256": "263dc17a8e9cdc76fdc72b7916f66c325f50f849fc41629df96c5d84b2a79994",
+        "bytes": 1035210
+      },
+      {
+        "path": "results/full_history/data/15m/TRB.npz",
+        "sha256": "568a3fdf5360d9eef06efe37de80f55c03ab8e088c3c49254bf4950f8922fdf5",
+        "bytes": 970553
+      },
+      {
+        "path": "results/full_history/data/15m/TRIA.npz",
+        "sha256": "cb0d79c7a959d79b88d0497e86fb238584433fb6bddfc4ee4b29805b87641dcd",
+        "bytes": 575444
+      },
+      {
+        "path": "results/full_history/data/15m/TRUTH.npz",
+        "sha256": "19452588f16620ead4a5a1eb0c5cc9f7363835f6c7e5f215d73526742e62ebac",
+        "bytes": 829349
+      },
+      {
+        "path": "results/full_history/data/15m/UB.npz",
+        "sha256": "2aac3aaccf0b8169e2f053af2075b94c5a94e656db218417df283dac489e699b",
+        "bytes": 386576
+      },
+      {
+        "path": "results/full_history/data/15m/USELESS.npz",
+        "sha256": "02f2a38e460a999b251efcb1187c8fdb7234c742d51b8fd0f8a02dd1e779ebd2",
+        "bytes": 1012477
+      },
+      {
+        "path": "results/full_history/data/15m/VIRTUAL.npz",
+        "sha256": "a7103f6869dc791ecbb342deb4d71e2f543d8f7221860a149c57e2ffeb7c1cd1",
+        "bytes": 1163984
+      },
+      {
+        "path": "results/full_history/data/15m/WCT.npz",
+        "sha256": "6d1f5edff9f85c36f2de7300bb2ee19684056f07e77a183ca23b2db0bea32477",
+        "bytes": 1102777
+      },
+      {
+        "path": "results/full_history/data/15m/WIF.npz",
+        "sha256": "cef6c8abbf1c67b24207226f75c2a6dba3467136e8d34ec2ffe10f16acdee581",
+        "bytes": 1121812
+      },
+      {
+        "path": "results/full_history/data/15m/WLD.npz",
+        "sha256": "a276673951afb845ebf71a4d3ec9269a1f0ebfc66e136ac0fa7e2e39d866d2b1",
+        "bytes": 1176310
+      },
+      {
+        "path": "results/full_history/data/15m/XLM.npz",
+        "sha256": "02d72f9026b48644966e005d242bd08db2b5294324985da24e02f66df27bb17c",
+        "bytes": 1345185
+      },
+      {
+        "path": "results/full_history/data/15m/XPL.npz",
+        "sha256": "8f5e44d008bb8f3c20b4e4a4a70b1a57440d1a0df97409c28319cf9f1f7d4d60",
+        "bytes": 928853
+      },
+      {
+        "path": "results/full_history/data/15m/ZBT.npz",
+        "sha256": "20e963f7f824d5e87f41ea5b84b4cb9d8bbcfeaa4341aa8dd39e99c977bd6b42",
+        "bytes": 864009
+      },
+      {
+        "path": "results/full_history/data/15m/ZEC.npz",
+        "sha256": "f4346df79e86a83765688c704957eab5d805ec12c1ddeb2320f4fac05bafe562",
+        "bytes": 776549
+      },
+      {
+        "path": "results/full_history/data/15m/ZRO.npz",
+        "sha256": "9c618e606c14f424140691d129e9693dd9cd6d84ccc82974b49fd6207f785ce3",
+        "bytes": 1011231
+      },
+      {
+        "path": "results/full_history/data/1h/BAT.npz",
+        "sha256": "0d0618a799703d1c7e742fde58b62a5c2c614389391cd426aa46787c374e5570",
+        "bytes": 308146
+      },
+      {
+        "path": "results/full_history/data/1h/BTC.npz",
+        "sha256": "95ddf03297296078775cdffb0c81db9ba766f64ed3775be3c79859c4d3f6c416",
+        "bytes": 371363
+      },
+      {
+        "path": "results/full_history/data/1h/FET.npz",
+        "sha256": "7cd914e7d518dedf942804488cca8b27e812a7487119f69cf5b308bff46c7bda",
+        "bytes": 17081
+      },
+      {
+        "path": "results/full_history/data/1h/ONT.npz",
+        "sha256": "c77b57583a61be0913aa7ac271063b2df4a078237419f5dea89b44a84ed9c52c",
+        "bytes": 324877
+      }
+    ],
+    "script_sha256": "6080884ebe312cc81634dff4580e81b70db2fba03189b1007872063399e9b4fe",
+    "reproduce": "python3 strategies/sweep_reversal_short/research/profit_projection.py --seed 7 --draws 40000 --drawdown-draws 20000",
+    "generated_at_utc": "2026-10-03T20:32:08.545175+00:00"
+  },
+  "caveats": [
+    "仅包含当前仍上市的合约，存在幸存者偏差；较晚上市合约历史较短。",
+    "基线仅含单边 5bp 手续费，不含滑点、资金费率、盘口冲击、部分成交和合约张数取整。",
+    "收益路径只在平仓后计入盈亏；持仓中浮动回撤和账户级固定 5% 日内 MTM 熔断未模拟，实际路径可能不同。",
+    "bootstrap 假定未来每笔独立同分布（IID），且沿用固定历史经验分布；未覆盖参数选择偏差、分布变化或估计不确定性。",
+    "同币事件及连续市场阶段可能相关，IID 重抽会低估聚集亏损；历史单仓样本量较小。",
+    "年交易数 24/36/48 是门控开闭程度的假设情景，不是信号频率的置信区间；行情变化可能使频率落在此范围之外。",
+    "滚动一年窗口高度重叠，不能当作相互独立的样本外检验；正历史收益不能保证未来盈利。",
+    "成本压力仅对同一成交序列扣除额外费用，未重新模拟成交、保护单触发和熔断。",
+    "OHLC 只能确定止盈/止损所在 K 线，无法确定精确触发时刻；本报告在该 K 线收盘边界确认已实现盈亏。",
+    "回测按确认收盘价计算保护价、入场后持有最多 96 小时；运行时保护价不按实际成交价重算，时间离场从确认 K 线开盘计时（提前 15 分钟），两者并非完整实盘复现。"
+  ],
+  "example_selection": "v1.4 研究窗口内，每种离场方式按入场时间取最后一笔，确定性选择；不挑选最盈利样本",
+  "example_trades": {
+    "tp": {
+      "symbol": "FET",
+      "signal_ts": 1788836400000,
+      "entry_ts": 1788840000000,
+      "entry_execution_ts": 1788840900000,
+      "exit_bar_open_ts": 1789025400000,
+      "exit_recognition_ts": 1789026300000,
+      "exit_time_semantics": "intrabar_unknown_recognized_at_bar_close",
+      "entry": 0.1845,
+      "stop": 0.1927142857142857,
+      "take": 0.1664285714285714,
+      "backtest_exit_price": 0.1664285714285714,
+      "pnl_R": 2.1786391304347825,
+      "net_pool_return": 0.09699709639953495,
+      "hold_bars_15m": 206,
+      "stop_distance_pct": 4.45218737901664,
+      "structure": {
+        "pi": 63,
+        "s": 69,
+        "k1": 70,
+        "j": 71,
+        "level": 0.1873,
+        "ext": 0.1906,
+        "structure_close": 0.1855,
+        "atr": 0.004228571428571433
+      },
+      "chart": "charts/example_tp_FET.svg"
+    },
+    "sl": {
+      "symbol": "ONT",
+      "signal_ts": 1786935600000,
+      "entry_ts": 1786939200000,
+      "entry_execution_ts": 1786940100000,
+      "exit_bar_open_ts": 1787229900000,
+      "exit_recognition_ts": 1787230800000,
+      "exit_time_semantics": "intrabar_unknown_recognized_at_bar_close",
+      "entry": 0.03916,
+      "stop": 0.0412253571428571,
+      "take": 0.0346162142857142,
+      "backtest_exit_price": 0.0412253571428571,
+      "pnl_R": -1.0194604011758603,
+      "net_pool_return": -0.053767870822995396,
+      "hold_bars_15m": 323,
+      "stop_distance_pct": 5.274150007295965,
+      "structure": {
+        "pi": 12016,
+        "s": 12025,
+        "k1": 12026,
+        "j": 12027,
+        "level": 0.04012,
+        "ext": 0.04074,
+        "structure_close": 0.03919,
+        "atr": 0.000970714285714285
+      },
+      "chart": "charts/example_sl_ONT.svg"
+    },
+    "time": {
+      "symbol": "BAT",
+      "signal_ts": 1789322400000,
+      "entry_ts": 1789326000000,
+      "entry_execution_ts": 1789326900000,
+      "exit_bar_open_ts": 1789671600000,
+      "exit_recognition_ts": 1789672500000,
+      "exit_time_semantics": "bar_close",
+      "entry": 0.07946,
+      "stop": 0.0851464285714285,
+      "take": 0.0669498571428571,
+      "backtest_exit_price": 0.07265,
+      "pnl_R": 1.184213415400076,
+      "net_pool_return": 0.08474635036496224,
+      "hold_bars_15m": 384,
+      "stop_distance_pct": 7.1563410161446015,
+      "structure": {
+        "pi": 12675,
+        "s": 12686,
+        "k1": 12689,
+        "j": 12690,
+        "level": 0.08018,
+        "ext": 0.08405,
+        "structure_close": 0.07971,
+        "atr": 0.002192857142857143
+      },
+      "chart": "charts/example_time_BAT.svg"
+    }
+  },
+  "equity_curve": [
+    {
+      "timestamp": 1743638400000,
+      "equity": 1.0,
+      "event": "coverage_start"
+    },
+    {
+      "timestamp": 1745242200000,
+      "equity": 0.9541323569461677,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1748788200000,
+      "equity": 0.8786748838848678,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1749254400000,
+      "equity": 1.025143224171378,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1751710500000,
+      "equity": 1.071164024256772,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1753301700000,
+      "equity": 1.157525958419864,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1753758900000,
+      "equity": 1.2665751720784526,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1755688500000,
+      "equity": 1.1869951801167413,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1756615500000,
+      "equity": 1.0846713736297546,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1756745100000,
+      "equity": 1.3257224603751387,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1757558700000,
+      "equity": 1.1327233730835975,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1758521700000,
+      "equity": 1.2739353108212126,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1760632200000,
+      "equity": 1.53320092671293,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1762146900000,
+      "equity": 1.7807709765490591,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1764908100000,
+      "equity": 1.9791201867717194,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1765884600000,
+      "equity": 1.834554125900044,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1766241900000,
+      "equity": 2.0784378443262983,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1767276900000,
+      "equity": 2.0660506762457613,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1768059900000,
+      "equity": 1.9342918472979196,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1768228200000,
+      "equity": 2.076192406187428,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1768925700000,
+      "equity": 2.314181145059955,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1769106600000,
+      "equity": 2.136851379638376,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1769873400000,
+      "equity": 2.379254061654315,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1770491700000,
+      "equity": 2.063431091989071,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1770904800000,
+      "equity": 1.9515674937378593,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1770954300000,
+      "equity": 1.8291571393860404,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1772129700000,
+      "equity": 2.001620526813865,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1772540100000,
+      "equity": 2.0136851851895163,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1773019800000,
+      "equity": 1.8580074109393818,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1774324800000,
+      "equity": 1.7361209713253,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1775394000000,
+      "equity": 1.8688979096655212,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1777577400000,
+      "equity": 1.7061478246513562,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1779062400000,
+      "equity": 1.9991721401917217,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1779560100000,
+      "equity": 1.8825603677356186,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1779631200000,
+      "equity": 1.7945730744789579,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1780133400000,
+      "equity": 1.709629565528563,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1780331400000,
+      "equity": 1.59127773278156,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1780421400000,
+      "equity": 1.5156481441903469,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1780498800000,
+      "equity": 1.3445312203763833,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1780538400000,
+      "equity": 1.4053007092590801,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1781919900000,
+      "equity": 1.5415688827424592,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1782203400000,
+      "equity": 1.6393791479966027,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1782877500000,
+      "equity": 1.5548947921978138,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1782951300000,
+      "equity": 1.6649242461215394,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1784982600000,
+      "equity": 1.5607095157132382,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1785353400000,
+      "equity": 1.6821176200639987,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1785731400000,
+      "equity": 1.919425662403206,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1786530600000,
+      "equity": 2.087466300557469,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1786924800000,
+      "equity": 2.26421430777048,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1787230800000,
+      "equity": 2.142472325354699,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1788289200000,
+      "equity": 2.445640473810552,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1788684300000,
+      "equity": 2.4673501006472423,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1789026300000,
+      "equity": 2.706675896211125,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1789672500000,
+      "equity": 2.936056800035831,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1790929800000,
+      "equity": 2.7201155657947353,
+      "event": "realized_exit"
+    },
+    {
+      "timestamp": 1791014400000,
+      "equity": 2.7201155657947353,
+      "event": "coverage_end"
+    }
+  ]
+}

@@ -94,7 +94,7 @@ func authenticatedAccountWithoutUSDTLeavesStrategyPoolAtZero() async throws {
 }
 
 @Test
-func strategyCreationPersistsOnlyRemainingUSDTAllocation() async throws {
+func strategyCreationPersistsRequestedUSDTAllocation() async throws {
     let runner = TradingAuditRunner(totalEquity: 10_000, usdtEquity: 1_000)
     let market = MarketDataService(client: ATKClient(runner: runner), ttl: MarketCacheTTL(ticker: 0, contracts: 60, account: 0, positions: 0, orders: 0))
     let risk = RiskEngine(initialEquity: 100_000)
@@ -103,40 +103,32 @@ func strategyCreationPersistsOnlyRemainingUSDTAllocation() async throws {
     let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory), riskEngine: risk)
     _ = try await backend.account()
 
-    let first = try await backend.createStrategy(StrategyConfig(name: "第一策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 75))
-    let second = try await backend.createStrategy(StrategyConfig(name: "第二策略", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .doublePumpExhaustionShort, capitalPoolPercent: 75))
-    #expect(first.capitalPoolPercent == 75)
-    #expect(second.capitalPoolPercent == 25)
+    let first = try await backend.createStrategy(StrategyConfig(name: "第一策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 25))
+    #expect(first.capitalPoolPercent == 25)
     let pools = await risk.strategyCapitals()
-    #expect(pools.first(where: { $0.strategyID == first.id })?.equity == 750)
-    #expect(pools.first(where: { $0.strategyID == second.id })?.equity == 250)
+    #expect(pools.first(where: { $0.strategyID == first.id })?.equity == 250)
 }
 
 @Test
-func strategyStartRequiresDailyBreakerAboveFullPoolSingleTradeLoss() async throws {
+func strategyCreationEnforcesFixedBreakerPoolCeiling() async throws {
     let runner = TradingAuditRunner(totalEquity: 10_000, usdtEquity: 10_000)
     let market = MarketDataService(client: ATKClient(runner: runner), ttl: MarketCacheTTL(ticker: 0, contracts: 60, account: 0, positions: 0, orders: 0))
-    // 10% daily breaker vs. a 100% pool whose worst single trade is 15%.
-    let risk = RiskEngine(limits: RiskLimits(maxDailyLossPercent: 10), initialEquity: 100_000)
+    let risk = RiskEngine(initialEquity: 100_000)
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("trading-breaker-headroom-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: directory) }
     let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory), riskEngine: risk)
     _ = try await backend.account()
 
-    let created = try await backend.createStrategy(StrategyConfig(name: "全池策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 100))
     do {
-        _ = try await backend.startStrategy(created.id)
-        Issue.record("expected start to be refused while the daily breaker is below the full-pool single-trade loss")
+        _ = try await backend.createStrategy(StrategyConfig(name: "超限策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 100))
+        Issue.record("expected a pool above the fixed 5% breaker ceiling to be refused")
     } catch {
-        #expect(error.localizedDescription.contains("熔断阈值"))
+        #expect(error.localizedDescription.contains("安全上限"))
     }
-    #expect((await backend.strategies()).first(where: { $0.id == created.id })?.enabled == false)
 
-    var smaller = created
-    smaller.capitalPoolPercent = 50
-    let updated = try await backend.updateStrategy(smaller)
-    #expect(updated.capitalPoolPercent == 50)
-    let started = try await backend.startStrategy(updated.id)
+    let created = try await backend.createStrategy(StrategyConfig(name: "安全策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 33))
+    #expect(created.capitalPoolPercent == 33)
+    let started = try await backend.startStrategy(created.id)
     #expect(started.enabled)
 }
 
@@ -150,9 +142,11 @@ func strategyCreationRejectsSubMinimumRemainingUSDTAllocation() async throws {
     let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory), riskEngine: risk)
     _ = try await backend.account()
 
-    _ = try await backend.createStrategy(StrategyConfig(name: "主策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 99.95))
-    await #expect(throws: ATKError.unavailable("USDT 资产已被其他策略占用，无法分配策略资金池")) {
-        _ = try await backend.createStrategy(StrategyConfig(name: "余量策略", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .doublePumpExhaustionShort, capitalPoolPercent: 1))
+    do {
+        _ = try await backend.createStrategy(StrategyConfig(name: "超限策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 99.95))
+        Issue.record("expected a pool above the fixed strategy ceiling to be refused")
+    } catch {
+        #expect(error.localizedDescription.contains("安全上限"))
     }
 }
 

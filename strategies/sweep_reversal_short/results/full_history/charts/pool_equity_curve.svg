@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="560" viewBox="0 0 1120 560" font-family="PingFang SC, Hiragino Sans GB, Helvetica Neue, Arial, sans-serif">
+<rect width="1120" height="560" fill="#0f141b"/>
+<text x="28.0" y="35.0" font-size="20" fill="#e6edf3" text-anchor="start" font-weight="bold" opacity="1.0">资金池已实现净值 · 54 笔单仓，名义 = 1 × 池，平仓后复投</text>
+<text x="28.0" y="61.0" font-size="12" fill="#8b949e" text-anchor="start" font-weight="normal" opacity="1.0">终值 2.72x  |  覆盖期年化 +94.7%  |  已实现最大回撤 43.5%  |  约 35.9 笔/年</text>
+<line x1="75.0" y1="427.0" x2="1068.0" y2="427.0" stroke="#30363d" stroke-width="1" opacity="1.0" stroke-dasharray="2,4"/>
+<text x="67.0" y="431.0" font-size="11" fill="#8b949e" text-anchor="end" font-weight="normal" opacity="1.0">0.70x</text>
+<line x1="75.0" y1="362.8" x2="1068.0" y2="362.8" stroke="#30363d" stroke-width="1" opacity="1.0" stroke-dasharray="2,4"/>
+<text x="67.0" y="366.8" font-size="11" fill="#8b949e" text-anchor="end" font-weight="normal" opacity="1.0">1.21x</text>
+<line x1="75.0" y1="298.6" x2="1068.0" y2="298.6" stroke="#30363d" stroke-width="1" opacity="1.0" stroke-dasharray="2,4"/>
+<text x="67.0" y="302.6" font-size="11" fill="#8b949e" text-anchor="end" font-weight="normal" opacity="1.0">1.71x</text>
+<line x1="75.0" y1="234.4" x2="1068.0" y2="234.4" stroke="#30363d" stroke-width="1" opacity="1.0" stroke-dasharray="2,4"/>
+<text x="67.0" y="238.4" font-size="11" fill="#8b949e" text-anchor="end" font-weight="normal" opacity="1.0">2.22x</text>
+<line x1="75.0" y1="170.2" x2="1068.0" y2="170.2" stroke="#30363d" stroke-width="1" opacity="1.0" stroke-dasharray="2,4"/>
+<text x="67.0" y="174.2" font-size="11" fill="#8b949e" text-anchor="end" font-weight="normal" opacity="1.0">2.72x</text>
+<line x1="75.0" y1="106.0" x2="1068.0" y2="106.0" stroke="#30363d" stroke-width="1" opacity="1.0" stroke-dasharray="2,4"/>
+<text x="67.0" y="110.0" font-size="11" fill="#8b949e" text-anchor="end" font-weight="normal" opacity="1.0">3.23x</text>
+<line x1="75.0" y1="389.3" x2="1068.0" y2="389.3" stroke="#8b949e" stroke-width="1" opacity="1.0" stroke-dasharray="6,4"/>
+<polyline points="75.0,389.3 108.6,389.3 108.6,395.1 182.9,395.1 182.9,404.7 192.7,404.7 192.7,386.1 244.2,386.1 244.2,380.2 277.5,380.2 277.5,369.2 287.1,369.2 287.1,355.4 327.6,355.4 327.6,365.5 347.0,365.5 347.0,378.5 349.7,378.5 349.7,347.9 366.8,347.9 366.8,372.4 387.0,372.4 387.0,354.5 431.2,354.5 431.2,321.5 462.9,321.5 462.9,290.1 520.8,290.1 520.8,264.9 541.3,264.9 541.3,283.2 548.8,283.2 548.8,252.3 570.5,252.3 570.5,253.8 586.9,253.8 586.9,270.6 590.4,270.6 590.4,252.5 605.0,252.5 605.0,222.3 608.8,222.3 608.8,244.8 624.9,244.8 624.9,214.0 637.8,214.0 637.8,254.2 646.5,254.2 646.5,268.4 647.5,268.4 647.5,283.9 672.2,283.9 672.2,262.0 680.8,262.0 680.8,260.5 690.8,260.5 690.8,280.3 718.2,280.3 718.2,295.7 740.6,295.7 740.6,278.9 786.4,278.9 786.4,299.6 817.5,299.6 817.5,262.3 827.9,262.3 827.9,277.1 829.4,277.1 829.4,288.3 839.9,288.3 839.9,299.1 844.1,299.1 844.1,314.1 846.0,314.1 846.0,323.8 847.6,323.8 847.6,345.5 848.4,345.5 848.4,337.8 877.4,337.8 877.4,320.5 883.3,320.5 883.3,308.0 897.5,308.0 897.5,318.8 899.0,318.8 899.0,304.8 941.6,304.8 941.6,318.0 949.3,318.0 949.3,302.6 957.3,302.6 957.3,272.5 974.0,272.5 974.0,251.1 982.3,251.1 982.3,228.7 988.7,228.7 988.7,244.1 1010.9,244.1 1010.9,205.6 1019.2,205.6 1019.2,202.8 1026.3,202.8 1026.3,172.4 1039.9,172.4 1039.9,143.3 1066.2,143.3 1066.2,170.7 1068.0,170.7 1068.0,170.7" fill="none" stroke="#3fb950" stroke-width="2.4" opacity="1.0"/>
+<polyline points="75.0,389.3 108.6,389.3 182.9,389.3 192.7,386.1 244.2,380.2 277.5,369.2 287.1,355.4 327.6,355.4 347.0,355.4 349.7,347.9 366.8,347.9 387.0,347.9 431.2,321.5 462.9,290.1 520.8,264.9 541.3,264.9 548.8,252.3 570.5,252.3 586.9,252.3 590.4,252.3 605.0,222.3 608.8,222.3 624.9,214.0 637.8,214.0 646.5,214.0 647.5,214.0 672.2,214.0 680.8,214.0 690.8,214.0 718.2,214.0 740.6,214.0 786.4,214.0 817.5,214.0 827.9,214.0 829.4,214.0 839.9,214.0 844.1,214.0 846.0,214.0 847.6,214.0 848.4,214.0 877.4,214.0 883.3,214.0 897.5,214.0 899.0,214.0 941.6,214.0 949.3,214.0 957.3,214.0 974.0,214.0 982.3,214.0 988.7,214.0 1010.9,205.6 1019.2,202.8 1026.3,172.4 1039.9,143.3 1066.2,143.3 1068.0,143.3" fill="none" stroke="#8b949e" stroke-width="1" opacity="0.65"/>
+<circle cx="108.6" cy="395.1" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="182.9" cy="404.7" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="192.7" cy="386.1" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="244.2" cy="380.2" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="277.5" cy="369.2" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="287.1" cy="355.4" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="327.6" cy="365.5" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="347.0" cy="378.5" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="349.7" cy="347.9" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="366.8" cy="372.4" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="387.0" cy="354.5" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="431.2" cy="321.5" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="462.9" cy="290.1" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="520.8" cy="264.9" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="541.3" cy="283.2" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="548.8" cy="252.3" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="570.5" cy="253.8" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="586.9" cy="270.6" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="590.4" cy="252.5" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="605.0" cy="222.3" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="608.8" cy="244.8" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="624.9" cy="214.0" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="637.8" cy="254.2" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="646.5" cy="268.4" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="647.5" cy="283.9" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="672.2" cy="262.0" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="680.8" cy="260.5" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="690.8" cy="280.3" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="718.2" cy="295.7" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="740.6" cy="278.9" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="786.4" cy="299.6" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="817.5" cy="262.3" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="827.9" cy="277.1" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="829.4" cy="288.3" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="839.9" cy="299.1" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="844.1" cy="314.1" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="846.0" cy="323.8" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="847.6" cy="345.5" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="848.4" cy="337.8" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="877.4" cy="320.5" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="883.3" cy="308.0" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="897.5" cy="318.8" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="899.0" cy="304.8" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="941.6" cy="318.0" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="949.3" cy="302.6" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="957.3" cy="272.5" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="974.0" cy="251.1" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="982.3" cy="228.7" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="988.7" cy="244.1" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="1010.9" cy="205.6" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="1019.2" cy="202.8" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="1026.3" cy="172.4" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="1039.9" cy="143.3" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<circle cx="1066.2" cy="170.7" r="2.5" fill="#3fb950" stroke="#0f141b" stroke-width="1.5"/>
+<line x1="847.6" y1="345.5" x2="847.6" y2="214.0" stroke="#f85149" stroke-width="1.6" opacity="1.0" stroke-dasharray="3,3"/>
+<text x="820.0" y="279.8" font-size="12" fill="#f85149" text-anchor="start" font-weight="normal" opacity="1.0">已实现回撤 43.5%</text>
+<text x="75.0" y="449.0" font-size="11" fill="#8b949e" text-anchor="middle" font-weight="normal" opacity="1.0">2025-04</text>
+<text x="240.5" y="449.0" font-size="11" fill="#8b949e" text-anchor="middle" font-weight="normal" opacity="1.0">2025-07</text>
+<text x="406.0" y="449.0" font-size="11" fill="#8b949e" text-anchor="middle" font-weight="normal" opacity="1.0">2025-10</text>
+<text x="571.5" y="449.0" font-size="11" fill="#8b949e" text-anchor="middle" font-weight="normal" opacity="1.0">2026-01</text>
+<text x="737.0" y="449.0" font-size="11" fill="#8b949e" text-anchor="middle" font-weight="normal" opacity="1.0">2026-04</text>
+<text x="902.5" y="449.0" font-size="11" fill="#8b949e" text-anchor="middle" font-weight="normal" opacity="1.0">2026-07</text>
+<text x="1068.0" y="449.0" font-size="11" fill="#8b949e" text-anchor="middle" font-weight="normal" opacity="1.0">2026-10</text>
+<text x="75.0" y="486.0" font-size="12" fill="#8b949e" text-anchor="start" font-weight="normal" opacity="1.0">阶梯在离场 K 线收盘边界更新；覆盖期起点包含 1.0x 初始权益。灰线为历史峰值，持仓浮盈不提前复投。</text>
+<text x="75.0" y="513.0" font-size="12" fill="#f0883e" text-anchor="start" font-weight="normal" opacity="1.0">该曲线未展示持仓内浮动盈亏，也未模拟固定 5% 日内 MTM 熔断；实际账户路径和最大回撤可能不同。</text>
+<text x="75.0" y="539.0" font-size="11" fill="#8b949e" text-anchor="start" font-weight="normal" opacity="1.0">历史最长连续亏损 6 笔；手续费单边 5bp，未含滑点、资金费率和成交冲击。</text>
+</svg>

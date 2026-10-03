@@ -23,12 +23,13 @@ ENGINE_PATH = ROOT / "Sources" / "TradingService" / "StrategyEngine.swift"
 STREAM_PATH = ROOT / "Sources" / "OKXLocalD" / "main.swift"
 UNIVERSE_RULES_PATH = ROOT / "Sources" / "TradingDomain" / "StrategyUniverseRules.swift"
 SIGNAL_PATH = LAB / "research" / "live_signal.py"
-RUNTIME_STRATEGY_DIRS = {"sweep_reversal_short", "double_pump_exhaustion_short"}
+RUNTIME_STRATEGY_DIRS = {"sweep_reversal_short"}
 # 运行时策略共用的仓位契约（与 StrategyType.notionalPoolMultiple /
 # maxStopDistancePercent 和 RiskLimits 默认日损熔断对应）。
 MAX_NOTIONAL_POOL_MULTIPLE = 1.0
 MAX_STOP_DISTANCE_PCT = 15.0
-ACCOUNT_DAILY_LOSS_PCT = 20.0
+ACCOUNT_DAILY_LOSS_PCT = 5.0
+MAX_CAPITAL_POOL_PCT = 33.33
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -132,8 +133,13 @@ def main() -> int:
         or not required_actions.issubset(set(risk_policy.get("actions", [])))
     ):
         fail(errors, f"账户级日损熔断必须是 mark-to-market 的 {ACCOUNT_DAILY_LOSS_PCT:g}%")
-    if ACCOUNT_DAILY_LOSS_PCT <= MAX_STOP_DISTANCE_PCT * MAX_NOTIONAL_POOL_MULTIPLE:
-        fail(errors, "账户日损熔断阈值必须高于单策略全池时的单笔最坏亏损")
+    if risk_policy.get("max_capital_pool_percent") != MAX_CAPITAL_POOL_PCT:
+        fail(errors, f"策略资金池上限必须同步为 {MAX_CAPITAL_POOL_PCT:g}%")
+    derived_pool_cap = (ACCOUNT_DAILY_LOSS_PCT / (MAX_STOP_DISTANCE_PCT * MAX_NOTIONAL_POOL_MULTIPLE)) * 100
+    if derived_pool_cap <= MAX_CAPITAL_POOL_PCT:
+        # The persisted two-decimal cap must leave a strict margin below the
+        # fixed account breaker after rounding.
+        fail(errors, "资金池上限必须严格低于账户日损熔断 ÷ 单笔最坏亏损")
     capital_pool = config.get("capital_pool", {})
     if (
         capital_pool.get("mode") != "per_strategy_instance"
@@ -142,8 +148,10 @@ def main() -> int:
         or capital_pool.get("unrealized_pnl_releases_available") is not False
     ):
         fail(errors, "策略资金池必须按实例隔离、只用已实现盈亏滚仓且禁止浮盈释放或跨池借用")
+    if capital_pool.get("allocation_percent_default") != MAX_CAPITAL_POOL_PCT:
+        fail(errors, f"策略资金池默认比例必须同步为 {MAX_CAPITAL_POOL_PCT:g}%")
 
-    if not re.search(r"availableCases\s*:.*\.sweepReversalShort.*\.doublePumpExhaustionShort", domain, re.DOTALL):
+    if not re.search(r"availableCases\s*:.*\.sweepReversalShort", domain, re.DOTALL):
         fail(errors, "StrategyType.availableCases 未包含全部已集成策略")
     if re.search(r"emaAltcoin|双均线交易山寨币做多", "".join(
             path.read_text() for path in sorted((ROOT / "Sources").rglob("*.swift")))):
@@ -250,7 +258,9 @@ def main() -> int:
     if "stopDistancePercent <= Decimal(StrategyType.maxStopDistancePercent)" not in service_source:
         fail(errors, "后端未执行止损距离上限")
     if "func requireCircuitBreakerHeadroom" not in service_source or "StrategyType.maxLossPerTradePercent" not in service_source:
-        fail(errors, "后端未在启用策略时校验熔断阈值高于全池单笔最坏亏损")
+        fail(errors, "后端未在启用策略时校验资金池与固定熔断阈值")
+    if "maxCapitalPoolPercent" not in domain or "maxCapitalPoolPercent" not in service_source:
+        fail(errors, "领域层和后端未同步策略资金池安全上限")
     limits_default = re.search(r"maxDailyLossPercent:\s*Decimal\s*=\s*([0-9.]+),\s*maxDrawdownPercent:\s*Decimal\s*=\s*([0-9.]+)\)", domain)
     if not limits_default or float(limits_default.group(1)) != ACCOUNT_DAILY_LOSS_PCT:
         fail(errors, f"RiskLimits 默认日损熔断与实验室 {ACCOUNT_DAILY_LOSS_PCT:g}% 不一致")
@@ -390,11 +400,6 @@ def main() -> int:
         fail(errors, "缺少从 prep.py 独立数据集复现的全历史复核脚本 research/report_full_history.py")
     if "report_full_history.py" not in spec_text:
         fail(errors, "STRATEGY_SPEC 未指向全历史复核脚本 report_full_history.py")
-    dme_full_history = ROOT / "strategies" / "double_pump_exhaustion_short" / "research" / "report_full_history.py"
-    if not dme_full_history.exists():
-        fail(errors, "DME 缺少全历史复核脚本 research/report_full_history.py")
-    if not (ROOT / "strategies" / "double_pump_exhaustion_short" / "results" / "full_history" / "report.json").exists():
-        fail(errors, "DME 缺少 results/full_history/report.json 复核产物")
     if "universe.json" not in live_signal or "EXCLUDED_BASES" not in live_signal:
         fail(errors, "实验室实时扫描器未复用 universe.json 的排除清单")
     if "def _load_signal_parameters" not in live_signal or "strategy.json" not in live_signal:
@@ -463,8 +468,8 @@ def main() -> int:
             fail(errors, f"{label} 未明确 15m 收盘确认和市价入场")
         if "资金池可用余额" not in document or "15%" not in document or "止损距离" not in document:
             fail(errors, f"{label} 未明确全池名义仓位和 15% 止损距离上限")
-        if "20%" not in document or "熔断" not in document:
-            fail(errors, f"{label} 未明确 20% 账户日内熔断及其余量要求")
+        if f"{ACCOUNT_DAILY_LOSS_PCT:g}%" not in document or "熔断" not in document:
+            fail(errors, f"{label} 未明确 {ACCOUNT_DAILY_LOSS_PCT:g}% 账户日内熔断及其余量要求")
         if "未实现浮盈" not in document or "已实现盈亏" not in document or "滚仓" not in document:
             fail(errors, f"{label} 未明确资金池滚仓和浮盈不可释放规则")
     if not ("执行边界" in strategy_doc or "执行状态" in strategy_doc) or "保护单" not in strategy_doc:
@@ -477,7 +482,6 @@ def main() -> int:
     strategy_dirs = [
         ROOT / "strategies" / name for name in (
             "sweep_reversal_short", "intraday_pump_retest_short",
-            "extreme_wick_short", "double_pump_exhaustion_short",
             "ema_3line_pullback", "liquid_crypto_trend_long",
         )
     ]
@@ -513,35 +517,12 @@ def main() -> int:
         if "USDT" not in document or ("山寨币" not in document and "适合标的" not in document):
             fail(errors, f"{strategy_dir.name}/STRATEGY.md 未明确适合标的")
 
-    dme_config_path = ROOT / "strategies" / "double_pump_exhaustion_short" / "config" / "strategy.json"
-    try:
-        dme_config = json.loads(dme_config_path.read_text())
-        dme_runtime = dme_config.get("runtime", {})
-        if dme_config.get("status") != "finalized" or dme_config.get("runtime_integration") != "implemented":
-            fail(errors, "DME 策略必须标记为 finalized 且已接入运行时")
-        for key, want in {
-            "strategy_type": "doublePumpExhaustionShort",
-            "scope": "dynamic.doublePumpCandidates",
-            "evaluation_interval": "confirmed_15m_close",
-            "order_routing": "account_mode",
-            "enabled_by_default": False,
-            "sizing": "full_pool_available_capital",
-            "max_stop_distance_pct": MAX_STOP_DISTANCE_PCT,
-        }.items():
-            if dme_runtime.get(key) != want:
-                fail(errors, f"DME runtime.{key} 未同步为 {want!r}")
-    except Exception as exc:
-        fail(errors, f"无法读取 DME config/strategy.json：{exc}")
-    if "doublePumpExhaustionShort" not in domain or "evaluateDoublePumpExhaustionShort" not in engine:
-        fail(errors, "DME 未注册领域层和 StrategyEngine 运行时处理器")
-    if "isEligibleDoublePump" not in universe_rules or "doublePumpCandidates" not in domain or "strategyUniverseTargets" not in stream or "targetsByStrategy" not in stream:
-        fail(errors, "DME 未接入策略专属的 10m USDT 报价成交额标的监控缓存")
     if errors:
         print("策略实验室同步检查失败：")
         for error in errors:
             print(f"- {error}")
         return 1
-    print("策略实验室与运行时代码同步检查通过（运行时策略全池仓位契约：名义 1× 资金池、止损距离 ≤15%、日损熔断 20% + sweep v1.4 + DME 1.0）")
+    print(f"策略实验室与运行时代码同步检查通过（运行时策略全池仓位契约：名义 1× 资金池、止损距离 ≤15%、日损熔断 {ACCOUNT_DAILY_LOSS_PCT:g}% + sweep v1.4）")
     return 0
 
 

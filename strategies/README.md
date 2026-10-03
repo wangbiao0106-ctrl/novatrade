@@ -21,15 +21,22 @@ git diff --check
 
 当前策略：
 
-- [`sweep_reversal_short/`](sweep_reversal_short/)：山寨币二次扫顶做空，已接入策略引擎。生产范围（v1.4）是每 30 秒刷新、24h 报价成交额不低于 300 万 USDT 且排名前 100 的合规山寨币（`dynamic.sweepCandidates`）；`config/universe_recommended.json` 的 177 个标的只用于历史回测基线，不是运行时绑定名单。
-- [`ema_3line_pullback/`](ema_3line_pullback/)：EMA 回踩策略族的四方向历史研究归档，不是规则真源，未接入运行时。
-- [`extreme_wick_short/`](extreme_wick_short/)：山寨日内涨幅超过 100% 的 15m 动能衰竭做空研究候选；未接入运行时。
-- [`double_pump_exhaustion_short/`](double_pump_exhaustion_short/)：由 `extreme_wick_short` 的 `grid_0580` 固定出的日内翻倍动能衰竭确认做空正式规则；已接入运行时，按连接账号类型路由模拟或实盘，默认停用。
-- [`range_rejection_confirmation_short/`](range_rejection_confirmation_short/)：突破近期高点后出现大实体阴线、收盘回到 EMA20 附近，等待右侧确认再做空的研究候选；未接入运行时。
-- [`intraday_pump_retest_short/`](intraday_pump_retest_short/)：山寨日内涨幅超过 60% 后，高点回落再突涨并缩量收高做空研究候选；未接入运行时。
-- [`personal_trading_style_backtest/`](personal_trading_style_backtest/)：从 OKX 统一交易账单回放个人交易风格、验证入场前过滤条件的研究实验；未接入运行时。
-- [`personal_style_strategy_variants/`](personal_style_strategy_variants/)：将账单归纳出的冲高做空、扫顶、回踩多头和均值回归偏好拆成多分支，用全量 5 分钟行情批量回顾验证；未接入运行时。
-- [`liquid_crypto_trend_long/`](liquid_crypto_trend_long/)：在**下单时点**滚动 24h 报价成交额 ≥ 3000 万 USDT 的加密永续上做纯多头 1 小时趋势跟随（MA72 + 1% 滞回带 + 96 小时持仓上限 + 200% 波动率目标），以同池与全池买入持有篮子作为硬验收基准；未接入运行时。
+| 已定稿规则 | 全历史生产单仓 | 盈利分布与 K 线说明书 |
+| --- | --- | --- |
+| 山寨币二次扫顶（v1.4） | 54 笔，资金池终值 2.720x；已实现回撤 43.49% | [`sweep_reversal_short/STRATEGY.md`](sweep_reversal_short/STRATEGY.md) |
+
+全历史结果仅说明规则已同步。年度分布属于条件预测，不能把历史期望当作收益保证；其他目录保持研究候选或归档状态。
+
+- [`sweep_reversal_short/`](sweep_reversal_short/)：山寨币二次扫顶，已接入策略引擎。生产范围（v1.4）是每 30 秒刷新、24h 报价成交额不低于 300 万 USDT 且排名前 100 的合规山寨币（`dynamic.sweepCandidates`）；`config/universe_recommended.json` 的 177 个标的只用于历史回测基线，不是运行时绑定名单。
+- [`ema_3line_pullback/`](ema_3line_pullback/)：三线突破回踩，EMA 20/60/120 四方向历史研究归档，不是规则真源，未接入运行时。
+- [`range_rejection_confirmation_short/`](range_rejection_confirmation_short/)：冲高阴线确认，突破近期高点后出现大实体阴线、收盘回到 EMA20 附近，等待右侧确认再做空的研究候选；未接入运行时。
+- [`intraday_pump_retest_short/`](intraday_pump_retest_short/)：缩量二次拉升，山寨日内涨幅超过 60% 后，高点回落再突涨并缩量收高的研究候选；未接入运行时。
+- [`personal_trading_style_backtest/`](personal_trading_style_backtest/)：交易风格回放，从 OKX 统一交易账单回放个人交易风格、验证入场前过滤条件的研究实验；未接入运行时。
+- [`personal_style_strategy_variants/`](personal_style_strategy_variants/)：交易偏好分支，将账单归纳出的冲高做空、扫顶、回踩多头和均值回归偏好拆成多分支，用全量 5 分钟行情批量回顾验证；未接入运行时。
+- [`liquid_crypto_trend_long/`](liquid_crypto_trend_long/)：高流动性趋势，在**下单时点**滚动 24h 报价成交额 ≥ 3000 万 USDT 的加密永续上做纯多头 1 小时趋势跟随（MA72 + 1% 滞回带 + 96 小时持仓上限 + 200% 波动率目标），以同池与全池买入持有篮子作为硬验收基准；未接入运行时。
+- [`five_minute_surge_waterfall_short/`](five_minute_surge_waterfall_short/)：5m 大涨（严格 >20% / >30%）与前 4 小时高点突破状态组合，比较下一根开盘和最近 72 根实体顶部限价做空；研究候选，未接入运行时。
+- [`extreme_negative_funding_110_short/`](extreme_negative_funding_110_short/)：独立验证 5m 日内涨幅 >80%、价格触及日内开盘价 +110% 且资金费率达到币种负值上限后挂限价做空，1 倍杠杆、20% 止损、分段止盈；当前行情目录没有历史资金费率，未接入运行时。
+- [`spot_perp_hedged_accumulation/`](spot_perp_hedged_accumulation/)：单一主流币的 1:1 现货多头 + USDT 永续空头对冲研究；1h 背离/EMA20 回踩激活，价格每跨 4% 尝试转移 25% 基础币单位，但名义偏离硬限 20%，资金费和基差尚未建模，研究候选，未接入运行时。
 
 资产类别排除清单（主流币、稳定币、股票/ETF/指数/商品）的唯一真源是 [`sweep_reversal_short/config/universe.json`](sweep_reversal_short/config/universe.json) 的 `exclude`，`Sources/TradingDomain/StrategyUniverseRules.swift`、`research/live_signal.py` 和 `ema_3line_pullback/src/backtest.py` 都只是副本，由 `scripts/validate_strategy_sync.py` 逐一对齐。
 

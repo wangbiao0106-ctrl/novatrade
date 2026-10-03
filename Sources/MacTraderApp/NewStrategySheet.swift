@@ -138,6 +138,7 @@ struct NewStrategySheet: View {
                     Button {
                         selectedRule = strategyType
                         leverage = strategyType.defaultLeverage
+                        capitalPoolPercent = min(capitalPoolPercent, max(1, strategyType.maxCapitalPoolPercent))
                         step = .configure
                     } label: {
                         strategySelectionCard(strategyType)
@@ -225,7 +226,7 @@ struct NewStrategySheet: View {
                     }
                 }
 
-                configurationSection("资金与风控", subtitle: "资金池和杠杆可调；风控参数由策略固定，按资金池计算") {
+                configurationSection("资金与风控", subtitle: "账户日内熔断固定为 5%；资金池上限按策略止损上限计算") {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(alignment: .firstTextBaseline) {
                             VStack(alignment: .leading, spacing: 3) {
@@ -237,25 +238,25 @@ struct NewStrategySheet: View {
                             }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 2) {
-                                Text("\(String(format: "%.0f", capitalPoolPercent))%")
+                                Text("\(String(format: "%.2f", capitalPoolPercent))%")
                                     .font(.title3.monospacedDigit().weight(.semibold))
                                     .foregroundStyle(.mint)
-                                Text("可分配上限 \(String(format: "%.0f", maxCapitalPoolPercent))%")
+                                Text("可分配上限 \(String(format: "%.2f", maxCapitalPoolPercent))%")
                                     .font(.caption2.monospacedDigit())
                                     .foregroundStyle(.secondary)
                             }
                         }
                         HStack(spacing: 12) {
-                            Slider(value: $capitalPoolPercent, in: capitalPoolRange, step: 1)
+                            Slider(value: $capitalPoolPercent, in: capitalPoolRange, step: 0.01)
                                 .tint(.mint)
                                 .accessibilityLabel("策略资金池比例")
-                                .accessibilityValue("\(String(format: "%.0f", capitalPoolPercent))%")
-                            TextField("", value: $capitalPoolPercent, format: .number.precision(.fractionLength(0)))
+                                .accessibilityValue("\(String(format: "%.2f", capitalPoolPercent))%")
+                            TextField("", value: $capitalPoolPercent, format: .number.precision(.fractionLength(2)))
                                 .textFieldStyle(.roundedBorder)
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 58)
                                 .accessibilityLabel("策略资金池比例")
-                                .accessibilityValue("\(String(format: "%.0f", capitalPoolPercent))%")
+                                .accessibilityValue("\(String(format: "%.2f", capitalPoolPercent))%")
                             Text("%")
                                 .foregroundStyle(.secondary)
                         }
@@ -288,6 +289,8 @@ struct NewStrategySheet: View {
                         }
                         Divider().overlay(Color.white.opacity(0.08))
                         VStack(alignment: .leading, spacing: 8) {
+                            infoRow("账户日内熔断", value: "固定 \(String(format: "%.0f", NSDecimalNumber(decimal: RiskLimits.productionDailyLossPercent).doubleValue))%")
+                            infoRow("策略资金池安全上限", value: "\(String(format: "%.2f", selectedRule.maxCapitalPoolPercent))%（单笔最坏亏损 \(formatPercent(Decimal(StrategyType.maxLossPerTradePercent)))）")
                             infoRow("单笔名义仓位", value: "资金池可用余额 × \(String(format: "%.0f", StrategyType.notionalPoolMultiple)) ≈ \(formatted(currentStrategyCapital))", valueColor: .primary)
                             infoRow("单笔最大亏损", value: "等于止损距离，上限 \(formatPercent(Decimal(StrategyType.maxLossPerTradePercent))) 资金池 ≈ \(formatted(maxLossPerTradeAmount))")
                             infoRow("止损距离上限", value: "超过 \(formatPercent(Decimal(StrategyType.maxStopDistancePercent))) 的信号不下单")
@@ -359,7 +362,6 @@ struct NewStrategySheet: View {
     private func strategyIcon(_ strategyType: StrategyType) -> String {
         switch strategyType {
         case .sweepReversalShort: return "arrow.down.right.and.arrow.up.left"
-        case .doublePumpExhaustionShort: return "chart.bar.xaxis"
         case .external: return "questionmark"
         }
     }
@@ -368,8 +370,6 @@ struct NewStrategySheet: View {
         switch strategyType {
         case .sweepReversalShort:
             return "找出冲高后第二次扫顶的币，确认转弱后做空。"
-        case .doublePumpExhaustionShort:
-            return "观察滚动 24 小时翻倍后的 15 分钟冲高衰竭，确认收盘后做空。"
         case .external:
             return "策略包暂不可用。"
         }
@@ -377,7 +377,7 @@ struct NewStrategySheet: View {
 
     private func orderTypeDescription(_ strategyType: StrategyType) -> String {
         switch strategyType {
-        case .sweepReversalShort, .doublePumpExhaustionShort:
+        case .sweepReversalShort:
             return "市价下单"
         case .external:
             return "不可用"
@@ -386,7 +386,7 @@ struct NewStrategySheet: View {
 
     private func orderTypeIcon(_ strategyType: StrategyType) -> String {
         switch strategyType {
-        case .sweepReversalShort, .doublePumpExhaustionShort: return "bolt.fill"
+        case .sweepReversalShort: return "bolt.fill"
         case .external: return "questionmark"
         }
     }
@@ -429,8 +429,8 @@ struct NewStrategySheet: View {
     }
 
     private var maxCapitalPoolPercent: Double {
-        guard usdtTotalAssets != nil else { return 100 }
-        return capitalAllocation.availableAllocationPercent.doubleValue
+        guard usdtTotalAssets != nil else { return selectedRule.maxCapitalPoolPercent }
+        return min(selectedRule.maxCapitalPoolPercent, capitalAllocation.availableAllocationPercent.doubleValue)
     }
 
     private var effectiveCapitalPoolPercent: Double {

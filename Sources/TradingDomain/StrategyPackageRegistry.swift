@@ -17,8 +17,8 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
     public let displayName: String
     public let englishName: String
     /// The executable adapter name.  Existing adapters use values such as
-    /// `doublePumpExhaustionShort` and `sweepReversalShort`.  A package may be
-    /// installed before its adapter is shipped; it will then remain dormant.
+    /// `sweepReversalShort`. A package may be installed before its adapter is
+    /// shipped; it will then remain dormant.
     public let runtimeHandler: String
     public let sourceOfTruth: String?
     public let entryTimeframeMinutes: Int?
@@ -141,7 +141,6 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
         let compact = trimmed.lowercased().filter { $0.isLetter || $0.isNumber }
         switch compact {
         case "sweepreversalshort": return "sweepReversalShort"
-        case "doublepumpexhaustionshort": return "doublePumpExhaustionShort"
         default: return trimmed
         }
     }

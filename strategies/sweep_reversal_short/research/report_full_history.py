@@ -16,7 +16,8 @@
   python3 strategies/sweep_reversal_short/research/report_full_history.py --fee 0.001
   python3 strategies/sweep_reversal_short/research/report_full_history.py --refresh-data
 
-输出：`results/full_history/report.json` 与逐笔 CSV（目录被 .gitignore 忽略，按需重建）。
+输出：`results/full_history/report_fee5bps.json` 与逐笔 CSV；手续费不同会更改文件后缀。
+轻量复核证据保留在版本库，`results/full_history/data/` 派生缓存被 .gitignore 忽略。
 """
 from __future__ import annotations
 
@@ -140,6 +141,18 @@ def main() -> None:
                  "symbols_1h": len(data1), "runtime_eligible_alts": len(symbols)},
         "window_v1_4": {"start": window_start, "end_exclusive": window_end},
         "costs": {"fee_per_side": fee, "slippage": 0.0},
+        "position_management": {
+            "leverage": float(R.COSTS["leverage"]),
+            "leverage_effect": "margin_only",
+            "notional_pool_multiple": 1.0,
+            "sizing": "full_pool_available_capital",
+            "max_stop_distance_pct": R.MAX_STOP_PCT * 100,
+        },
+        "account_risk": {
+            "daily_loss_circuit_breaker_pct": 5.0,
+            "measurement": "mark_to_market",
+            "max_capital_pool_percent": 33.33,
+        },
         "guards": {"min_atr_pct": R.MIN_ATR_PCT, "max_risk_atr": R.MAX_RISK_ATR,
                    "max_stop_distance_pct": R.MAX_STOP_PCT * 100, "btc_gate": True},
         "universe_rule": {"ranking": "rolling 24h quote volume at structure bar close among all runtime-eligible alts in the data",
@@ -152,7 +165,7 @@ def main() -> None:
         "live_single_slot": section(slot, monthly=True),
         "live_single_slot_pool_path": {"full": pool_path(slot),
                                        "by_period": {name: pool_path(group) for name, group in slot.groupby("period")},
-                                       "contract": "notional = 1 × pool available capital; per-trade loss = stop distance; realized PnL compounds"},
+                                       "contract": "notional = 1 × pool available capital; per-trade loss = stop distance; realized PnL compounds; leverage = 2× margin-only"},
         "limitations": [
             "只含当前仍上市的合约（幸存者偏差）；后期上市合约历史较短",
             "未计资金费率与滑点；手续费按 fee_per_side",

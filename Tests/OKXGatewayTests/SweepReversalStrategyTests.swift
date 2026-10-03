@@ -3,7 +3,7 @@ import Testing
 import TradingDomain
 @testable import TradingService
 
-/// 山寨币二次扫顶做空策略引擎测试：与 Python 回测（strategies/sweep_reversal_short/engine.py）逐条对应。
+/// 山寨币二次扫顶策略引擎测试：与 Python 回测（strategies/sweep_reversal_short/engine.py）逐条对应。
 /// 构造序列：完整 288 根暖机 → 高位摆动点 p → 首次扫顶 s（放量、收盘回落）→ 二次扫顶 j（更低高点、收盘回落，最后一根）。
 
 private func makeSweepCandles(resweep: Bool = true) -> [Candle] {
@@ -100,7 +100,7 @@ private func makeBTCBearishCandlesWithPriorTimestamp() -> [Candle] {
 
 private func makeSweepConfig() -> StrategyConfig {
     StrategyConfig(
-        name: "山寨币二次扫顶做空", scope: .dynamic(.sweepCandidates), interval: .oneHour, type: .sweepReversalShort,
+        name: "山寨币二次扫顶", scope: .dynamic(.sweepCandidates), interval: .oneHour, type: .sweepReversalShort,
         parameters: ["L": 10, "R": 5, "majorWindow": 288, "sweepWait": 96, "rejectWait": 5,
                      "resweepWait": 12, "rsiMin": 62, "volMult": 1.5, "rsDeep": 0.2,
                      "bufATR": 0.5, "tpMult": 2.2, "minATRPct": 0.5, "maxRiskATR": 5.0, "btcGateEnabled": 1],
@@ -147,7 +147,7 @@ private func makeSecondBarConfirmation(entryTimestamp: Date) -> [Candle] {
 func sweepReversalKeepsIdentifierSeparateFromDisplayName() {
     let config = makeSweepConfig()
     #expect(config.type.identifier == "sweepReversalShort")
-    #expect(config.name == "山寨币二次扫顶做空")
+    #expect(config.name == "山寨币二次扫顶")
     #expect(StrategyType.sweepReversalShort.identifier == "sweepReversalShort")
 }
 
@@ -348,7 +348,7 @@ func sweepReversalOneHourEventNeverLeaksAnotherInstrumentsSignal() async throws 
     // 策略实例扫描动态范围；另一个标的的事件必须返回自己的中性状态，
     // 不能带出 A 标的的信号。
     let config = StrategyConfig(
-        name: "山寨币二次扫顶做空", scope: .dynamic(.sweepCandidates), interval: .oneHour,
+        name: "山寨币二次扫顶", scope: .dynamic(.sweepCandidates), interval: .oneHour,
         type: .sweepReversalShort, parameters: makeSweepConfig().parameters,
         enabled: true, cooldownBars: 96
     )

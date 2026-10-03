@@ -2,7 +2,7 @@
   "strategy": "SWEEP_REVERSAL_SHORT",
   "version": "1.4",
   "source_of_truth": "strategies/sweep_reversal_short/STRATEGY.md",
-  "name_zh": "山寨币二次扫顶做空",
+  "name_zh": "山寨币二次扫顶",
   "market": "OKX_USDT_LINEAR_PERPETUAL",
   "entry_timeframe_minutes": 60,
   "confirmation_timeframe_minutes": 15,
@@ -61,7 +61,8 @@
     "when_off": "停止新开仓，已持仓位按原止损止盈管理"
   },
   "risk_policy": {
-    "account_daily_loss_percent": 20.0,
+    "account_daily_loss_percent": 5.0,
+    "max_capital_pool_percent": 33.33,
     "baseline": "calendar_day_start_equity",
     "measurement": "mark_to_market",
     "actions": [
@@ -71,12 +72,12 @@
       "latch_until_manual_reset"
     ],
     "strategy_rules_before_trip": "strategy_specific_stop_take_time_exit",
-    "headroom_rule": "account_daily_loss_percent 必须大于 Σ(启用策略资金池占比 × max_loss_per_trade_pct_of_pool)/100，运行时在创建/更新/启动启用策略时校验",
+    "headroom_rule": "固定 5% 账户日内熔断必须大于 Σ(启用策略资金池占比 × max_loss_per_trade_pct_of_pool)/100，运行时在创建/更新/启动启用策略时校验",
     "cumulative_drawdown_breaker": "disabled_by_default_cannot_be_reset"
   },
   "capital_pool": {
     "mode": "per_strategy_instance",
-    "allocation_percent_default": 100.0,
+    "allocation_percent_default": 33.33,
     "rollover": "compound_realized_pnl",
     "unrealized_pnl_releases_available": false,
     "cross_pool_borrowing": false
@@ -113,7 +114,7 @@
     "cooldown_advances": "per_confirmed_bar",
     "per_instrument_status_isolation": true,
     "signal_ownership_check_before_submit": true,
-    "note": "动态扫描24h报价成交额前100、且成交额不低于300万USDT的合规山寨币；1h只建立二次扫顶结构，后续最多1小时等待首根符合条件的15m阴线收盘，随后从扫描结果中只选择一个币种以市价做空。入场名义仓位 = 本策略资金池可用余额 × 1，止损距离超过 15% 的信号不下单，并附带条件止损/止盈；运行时按当前账户类型路由 OKX 模拟或实盘订单，监控负责96根1h（384根15m）时间离场，账户级 20% mark-to-market 日内熔断负责停止策略、撤单和全平，启用策略前校验熔断阈值高于各池「占比 × 15%」之和。"
+    "note": "动态扫描24h报价成交额前100、且成交额不低于300万USDT的合规山寨币；1h只建立二次扫顶结构，后续最多1小时等待首根符合条件的15m阴线收盘，随后从扫描结果中只选择一个币种以市价做空。入场名义仓位 = 本策略资金池可用余额 × 1，止损距离超过 15% 的信号不下单，并附带条件止损/止盈；运行时按当前账户类型路由 OKX 模拟或实盘订单，监控负责96根1h（384根15m）时间离场，账户级固定 5% mark-to-market 日内熔断负责停止策略、撤单和全平，资金池占比上限由 5% ÷ 15% 推导并由界面和服务端共同校验。"
   },
   "costs": {
     "fee_rate_one_way": 0.0005,

@@ -59,7 +59,7 @@ python3 scripts/build_kline_cache.py
 
 缓存位于 `.cache/kline/okx/swap/`，属于可重建产物，不提交到仓库。原始数据仍保留在 `data/kline/okx/swap/5m/`。
 
-## 山寨币二次扫顶做空（已集成）
+## 山寨币二次扫顶（已集成）
 
 策略实验室中的 `sweep_reversal_short` 是当前规则的唯一来源：人类规则见 `strategies/sweep_reversal_short/STRATEGY.md`，机器参数见同目录 `config/strategy.json`。运行时策略依据该版本同步到 `Sources/`，不会读取研究目录。
 
@@ -68,13 +68,21 @@ python3 scripts/build_kline_cache.py
 - 规则与集成说明：`strategies/sweep_reversal_short/STRATEGY.md`
 - 参数配置：`strategies/sweep_reversal_short/config/strategy.json`
 - 引擎实现：`Sources/TradingService/StrategyEngine.swift`（`evaluateWithConfirmation`，按实验室 v1.4 规则实现；信号携带 ATR 标定的止损/止盈价位）
-- 执行边界：当前版本包含全池名义仓位（资金池可用余额 × 1，止损距离 > 15% 不下单）、条件保护单、96 根时间离场和账户级 20% mark-to-market 日内熔断（启用策略前校验阈值高于各池「占比 × 15%」之和）；熔断处置失败会写入 warning 并保持锁存。评估按已确认 K 线幂等，REST 刷新图表不会消耗冷却；状态按「策略 + 标的」隔离，1h 结构事件不会带出其它标的的信号
-- 稳定策略标识：`sweepReversalShort`；UI 显示名称：`山寨币二次扫顶做空`
+- 执行边界：当前版本包含全池名义仓位（资金池可用余额 × 1，止损距离 > 15% 不下单）、条件保护单、96 根时间离场和账户级固定 5% mark-to-market 日内熔断；新建或启动策略时，资金池占比必须满足「资金池占比 × 15% < 5%」，扫顶策略上限约为 33.33%。熔断处置失败会写入 warning 并保持锁存。评估按已确认 K 线幂等，REST 刷新图表不会消耗冷却；状态按「策略 + 标的」隔离，1h 结构事件不会带出其它标的的信号
+- 稳定策略标识：`sweepReversalShort`；UI 显示名称：`山寨币二次扫顶`
 - 运行范围：后台每 30 秒刷新行情，排除主流币、稳定币及非加密资产，剔除 24h 报价成交额低于 300 万 USDT 的合约后，按成交额动态扫描前 100 个 USDT 线性永续山寨币（`dynamic.sweepCandidates`）；177 个推荐标的只属于历史回测基线，不是固定运行名单
 - 门控数据流：`PaperTradingStore` 缓存 BTC 1H K 线，取不晚于信号时刻的最近已确认 bar；历史不足 200 根或无法对齐时门控不通过
 - UI：点击“添加”先从策略卡片选择规则，再配置 USDT 资金池和杠杆；内置策略默认 2 倍杠杆，可在 1–100 倍范围调整
 - 单元测试：`Tests/OKXGatewayTests/SweepReversalStrategyTests.swift`（含门控、假突破、15m 确认窗口边界、冷却幂等、跨标的信号隔离）
-- 研究与回测：已上线规则口径为 177 个历史快照 54 个结构 → 41 笔、胜率 56.1%、盈亏比 1.53R、期望 +0.37R/笔（复现入口 `strategies/sweep_reversal_short/research/report_live_rule.py`）；不代表动态榜单未来绩效
+- 研究与回测：已上线规则口径为 177 个历史快照 54 个结构 → 39 笔、胜率 56.4%、盈亏比 1.59R、期望 +0.41R/笔（含 15% 止损距离上限）；全历史生产范围 108 笔、单仓 54 笔，单仓池终值 2.720x、已实现最大回撤 43.49%。完整证据、盈利分布预测和真实 K 线点位见 [策略说明书](strategies/sweep_reversal_short/STRATEGY.md)，不代表未来绩效。
+
+## 正式策略说明书
+
+| 中文名称 | 全历史单仓复投 / 已实现最大回撤 | 说明书 |
+| --- | --- | --- |
+| 山寨币二次扫顶 | +172.0% / 43.5% | [信号、选币、盈利分布预测、三类真实 K 线和执行检查](strategies/sweep_reversal_short/STRATEGY.md) |
+
+上述正收益为截至 2026-10-03 的历史证据。预测以策略资金池为分母，使用单仓成交序列；账户级每日 MTM 熔断和持仓内浮亏未在这些已实现资金池路径中完整模拟。策略名称只体现标的或信号，稳定 ID 和交易方向规则保持原值。
 
 策略实验室定稿后的安装、升级和卸载走配置包流程，不需要编辑 Swift 源码；只有修改内建运行时适配器时才需要同步代码。流程和 AI 指令见 [`spec/STRATEGY_PACKAGE.md`](spec/STRATEGY_PACKAGE.md)。
 

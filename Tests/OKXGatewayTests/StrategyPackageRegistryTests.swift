@@ -7,33 +7,33 @@ import Testing
 func experimentManifestIsParsed() throws {
     let json = """
     {
-      "strategy": "DOUBLE_PUMP_EXHAUSTION_SHORT",
+      "strategy": "SWEEP_REVERSAL_SHORT",
       "version": "1.0",
-      "name_zh": "日内翻倍动能衰竭确认做空",
-      "display_name": "日内翻倍动能衰竭确认做空",
-      "name_en": "Double Pump Exhaustion Short",
+      "name_zh": "山寨币二次扫顶",
+      "display_name": "山寨币二次扫顶",
+      "name_en": "Sweep Reversal Short",
       "runtime": {
-        "strategy_type": "doublePumpExhaustionShort",
-        "scope": "dynamic.doublePumpCandidates",
+        "strategy_type": "sweepReversalShort",
+        "scope": "dynamic.sweepCandidates",
         "auto_submit_live_orders": false
       },
-      "entry_timeframe_minutes": 15,
+      "entry_timeframe_minutes": 60,
       "signal_parameters": { "atr_period": 14, "rsi_period": 14 },
-      "position_management": { "leverage": 2.0, "risk_per_trade_pct": 1.0, "risk_per_trade_max_pct": 1.0, "cooldown_bars": 16 }
+      "position_management": { "leverage": 2.0, "risk_per_trade_pct": 1.0, "risk_per_trade_max_pct": 1.0, "cooldown_bars": 96 }
     }
     """.data(using: .utf8)!
     let manifest = try StrategyPackageRegistry.decodeManifest(json)
-    #expect(manifest.identifier == "double_pump_exhaustion_short")
-    #expect(manifest.runtimeHandler == "doublePumpExhaustionShort")
-    #expect(manifest.displayName == "日内翻倍动能衰竭确认做空")
-    #expect(manifest.entryTimeframeMinutes == 15)
+    #expect(manifest.identifier == "sweep_reversal_short")
+    #expect(manifest.runtimeHandler == "sweepReversalShort")
+    #expect(manifest.displayName == "山寨币二次扫顶")
+    #expect(manifest.entryTimeframeMinutes == 60)
     #expect(manifest.defaultParameters["atrPeriod"] == 14)
     #expect(manifest.defaultParameters["rsiPeriod"] == 14)
     #expect(manifest.defaultParameters["leverage"] == 2)
-    #expect(manifest.executableStrategyType == .doublePumpExhaustionShort)
+    #expect(manifest.executableStrategyType == .sweepReversalShort)
     let config = try manifest.makeDefaultConfiguration()
-    #expect(config.type == .doublePumpExhaustionShort)
-    #expect(config.interval == .fifteenMinutes)
+    #expect(config.type == .sweepReversalShort)
+    #expect(config.interval == .oneHour)
     #expect(config.parameters["atrPeriod"] == 14)
     #expect(config.parameters["leverage"] == 2)
     #expect(config.enabled == false)
@@ -87,13 +87,13 @@ func researchHandlerAliases() throws {
 func packageManifestFields() async throws {
     let fm = FileManager.default
     let root = fm.temporaryDirectory.appendingPathComponent("strategy-manifest-\(UUID().uuidString)", isDirectory: true)
-    let package = root.appendingPathComponent("double_pump_exhaustion_short", isDirectory: true)
+    let package = root.appendingPathComponent("sweep_reversal_short", isDirectory: true)
     try fm.createDirectory(at: package.appendingPathComponent("config"), withIntermediateDirectories: true)
     let manifest = """
-    { "schema_version": 1, "strategy_id": "double_pump_exhaustion_short", "package_id": "double_pump_exhaustion_short", "version": "2.0.0", "display_name": "DME 2", "runtime_handler": "doublePumpExhaustionShort", "lifecycle": "finalized" }
+    { "schema_version": 1, "strategy_id": "sweep_reversal_short", "package_id": "sweep_reversal_short", "version": "2.0.0", "display_name": "Sweep 2", "runtime_handler": "sweepReversalShort", "lifecycle": "finalized" }
     """.data(using: .utf8)!
     let config = """
-    { "strategy": "DOUBLE_PUMP_EXHAUSTION_SHORT", "version": "1.0.0", "display_name": "DME", "runtime": { "strategy_type": "doublePumpExhaustionShort" }, "signal_parameters": { "atr_period": 9 }, "position_management": { "leverage": 2.0 } }
+    { "strategy": "SWEEP_REVERSAL_SHORT", "version": "1.0.0", "display_name": "Sweep", "runtime": { "strategy_type": "sweepReversalShort" }, "signal_parameters": { "atr_period": 9 }, "position_management": { "leverage": 2.0 } }
     """.data(using: .utf8)!
     try fm.createDirectory(at: package, withIntermediateDirectories: true)
     try manifest.write(to: package.appendingPathComponent("manifest.json"))

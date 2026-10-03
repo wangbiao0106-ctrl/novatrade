@@ -17,45 +17,13 @@ func strategyScopesResolveSingleMultipleAndDynamicTargets() throws {
 }
 
 @Test
-func strategySpecificScopesDoNotReuseTheHot20Pool() {
+func sweepScopeUsesItsDedicatedPool() {
     let contracts = [
         ContractMarket(id: "SWEEP-USDT-SWAP", name: "SWEEP", baseCurrency: "SWEEP", quoteCurrency: "USDT", last: 1, changePercent: 5, volume24h: 80_000_000),
-        ContractMarket(id: "DME-USDT-SWAP", name: "DME", baseCurrency: "DME", quoteCurrency: "USDT", last: 1, changePercent: 101, volume24h: 10_000_000),
-        ContractMarket(id: "DME-LOW-VOLUME-USDT-SWAP", name: "DME low volume", baseCurrency: "DME-LOW-VOLUME", quoteCurrency: "USDT", last: 1, changePercent: 120, volume24h: 9_000_000),
     ]
 
     #expect(StrategyType.sweepReversalShort.defaultUniverseCategory == .sweepCandidates)
-    #expect(StrategyType.doublePumpExhaustionShort.defaultUniverseCategory == .doublePumpCandidates)
-    #expect(StrategyScope.dynamic(.doublePumpCandidates).resolvedInstrumentIDs(from: contracts) == ["DME-USDT-SWAP"])
-}
-
-@Test
-func paperStoreReportsAndRefreshesTheConcreteScanPool() async throws {
-    let directory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("novatrade-universe-cache-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-
-    let store = PaperTradingStore(directory: directory)
-    let config = StrategyConfig(name: "DME", scope: .dynamic(.doublePumpCandidates),
-                                interval: .fifteenMinutes, type: .doublePumpExhaustionShort)
-    _ = try await store.create(config)
-
-    let eligible = ContractMarket(id: "TARGET-USDT-SWAP", name: "TARGET", baseCurrency: "TARGET",
-                                  quoteCurrency: "USDT", last: 1, changePercent: 101, rollingChangePercent: 101, volume24h: 10_000_000)
-    let excluded = ContractMarket(id: "EXCLUDED-USDT-SWAP", name: "EXCLUDED", baseCurrency: "EXCLUDED",
-                                  quoteCurrency: "USDT", last: 1, changePercent: 101, rollingChangePercent: 101, volume24h: 9_000_000)
-    await store.refreshStrategyUniverse([eligible, excluded])
-    let first = await store.strategyUniverseTargets()
-    #expect(first.count == 1)
-    #expect(first[0].instrumentIDs == [eligible.id])
-    #expect(first[0].targetCount == 1)
-
-    let replacement = ContractMarket(id: "REPLACEMENT-USDT-SWAP", name: "REPLACEMENT", baseCurrency: "REPLACEMENT",
-                                     quoteCurrency: "USDT", last: 1, changePercent: 101, rollingChangePercent: 101, volume24h: 10_000_000)
-    await store.refreshStrategyUniverse([replacement])
-    let second = await store.strategyUniverseTargets()
-    #expect(second[0].instrumentIDs == [replacement.id])
-    #expect(second[0].instrumentIDs.contains(eligible.id) == false)
+    #expect(StrategyScope.dynamic(.sweepCandidates).resolvedInstrumentIDs(from: contracts) == ["SWEEP-USDT-SWAP"])
 }
 
 @Test
@@ -102,16 +70,6 @@ func unknownStrategyTypeDoesNotDiscardLedgerOrKnownStrategies() async throws {
     #expect((await store.allFills()).contains(where: { $0.orderID == orderID }))
     #expect((await store.riskSnapshot()).equity == 10_000)
     #expect((await store.status(for: orphanID))?.state == .paused)
-}
-
-@Test
-func storeCanonicalizesEveryRuntimeStrategyToItsOwnUniverse() async throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-universe-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let store = PaperTradingStore(directory: directory)
-
-    let dme = try await store.create(StrategyConfig(name: "DME", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .doublePumpExhaustionShort))
-    #expect(dme.scope == .dynamic(.doublePumpCandidates))
 }
 
 @Test("Strategy store keeps a user-selected leverage override")
@@ -226,7 +184,7 @@ func strategyStoreAllowsOneInstancePerRuleAndDeletesIt() async throws {
     let store = PaperTradingStore(directory: directory)
     #expect((await store.allStrategies()).isEmpty)
 
-    let config = StrategyConfig(name: "山寨币二次扫顶做空", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
+    let config = StrategyConfig(name: "山寨币二次扫顶", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
     _ = try await store.create(config)
     do {
         _ = try await store.create(StrategyConfig(name: "重复扫顶", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort))
@@ -253,7 +211,7 @@ func tradingBackendCannotRestartStrategyWhileAccountKillSwitchIsLatched() async 
     let risk = RiskEngine(limits: RiskLimits(maxDailyLossPercent: 5), initialEquity: 1_000)
     await risk.synchronizeStrategyCapital(1_000)
     let backend = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: risk)
-    let config = try await backend.createStrategy(StrategyConfig(name: "山寨币二次扫顶做空", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort))
+    let config = try await backend.createStrategy(StrategyConfig(name: "山寨币二次扫顶", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort))
     let lossTime = Date(timeIntervalSince1970: 1_700_000_000)
     await risk.record(realizedPnL: -60, now: lossTime)
 
@@ -286,18 +244,6 @@ func tradingBackendAllowsSavingPausedStrategyWhileAccountKillSwitchIsLatched() a
     #expect(!paused.enabled)
     #expect((await backend.strategies()).contains(where: { $0.id == paused.id }))
 
-    do {
-        _ = try await backend.createStrategy(StrategyConfig(
-            name: "熔断期间启动",
-            scope: .dynamic(.hotAltcoins),
-            interval: .fifteenMinutes,
-            type: .doublePumpExhaustionShort,
-            enabled: true
-        ))
-        Issue.record("expected enabled strategy creation to be blocked by the account kill switch")
-    } catch {
-        #expect(error.localizedDescription.contains("熔断"))
-    }
 }
 
 @Test
@@ -308,7 +254,7 @@ func deletingStrategyPersistsRemovalOfItsCapitalPool() async throws {
     let firstRisk = RiskEngine(initialEquity: 10_000)
     await firstRisk.synchronizeStrategyCapital(10_000)
     let first = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: firstRisk)
-    let config = StrategyConfig(name: "山寨币二次扫顶做空", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
+    let config = StrategyConfig(name: "山寨币二次扫顶", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort)
     let created = try await first.createStrategy(config)
     #expect((await first.strategyCapital()).contains { $0.strategyID == created.id })
     _ = try await first.deleteStrategy(created.id)
@@ -332,7 +278,6 @@ func strategyStoreDropsLegacyPerTradeRiskParameters() async throws {
     #expect(created.parameters["maxOpenRiskPercent"] == nil)
     #expect(created.parameters["maxConcurrentPositions"] == 1)
     #expect(StrategyType.sweepReversalShort.defaultParameters["maxOpenRiskPercent"] == nil)
-    #expect(StrategyType.doublePumpExhaustionShort.defaultParameters["maxOpenRiskPercent"] == nil)
     #expect(StrategyType.maxLossPerTradePercent == 15)
 }
 
@@ -580,13 +525,12 @@ func riskEngineEnforcesNotionalAndThrottleLimits() async {
 
 @Test
 func riskLimitsDefaultBreakerSitsAboveFullPoolSingleTradeLoss() {
-    // One strategy with the whole account as its pool can lose
-    // `maxLossPerTradePercent` on a single stop; the default daily breaker
-    // must leave headroom above that and the unresettable drawdown breaker
-    // stays off.
+    // Production uses a fixed 5% account breaker. The UI and backend cap a
+    // strategy pool so its worst single stop remains below that threshold.
     let limits = RiskLimits()
-    #expect(limits.maxDailyLossPercent == 20)
-    #expect(limits.maxDailyLossPercent > Decimal(StrategyType.maxLossPerTradePercent))
+    #expect(limits.maxDailyLossPercent == 5)
+    #expect(StrategyType.sweepReversalShort.maxCapitalPoolPercent > 33)
+    #expect(StrategyType.sweepReversalShort.maxCapitalPoolPercent < 34)
     #expect(limits.maxDrawdownPercent == 0)
 }
 
