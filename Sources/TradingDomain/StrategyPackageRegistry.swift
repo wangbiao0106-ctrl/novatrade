@@ -17,7 +17,7 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
     public let displayName: String
     public let englishName: String
     /// The executable adapter name.  Existing adapters use values such as
-    /// `hlsr`, `doublePumpExhaustionShort`, and `sweepReversalShort`.  A package may be
+    /// `doublePumpExhaustionShort` and `sweepReversalShort`.  A package may be
     /// installed before its adapter is shipped; it will then remain dormant.
     public let runtimeHandler: String
     public let sourceOfTruth: String?
@@ -27,6 +27,9 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
     public let maxRiskPercent: Double?
     public let defaultCooldownBars: Int?
     public let scope: String?
+    /// Legacy package metadata retained for decoding and catalog display. The
+    /// runtime ignores both fields and routes strategy orders from the
+    /// authenticated account mode.
     public let liveOrderMode: String?
     public let autoSubmitLiveOrders: Bool
     public let enabledByDefault: Bool
@@ -78,9 +81,9 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
         self.defaultCooldownBars = defaultCooldownBars
         self.scope = scope
         self.liveOrderMode = liveOrderMode
-        // Live order submission is opt-in even when a package contains an
-        // old or malformed truthy value.  The runtime still applies its own
-        // OKX demo/live safety gate.
+        // Retain this legacy metadata for backwards-compatible decoding. The
+        // runtime routes strategy orders from the connected account mode and
+        // never lets a package select or forbid paper/live execution.
         self.autoSubmitLiveOrders = autoSubmitLiveOrders
         self.enabledByDefault = enabledByDefault
         self.lifecycle = lifecycle
@@ -145,7 +148,6 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         let compact = trimmed.lowercased().filter { $0.isLetter || $0.isNumber }
         switch compact {
-        case "hlsr": return "hlsr"
         case "sweepreversalshort": return "sweepReversalShort"
         case "doublepumpexhaustionshort": return "doublePumpExhaustionShort"
         default: return trimmed
@@ -260,9 +262,6 @@ public actor StrategyPackageRegistry {
         let manifest = try Self.readManifest(at: url, fileManager: fileManager)
         if let lifecycle = manifest.lifecycle, lifecycle != "finalized" {
             throw StrategyPackageError.invalidPackage("只有 lifecycle=finalized 的实验定稿包才能安装：\(manifest.identifier)")
-        }
-        guard !manifest.autoSubmitLiveOrders else {
-            throw StrategyPackageError.invalidPackage("策略包不得启用自动实盘下单")
         }
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let destination = directory.appendingPathComponent(manifest.identifier, isDirectory: true)
@@ -389,14 +388,14 @@ public actor StrategyPackageRegistry {
             ?? object["risk_policy"] as? [String: Any] ?? object["portfolio"] as? [String: Any] ?? [:]
         let signal = object["signal_parameters"] as? [String: Any]
             ?? object["parameters"] as? [String: Any] ?? [:]
-        let identifier = string(runtime["strategy_type"])
-            ?? string(runtime["strategy_id"])
-            ?? string(object["strategy_id"])
+        let identifier = string(object["strategy_id"])
             ?? string(object["package_id"])
             ?? string(object["identifier"])
             ?? string(object["id"])
             ?? string(object["name"])
             ?? string(object["strategy"])
+            ?? string(runtime["strategy_id"])
+            ?? string(runtime["strategy_type"])
         guard let identifier else { throw StrategyPackageError.invalidManifest("缺少 strategy_type 或 identifier") }
         let display = string(object["display_name"])
             ?? string(object["name_zh"])
@@ -485,9 +484,11 @@ public actor StrategyPackageRegistry {
                                     defaultCooldownBars: package.defaultCooldownBars ?? config.defaultCooldownBars,
                                     scope: package.scope ?? config.scope,
                                     liveOrderMode: package.liveOrderMode ?? config.liveOrderMode,
-                                    // Package-level safety flags are
-                                    // authoritative; tuned config values can
-                                    // never opt in to live submission.
+                                    // Keep legacy execution metadata for
+                                    // decoding and catalog display only. The
+                                    // runtime chooses paper/live from the
+                                    // authenticated account mode; a package
+                                    // must not opt in to or forbid either mode.
                                     autoSubmitLiveOrders: package.autoSubmitLiveOrders,
                                     enabledByDefault: package.enabledByDefault,
                                     lifecycle: package.lifecycle)

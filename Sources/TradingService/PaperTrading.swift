@@ -11,8 +11,8 @@ public actor CandleStore {
         let key = "\(instrumentID):\(interval.rawValue)"
         var values = candlesByKey[key, default: []]
         // A stale REST snapshot or delayed WSS frame must not turn a confirmed
-        // bar back into an open one. An unconfirmed bar inside the history
-        // makes HLSR refuse to evaluate until it scrolls out of the window.
+        // bar back into an open one. An unconfirmed bar remains in the history
+        // until it scrolls out of the evaluation window.
         if let existing = values.first(where: { $0.timestamp == candle.timestamp }), existing.confirmed, !candle.confirmed {
             return
         }

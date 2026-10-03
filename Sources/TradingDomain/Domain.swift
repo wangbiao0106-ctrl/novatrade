@@ -298,9 +298,7 @@ public struct Candle: Codable, Equatable, Sendable, Identifiable {
     public let low: Decimal
     public let close: Decimal
     public let volume: Decimal
-    /// OKX `volCcyQuote` (row 7), in quote currency.  HLSR's 24h liquidity
-    /// gate must use this field rather than contract/base volume, and fails
-    /// closed when it is nil rather than substituting contract volume.
+    /// OKX `volCcyQuote` (row 7), in quote currency.
     public let quoteVolume: Decimal?
     public let confirmed: Bool
 
@@ -449,10 +447,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     case sweepReversalShort
     /// 日内翻倍后 15m 动能衰竭确认做空。
     case doublePumpExhaustionShort
-    /// High-Level Liquidity Sweep Reversal.  Keep the short identifier stable
-    /// because it is persisted in strategy files and used by the service
-    /// router; UI copy belongs in ``displayName``.
-    case hlsr
     /// Preserve a package identifier when its runtime handler is unavailable.
     /// Removing a package must never make the entire trading ledger undecodable.
     case external(String)
@@ -461,7 +455,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
         switch rawValue {
         case "sweepReversalShort": self = .sweepReversalShort
         case "doublePumpExhaustionShort": self = .doublePumpExhaustionShort
-        case "hlsr": self = .hlsr
         default: self = .external(rawValue)
         }
     }
@@ -470,7 +463,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
         switch self {
         case .sweepReversalShort: return "sweepReversalShort"
         case .doublePumpExhaustionShort: return "doublePumpExhaustionShort"
-        case .hlsr: return "hlsr"
         case .external(let identifier): return identifier
         }
     }
@@ -492,7 +484,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
 
     public static var allCases: [StrategyType] { availableCases }
 
-    public static var availableCases: [StrategyType] { [.sweepReversalShort, .hlsr, .doublePumpExhaustionShort] }
+    public static var availableCases: [StrategyType] { [.sweepReversalShort, .doublePumpExhaustionShort] }
 
     /// Stable machine-readable identifier. Keep this independent from UI copy.
     public var identifier: String { rawValue }
@@ -512,7 +504,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var defaultUniverseCategory: StrategyUniverseCategory {
         switch self {
         case .sweepReversalShort: return .sweepCandidates
-        case .hlsr: return .hlsrCandidates
         case .doublePumpExhaustionShort: return .doublePumpCandidates
         case .external: return .hotAltcoins
         }
@@ -523,7 +514,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var displayName: String {
         switch self {
         case .sweepReversalShort: return "山寨币二次扫顶做空"
-        case .hlsr: return "高位扫顶反转做空"
         case .doublePumpExhaustionShort: return "日内翻倍动能衰竭确认做空"
         case .external(let identifier): return identifier
         }
@@ -533,7 +523,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var englishName: String {
         switch self {
         case .sweepReversalShort: return "Sweep Reversal Short"
-        case .hlsr: return "High-Level Liquidity Sweep Reversal"
         case .doublePumpExhaustionShort: return "Double Pump Exhaustion Short"
         case .external(let identifier): return identifier
         }
@@ -557,40 +546,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "maxConcurrentPositions": 1,
                 "maxOpenRiskPercent": 10.0,
             ]
-        case .hlsr:
-            // Values mirror strategies/hlsr/config/strategy.json.  Boolean
-            // settings are represented as 0/1 because StrategyConfig's
-            // parameter bag is intentionally numeric for persistence and
-            // service-side overrides.
-            return [
-                "entryTimeframeMinutes": 15,
-                "structureTimeframeMinutes": 240,
-                "gain24hGt": 0.4,
-                "quoteVolume24hGt": 30_000_000,
-                "swingLookback": 6,
-                "wickRatio": 0.6,
-                "volumeMultiple": 1.0,
-                "minimumRejectionScore": 2,
-                "rejectDepthATR": 0.1,
-                "confirmationWindow": 4,
-                "stopATR": 0.25,
-                "trailBars": 2,
-                "allowRange": 1,
-                // `zone_required: "any"` has no numeric restriction; zero
-                // is the stable code understood by the runtime router.
-                "zoneRequiredCode": 0,
-                "leverage": 2,
-                "partialTarget1": 0.3,
-                "partialTarget2": 0.3,
-                "partialTarget3": 0.4,
-                "moveStopToEntryAfterTP1": 1,
-                "cooldownBars": 16,
-                "feeRateOneWay": 0.0006,
-                "slippage": 0.0002,
-                "fundingRate": 0,
-                "maxConcurrentPositions": 1,
-                "maxOpenRiskPercent": 10.0,
-            ]
         case .doublePumpExhaustionShort:
             return [
                 "atrPeriod": 14, "rsiPeriod": 14, "volumePeriod": 20,
@@ -608,7 +563,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// 总资产）。运行时会把用户输入收敛到这个上限。
     public var maxRiskPercent: Double {
         switch self {
-        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort: return 10.0
+        case .sweepReversalShort, .doublePumpExhaustionShort: return 10.0
         case .external: return 0
         }
     }
@@ -616,7 +571,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// 单笔止损风险预算默认值，同样以本策略资金池权益为基数。
     public var defaultRiskPercent: Double {
         switch self {
-        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort: return 10.0
+        case .sweepReversalShort, .doublePumpExhaustionShort: return 10.0
         case .external: return 0
         }
     }
@@ -625,7 +580,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// 每个实例同时只允许一个持仓，所以它与单笔预算相同。
     public var maxOpenRiskPercent: Double {
         switch self {
-        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort: return 10.0
+        case .sweepReversalShort, .doublePumpExhaustionShort: return 10.0
         case .external: return 0
         }
     }
@@ -637,8 +592,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
         switch self {
         case .sweepReversalShort:
             return "扫顶期间最高价 + 0.5 × ATR14，按每个信号计算"
-        case .hlsr:
-            return "扫顶高点 + 0.25 × ATR14；TP1 后移至开仓价，TP2 后跟踪最近 2 根 15 分钟高点"
         case .doublePumpExhaustionShort:
             return "确认 K 线高点 + 0.45 × ATR14"
         case .external:
@@ -651,8 +604,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
         switch self {
         case .sweepReversalShort:
             return "2.2R，按入场价与止损距离计算"
-        case .hlsr:
-            return "分三批 30% / 30% / 40%：最近支撑、4 小时区间中点（≥2R）、前主要低点（≥3R）"
         case .doublePumpExhaustionShort:
             return "1R，最长持有 24 根 15 分钟 K 线（6 小时）"
         case .external:
@@ -666,7 +617,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var signalCycleDescription: String {
         switch self {
         case .sweepReversalShort: return "1 小时结构 + 15 分钟收盘确认"
-        case .hlsr: return "15 分钟确认入场；4 小时判定市场状态"
         case .doublePumpExhaustionShort: return "15 分钟收盘确认；滚动 24 小时翻倍后生效"
         case .external: return "运行时处理器不可用"
         }
@@ -676,18 +626,17 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     public var signalCycleShortLabel: String {
         switch self {
         case .sweepReversalShort: return "1H + 15m"
-        case .hlsr: return "15m + 4H"
         case .doublePumpExhaustionShort: return "15m"
         case .external: return "--"
         }
     }
 
     /// The bar on which the runtime counts down `StrategyStatus.cooldown`.
-    /// All three rules execute on confirmed 15m bars, so the sweep rule's
+    /// Both short rules execute on confirmed 15m bars, so the sweep rule's
     /// 96 one-hour bars are tracked as 384 fifteen-minute steps.
     public var cooldownBarInterval: KlineInterval {
         switch self {
-        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort: return .fifteenMinutes
+        case .sweepReversalShort, .doublePumpExhaustionShort: return .fifteenMinutes
         case .external: return entryInterval
         }
     }
@@ -699,12 +648,10 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
         return "出场后 \(defaultCooldownBars) 根 \(entryInterval.displayName) K 线，约 \(TradingDurationText.describe(minutes: minutes))"
     }
 
-    /// Entry bars consumed by the runtime monitor.  HLSR evaluates its
-    /// structure on a separate completed 4H series, but all signal and order
-    /// events are driven by confirmed 15m bars.
+    /// Entry bars consumed by the runtime monitor.
     public var entryInterval: KlineInterval {
         switch self {
-        case .hlsr, .doublePumpExhaustionShort: return .fifteenMinutes
+        case .doublePumpExhaustionShort: return .fifteenMinutes
         case .sweepReversalShort, .external: return .oneHour
         }
     }
@@ -713,7 +660,7 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// exit.
     public var defaultCooldownBars: Int {
         switch self {
-        case .hlsr, .doublePumpExhaustionShort: return 16
+        case .doublePumpExhaustionShort: return 16
         case .sweepReversalShort: return 96
         case .external: return 0
         }
@@ -730,14 +677,12 @@ public enum StrategyScopeMode: String, Codable, CaseIterable, Sendable {
 public enum StrategyUniverseCategory: String, Codable, CaseIterable, Sendable {
     case hotAltcoins
     case sweepCandidates
-    case hlsrCandidates
     case doublePumpCandidates
 
     public var displayName: String {
         switch self {
         case .hotAltcoins: return "热门榜前 20 个山寨币"
         case .sweepCandidates: return "扫顶候选（24h 成交额前 100、≥300 万 USDT）"
-        case .hlsrCandidates: return "高位扫顶候选（24h 涨幅 >40%、成交额 >3000 万）"
         case .doublePumpCandidates: return "翻倍衰竭候选（24h 涨幅 >100%、成交额 ≥1000 万）"
         }
     }
@@ -747,7 +692,6 @@ public enum StrategyUniverseCategory: String, Codable, CaseIterable, Sendable {
         switch self {
         case .hotAltcoins: return "热门榜前 20"
         case .sweepCandidates: return "扫顶候选"
-        case .hlsrCandidates: return "高位扫顶候选"
         case .doublePumpCandidates: return "翻倍衰竭候选"
         }
     }
@@ -791,7 +735,7 @@ public struct StrategyScope: Codable, Equatable, Sendable {
                 return ranked.prefix(20).map(\.id)
             case .sweepCandidates:
                 return ranked.prefix(StrategyUniverseRules.sweepCandidateLimit).map(\.id)
-            case .hlsrCandidates, .doublePumpCandidates:
+            case .doublePumpCandidates:
                 return ranked.map(\.id)
             }
         }
@@ -806,10 +750,6 @@ public struct StrategyScope: Codable, Equatable, Sendable {
             return contracts
                 .filter(StrategyUniverseRules.isEligibleSweep)
                 .sorted { $0.volume24h > $1.volume24h }
-        case .hlsrCandidates:
-            return contracts
-                .filter(StrategyUniverseRules.isEligibleHLSR)
-                .sorted { $0.rollingChangePercent > $1.rollingChangePercent }
         case .doublePumpCandidates:
             return contracts
                 .filter(StrategyUniverseRules.isEligibleDoublePump)
@@ -972,8 +912,7 @@ public struct StrategySignal: Codable, Equatable, Sendable, Identifiable {
     /// 信号附带的止损/止盈价位（ATR 标定策略使用；固定百分比策略为 nil）
     public let stopPrice: Decimal?
     public let takePrice: Decimal?
-    /// Full HLSR exit plan. `takePrice` is TP1, used for the exchange
-    /// take-profit order.
+    /// Optional multi-target exit plan.
     public let takePrices: [Decimal]?
     public let targetFractions: [Decimal]?
     public let moveStopToEntryAfterTP1: Bool
@@ -1047,7 +986,8 @@ public struct PaperOrder: Codable, Equatable, Sendable, Identifiable {
     public let requestedAt: Date
     public let fillPrice: Decimal?
     public let status: String
-    /// OKX order id when this record was submitted to the demo account.
+    /// OKX order id when this record was submitted to the account selected by
+    /// the runtime (paper or live according to its authenticated profile).
     public let remoteOrderID: String?
     /// Exchange client order id of the submission. It is known before the
     /// order is sent, so a process that dies mid-submission can still resolve

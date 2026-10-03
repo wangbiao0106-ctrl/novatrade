@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""融合版回测：我的 resweep 信号 + HLSR 出场结构（三段止盈/分批/保本/移动止损）
+"""融合版回测：我的 resweep 信号 + 结构化出场（三段止盈/分批/保本/移动止损）
 
 对比基线：固定 2.2R + 96根时间离场（60笔/51.7%/1.69R/+0.37R）
 """
@@ -40,7 +40,7 @@ def collect_events():
 
 
 def fusion_exit(d, k, entry, ext, stop, risk, spec, max_hold, trail_bars, cost_ratio):
-    """HLSR 风格出场管理。spec: (mode, targets_mult, fracs, be_after_tp1, trail_after_tp2)
+    """结构化多目标出场管理。spec: (mode, targets_mult, fracs, be_after_tp1, trail_after_tp2)
     返回 (net_r, kind)"""
     h, l, c, o = d["h"], d["l"], d["c"], d["o"]
     n = len(c)

@@ -5,6 +5,6 @@
 - 规则真源：[STRATEGY.md](STRATEGY.md)
 - 机器配置：[config/strategy.json](config/strategy.json)
 - 研究证据：[research/README.md](research/README.md)
-- 状态：正式规则，已接入 Swift 纸面/模拟运行时，默认停用，未获自动实盘资格
+- 状态：正式规则，已接入 Swift 运行时，默认停用；启动后按连接账号类型路由模拟或实盘
 
 核心候选来自 `strategies/extreme_wick_short` 的 `grid_0580`。原研究报告和参数没有被覆盖；本目录只固定正式规则，便于后续单独做样本外验证和仿真盘验收；运行时只使用编译后的 Swift 默认参数。

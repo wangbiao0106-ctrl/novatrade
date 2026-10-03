@@ -58,11 +58,10 @@ spec/                               稳定的工程规范和接口约定
 
 | 目录 | 用途 | 状态 |
 | --- | --- | --- |
-| `strategies/hlsr/` | 高位扫顶反转及其 15 分钟回测 | 已接入 OKX 模拟盘执行层，默认禁用；`STRATEGY.md` 是人类规则真源、`config/strategy.json` 是机器参数真源（四个参数块都被源码读取）；三段退出状态机位于 `Sources/TradingService/HLSRPositionManager.swift` |
 | `strategies/sweep_reversal_short/` | 山寨币二次扫顶做空 | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.4）|
 | `strategies/ema_3line_pullback/` | EMA 20/60/120 回踩策略族历史研究（四方向） | 研究归档，不是规则真源，未接入运行时 |
 | `strategies/extreme_wick_short/` | 山寨日内涨幅超过 100% 的 15m 动能衰竭做空 | 研究候选，未接入运行时 |
-| `strategies/double_pump_exhaustion_short/` | 从翻倍动能衰竭研究中固定出的正式核心规则 | 正式规则；已接入纸面/模拟运行时，默认停用 |
+| `strategies/double_pump_exhaustion_short/` | 从翻倍动能衰竭研究中固定出的正式核心规则 | 正式规则；已接入运行时，按账号类型路由模拟或实盘，默认停用 |
 | `strategies/intraday_pump_retest_short/` | 山寨日内涨幅超过 60% 后高点回落、二次突涨缩量做空 | 研究候选，未接入运行时 |
 | `strategies/range_rejection_confirmation_short/` | 突破近期高点后的大实体阴线回落，确认跌破 EMA20 后做空 | 研究候选，未接入运行时 |
 

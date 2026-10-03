@@ -99,7 +99,8 @@
   },
   "runtime_integration": {
     "signal_generation": "implemented",
-    "entry_submission": "okx_demo_market_order",
+    "entry_submission": "okx_account_mode_market_order",
+    "order_routing": "account_mode",
     "protective_exit_orders": "implemented",
     "risk_distance_position_sizing": "implemented",
     "strategy_time_exit": "implemented",
@@ -108,7 +109,7 @@
     "cooldown_advances": "per_confirmed_bar",
     "per_instrument_status_isolation": true,
     "signal_ownership_check_before_submit": true,
-    "note": "动态扫描24h报价成交额前100、且成交额不低于300万USDT的合规山寨币；1h只建立二次扫顶结构，后续最多1小时等待首根符合条件的15m阴线收盘，随后从扫描结果中只选择一个币种以市价做空。入场按策略资金池权益和止损距离计算数量，并附带条件止损/止盈；运行时监控负责96根1h（384根15m）时间离场，账户级5% mark-to-market 熔断负责停止策略、撤单和全平。"
+    "note": "动态扫描24h报价成交额前100、且成交额不低于300万USDT的合规山寨币；1h只建立二次扫顶结构，后续最多1小时等待首根符合条件的15m阴线收盘，随后从扫描结果中只选择一个币种以市价做空。入场按策略资金池权益和止损距离计算数量，并附带条件止损/止盈；运行时按当前账户类型路由 OKX 模拟或实盘订单，监控负责96根1h（384根15m）时间离场，账户级5% mark-to-market 熔断负责停止策略、撤单和全平。"
   },
   "costs": {
     "fee_rate_one_way": 0.0005,

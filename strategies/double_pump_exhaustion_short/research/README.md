@@ -16,4 +16,4 @@ python3 strategies/extreme_wick_short/src/sample_expansion.py \
   --output-dir strategies/extreme_wick_short/results/return_maximization
 ```
 
-正式规则包已接入 Swift 纸面/模拟运行时并默认停用；申请真实交易资格前仍必须使用新的流动性门槛、实际成交偏离和新样本外数据重新验收。
+正式规则包已接入 Swift 运行时并默认停用；运行时按连接账号类型路由模拟或实盘。新的流动性门槛、实际成交偏离和样本外数据仍需在运营流程中验收，但不作为策略配置的交易模式限制。

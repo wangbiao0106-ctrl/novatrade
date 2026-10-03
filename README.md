@@ -59,56 +59,6 @@ python3 scripts/build_kline_cache.py
 
 缓存位于 `.cache/kline/okx/swap/`，属于可重建产物，不提交到仓库。原始数据仍保留在 `data/kline/okx/swap/5m/`。
 
-## 山寨币高位做空回测
-
-HLSR 回测只保留当前配置和可重建的输入，输出统一写入对应策略的 `results/` 目录。
-
-```bash
-python3 strategies/hlsr/src/altcoin_backtest.py --symbols 50 --min-trades 20 --end 2026-09-26T19:00:00+00:00
-```
-
-
-### 15分钟二次见顶版本
-
-`strategies/hlsr/src/altcoin_backtest.py` 现在默认执行180天15分钟回测：滚动96根K线硬性筛选24小时涨幅至少40%、24小时报价成交额至少3,000万 USDT 的 USDT 线性永续，比较前高收盘转弱、上影线反抽和跌破EMA后反抽失败三类入场时机，使用2倍杠杆、1R/2R/最终目标分批止盈和高点跟踪止损。候选池默认只接受从窗口起点开始、至少覆盖最初60天且连续无缺口的本地15分钟训练片段，并按这60天成交额排序；训练片段之后的缺口只在报告 `data_quality` 中标记，不影响选币，避免用测试期末的当前成交量选币。交互式探索若要允许当前 live 合约补齐，必须显式加 `--allow-live-selection-fallback`，报告会记录该选择前视。参数通过60天训练、30天验证、30天测试的三个滚动窗口选择，并输出Beta胜率区间和按标的/日期聚类Bootstrap的正收益概率。
-
-```bash
-python3 strategies/hlsr/src/altcoin_backtest.py --symbols 50 --min-trades 20 --end 2026-09-26T19:00:00+00:00
-python3 -m unittest strategies/hlsr/tests/test_altcoin_backtest.py
-```
-
-结果写入 `strategies/hlsr/results/`。当复合条件导致训练样本少于 `--min-trades` 时，程序仍输出报告并将对应折标记为未满足最小样本；这些结果可随时重建，不作为运行时数据。
-
-### HLSR — High-Level Liquidity Sweep Reversal（已接入 OKX 模拟盘）
-
-高位扫顶反转策略的稳定标识为 `hlsr`，界面显示“高位扫顶反转做空”。规则和流程图见 [`strategies/hlsr/STRATEGY.md`](strategies/hlsr/STRATEGY.md) 与 [`strategies/hlsr/DESIGN.md`](strategies/hlsr/DESIGN.md)，机器参数见 [`strategies/hlsr/config/strategy.json`](strategies/hlsr/config/strategy.json)。运行时位于 `Sources/TradingDomain/`、`Sources/TradingService/`、`Sources/TradingService/HLSRPositionManager.swift`、`Sources/OKXLocalD/` 与 `Sources/MacTraderApp/`，使用确认的 15m 入场和已完成的 4H 状态；默认禁用，可人工启用 OKX 模拟盘，不自动提交真实订单。
-
-```bash
-python3 strategies/hlsr/src/high_short_strategy.py --symbols 50 --days 180 --end 2026-09-26T19:00:00+00:00
-python3 -m unittest strategies/hlsr/tests/test_high_short_strategy.py
-```
-
-结果写入 `strategies/hlsr/results/`。默认只从经过完整性校验的本地历史缓存选标的；历史缓存不足时命令会停止。交互式探索若要用当前 live 成交额补齐，必须显式加入 `--allow-live-selection-fallback`，报告会记录选择前视。该策略的回测结果必须通过样本外交易数、胜率和平均净R门槛才会标记为 `PASS`。
-
-HLSR 的标准策略说明、参数配置和只读信号生成器分别位于：
-
-- `strategies/hlsr/STRATEGY.md`
-- `strategies/hlsr/config/strategy.json`
-- `strategies/hlsr/src/hlsr_signal_generator.py`
-
-运行时会验证 4H 至少 55 根连续历史、15m 与 4H K 线完整性和 `volCcyQuote` 报价成交额；确认后在下一根 15m 开盘估算市价入场，并管理 30%/30%/40% 三段目标、TP1 后保本、TP2 后跟踪止损、收盘失效和 16 根 15m 冷却。研究样本外结果为 **FAIL**（8 笔、37.5% 胜率、平均净 R +0.455），不能据此宣称策略已经盈利。
-
-信号生成器读取已确认的 5 分钟或 15 分钟 OHLCV 文件，自动聚合到 15 分钟，输出最近或全部历史信号；它不会连接交易所，也不会提交订单：
-
-```bash
-python3 strategies/hlsr/src/hlsr_signal_generator.py \
-  --input data/kline/okx/swap/5m/BEAT_USDT_SWAP_5m_20260331T065300Z_20260927T065300Z.jsonl.gz \
-  --symbol BEAT-USDT-SWAP \
-  --config strategies/hlsr/config/strategy.json
-```
-
-回测的 `--days` 至少为 180 天，以覆盖三个 60/30/30 天 walk-forward 折；`--end` 支持带时区的 ISO-8601 时间，也支持 `Z` 结尾。
-
 ## 山寨币二次扫顶做空（已集成）
 
 策略实验室中的 `sweep_reversal_short` 是当前规则的唯一来源：人类规则见 `strategies/sweep_reversal_short/STRATEGY.md`，机器参数见同目录 `config/strategy.json`。运行时策略依据该版本同步到 `Sources/`，不会读取研究目录。
@@ -122,7 +72,7 @@ python3 strategies/hlsr/src/hlsr_signal_generator.py \
 - 稳定策略标识：`sweepReversalShort`；UI 显示名称：`山寨币二次扫顶做空`
 - 运行范围：后台每 30 秒刷新行情，排除主流币、稳定币及非加密资产，剔除 24h 报价成交额低于 300 万 USDT 的合约后，按成交额动态扫描前 100 个 USDT 线性永续山寨币（`dynamic.sweepCandidates`）；177 个推荐标的只属于历史回测基线，不是固定运行名单
 - 门控数据流：`PaperTradingStore` 缓存 BTC 1H K 线，取不晚于信号时刻的最近已确认 bar；历史不足 200 根或无法对齐时门控不通过
-- UI：点击“添加”先从三张策略卡片选择规则，再配置 USDT 资金池和杠杆；内置策略默认 2 倍杠杆，可在 1–100 倍范围调整
+- UI：点击“添加”先从策略卡片选择规则，再配置 USDT 资金池和杠杆；内置策略默认 2 倍杠杆，可在 1–100 倍范围调整
 - 单元测试：`Tests/OKXGatewayTests/SweepReversalStrategyTests.swift`（含门控、假突破、15m 确认窗口边界、冷却幂等、跨标的信号隔离）
 - 研究与回测：已上线规则口径为 177 个历史快照 54 个结构 → 41 笔、胜率 56.1%、盈亏比 1.53R、期望 +0.37R/笔（复现入口 `strategies/sweep_reversal_short/research/report_live_rule.py`）；不代表动态榜单未来绩效
 
@@ -133,10 +83,10 @@ python3 strategies/hlsr/src/hlsr_signal_generator.py \
 在实验室调优后生成并校验定稿包，安装到应用数据目录：
 
 ```bash
-python3 scripts/strategy_package.py pack strategies/hlsr --output /tmp/hlsr-1.1.0.zip --version 1.1.0 --finalized
-python3 scripts/strategy_package.py install /tmp/hlsr-1.1.0.zip
+python3 scripts/strategy_package.py pack strategies/sweep_reversal_short --output /tmp/sweep-reversal-short-1.4.0.zip --version 1.4.0 --finalized
+python3 scripts/strategy_package.py install /tmp/sweep-reversal-short-1.4.0.zip
 python3 scripts/strategy_package.py list --json
-python3 scripts/strategy_package.py uninstall hlsr
+python3 scripts/strategy_package.py uninstall sweep_reversal_short
 ```
 
 本地服务也提供 `GET/POST/DELETE /api/v1/strategy-packages`，安装接口只接受状态目录下 `strategy-staging/` 的包目录；未知运行时处理器会安全保持暂停，不会影响已有账本。卸载前服务会检查运行实例、持仓并取消待成交挂单。

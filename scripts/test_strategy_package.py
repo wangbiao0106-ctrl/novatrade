@@ -15,17 +15,17 @@ except ModuleNotFoundError:
 
 class StrategyPackageTests(unittest.TestCase):
     def _lab(self, root: Path, version: str = "1.0.0") -> Path:
-        lab = root / "hlsr"
+        lab = root / "demo_strategy"
         (lab / "config").mkdir(parents=True)
-        (lab / "STRATEGY.md").write_text("# HLSR\n", encoding="utf-8")
+        (lab / "STRATEGY.md").write_text("# Demo strategy\n", encoding="utf-8")
         (lab / "README.md").write_text("lab\n", encoding="utf-8")
         (lab / "config" / "strategy.json").write_text(
             json.dumps(
                 {
-                    "strategy": "HLSR",
+                    "strategy": "DEMO_STRATEGY",
                     "version": version,
-                    "display_name": "高位扫顶反转做空",
-                    "source_of_truth": "strategies/hlsr/STRATEGY.md",
+                    "display_name": "Demo strategy",
+                    "source_of_truth": "strategies/demo_strategy/STRATEGY.md",
                 }
             ),
             encoding="utf-8",
@@ -36,21 +36,21 @@ class StrategyPackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             lab = self._lab(root)
-            package = root / "hlsr.zip"
+            package = root / "demo_strategy.zip"
             manifest = pack_strategy(lab, package, lifecycle="finalized")
-            self.assertEqual(manifest["strategy_id"], "hlsr")
+            self.assertEqual(manifest["strategy_id"], "demo_strategy")
             self.assertEqual(validate_package(package, require_finalized=True)["lifecycle"], "finalized")
             installed = root / "strategies"
             install_package(package, installed)
-            self.assertTrue((installed / "hlsr" / "config" / "strategy.json").is_file())
-            uninstall_package("hlsr", installed)
-            self.assertFalse((installed / "hlsr").exists())
-            self.assertNotIn("hlsr", json.loads((installed / "registry.json").read_text())["packages"])
+            self.assertTrue((installed / "demo_strategy" / "config" / "strategy.json").is_file())
+            uninstall_package("demo_strategy", installed)
+            self.assertFalse((installed / "demo_strategy").exists())
+            self.assertNotIn("demo_strategy", json.loads((installed / "registry.json").read_text())["packages"])
 
     def test_unfinalized_package_is_rejected_for_install(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            package = root / "hlsr.zip"
+            package = root / "demo_strategy.zip"
             pack_strategy(self._lab(root), package, lifecycle="candidate")
             with self.assertRaises(PackageError):
                 install_package(package, root / "strategies")
@@ -58,7 +58,7 @@ class StrategyPackageTests(unittest.TestCase):
     def test_tamper_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            package = root / "hlsr.zip"
+            package = root / "demo_strategy.zip"
             pack_strategy(self._lab(root), package, lifecycle="finalized")
             tampered = root / "tampered.zip"
             with zipfile.ZipFile(package) as source, zipfile.ZipFile(tampered, "w") as target:

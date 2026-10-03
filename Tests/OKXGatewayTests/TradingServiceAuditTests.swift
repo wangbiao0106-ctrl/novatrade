@@ -104,7 +104,7 @@ func strategyCreationPersistsOnlyRemainingUSDTAllocation() async throws {
     _ = try await backend.account()
 
     let first = try await backend.createStrategy(StrategyConfig(name: "第一策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 75))
-    let second = try await backend.createStrategy(StrategyConfig(name: "第二策略", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .hlsr, riskPercent: 0.5, capitalPoolPercent: 75))
+    let second = try await backend.createStrategy(StrategyConfig(name: "第二策略", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .doublePumpExhaustionShort, riskPercent: 0.5, capitalPoolPercent: 75))
     #expect(first.capitalPoolPercent == 75)
     #expect(second.capitalPoolPercent == 25)
     let pools = await risk.strategyCapitals()
@@ -124,7 +124,7 @@ func strategyCreationRejectsSubMinimumRemainingUSDTAllocation() async throws {
 
     _ = try await backend.createStrategy(StrategyConfig(name: "主策略", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, capitalPoolPercent: 99.95))
     await #expect(throws: ATKError.unavailable("USDT 资产已被其他策略占用，无法分配策略资金池")) {
-        _ = try await backend.createStrategy(StrategyConfig(name: "余量策略", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .hlsr, capitalPoolPercent: 1))
+        _ = try await backend.createStrategy(StrategyConfig(name: "余量策略", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .doublePumpExhaustionShort, capitalPoolPercent: 1))
     }
 }
 

@@ -97,11 +97,11 @@ func liveOrderPassesExplicitLiveFlagAndParsesResult() async throws {
 @Test
 func resolvesSwapOrderByClientIDAndTreatsOnlyExplicitNotFoundAsAbsent() async throws {
     let runner = StubATKRunner(outputs: [
-        "--demo swap get --instId BTC-USDT-SWAP --clOrdId hlsrleg1 --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","ordId":"remote-1","clOrdId":"hlsrleg1","side":"buy","state":"live","sz":"1","cTime":"1700000000000"}]"#),
+        "--demo swap get --instId BTC-USDT-SWAP --clOrdId clientleg1 --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","ordId":"remote-1","clOrdId":"clientleg1","side":"buy","state":"live","sz":"1","cTime":"1700000000000"}]"#),
         "--demo swap get --instId BTC-USDT-SWAP --clOrdId missing --json": ATKCommandResult(stdout: #"{"code":"51603","msg":"Order does not exist"}"#)
     ])
     let client = ATKClient(runner: runner)
-    let found = try await client.swapOrder(instrumentID: "BTC-USDT-SWAP", clientOrderID: "hlsrleg1", demo: true)
+    let found = try await client.swapOrder(instrumentID: "BTC-USDT-SWAP", clientOrderID: "clientleg1", demo: true)
     #expect(found?.id == "remote-1")
     let absent = try await client.swapOrder(instrumentID: "BTC-USDT-SWAP", clientOrderID: "missing", demo: true)
     #expect(absent == nil)

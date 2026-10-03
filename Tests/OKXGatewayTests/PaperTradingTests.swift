@@ -20,21 +20,12 @@ func strategyScopesResolveSingleMultipleAndDynamicTargets() throws {
 func strategySpecificScopesDoNotReuseTheHot20Pool() {
     let contracts = [
         ContractMarket(id: "SWEEP-USDT-SWAP", name: "SWEEP", baseCurrency: "SWEEP", quoteCurrency: "USDT", last: 1, changePercent: 5, volume24h: 80_000_000),
-        ContractMarket(id: "HLSR-USDT-SWAP", name: "HLSR", baseCurrency: "HLSR", quoteCurrency: "USDT", last: 1, changePercent: 41, volume24h: 31_000_001),
-        // SAND-like state after 08:00 Asia/Shanghai: the UTC-day move
-        // is negative, while rolling 24h gain still clears HLSR's gate.
-        ContractMarket(id: "SAND-USDT-SWAP", name: "SAND", baseCurrency: "SAND", quoteCurrency: "USDT", last: 1, changePercent: -2.3, rollingChangePercent: 43.8, volume24h: 369_622_000),
-        // A UTC-day-only mover must not enter the rolling-24h strategy pool.
-        ContractMarket(id: "DAILY-ONLY-USDT-SWAP", name: "DAILY-ONLY", baseCurrency: "DAILY-ONLY", quoteCurrency: "USDT", last: 1, changePercent: 55, rollingChangePercent: 20, volume24h: 40_000_000),
-        ContractMarket(id: "HLSR-LOW-VOLUME-USDT-SWAP", name: "HLSR low volume", baseCurrency: "HLSR-LOW-VOLUME", quoteCurrency: "USDT", last: 1, changePercent: 80, volume24h: 29_000_000),
         ContractMarket(id: "DME-USDT-SWAP", name: "DME", baseCurrency: "DME", quoteCurrency: "USDT", last: 1, changePercent: 101, volume24h: 10_000_000),
         ContractMarket(id: "DME-LOW-VOLUME-USDT-SWAP", name: "DME low volume", baseCurrency: "DME-LOW-VOLUME", quoteCurrency: "USDT", last: 1, changePercent: 120, volume24h: 9_000_000),
     ]
 
     #expect(StrategyType.sweepReversalShort.defaultUniverseCategory == .sweepCandidates)
-    #expect(StrategyType.hlsr.defaultUniverseCategory == .hlsrCandidates)
     #expect(StrategyType.doublePumpExhaustionShort.defaultUniverseCategory == .doublePumpCandidates)
-    #expect(StrategyScope.dynamic(.hlsrCandidates).resolvedInstrumentIDs(from: contracts) == ["SAND-USDT-SWAP", "HLSR-USDT-SWAP"])
     #expect(StrategyScope.dynamic(.doublePumpCandidates).resolvedInstrumentIDs(from: contracts) == ["DME-USDT-SWAP"])
 }
 
@@ -45,14 +36,14 @@ func paperStoreReportsAndRefreshesTheConcreteScanPool() async throws {
     defer { try? FileManager.default.removeItem(at: directory) }
 
     let store = PaperTradingStore(directory: directory)
-    let config = StrategyConfig(name: "HLSR", scope: .dynamic(.hlsrCandidates),
-                                interval: .fifteenMinutes, type: .hlsr)
+    let config = StrategyConfig(name: "DME", scope: .dynamic(.doublePumpCandidates),
+                                interval: .fifteenMinutes, type: .doublePumpExhaustionShort)
     _ = try await store.create(config)
 
     let eligible = ContractMarket(id: "TARGET-USDT-SWAP", name: "TARGET", baseCurrency: "TARGET",
-                                  quoteCurrency: "USDT", last: 1, changePercent: 55, volume24h: 40_000_000)
+                                  quoteCurrency: "USDT", last: 1, changePercent: 101, rollingChangePercent: 101, volume24h: 10_000_000)
     let excluded = ContractMarket(id: "EXCLUDED-USDT-SWAP", name: "EXCLUDED", baseCurrency: "EXCLUDED",
-                                  quoteCurrency: "USDT", last: 1, changePercent: 55, volume24h: 20_000_000)
+                                  quoteCurrency: "USDT", last: 1, changePercent: 101, rollingChangePercent: 101, volume24h: 9_000_000)
     await store.refreshStrategyUniverse([eligible, excluded])
     let first = await store.strategyUniverseTargets()
     #expect(first.count == 1)
@@ -60,7 +51,7 @@ func paperStoreReportsAndRefreshesTheConcreteScanPool() async throws {
     #expect(first[0].targetCount == 1)
 
     let replacement = ContractMarket(id: "REPLACEMENT-USDT-SWAP", name: "REPLACEMENT", baseCurrency: "REPLACEMENT",
-                                     quoteCurrency: "USDT", last: 1, changePercent: 60, volume24h: 50_000_000)
+                                     quoteCurrency: "USDT", last: 1, changePercent: 101, rollingChangePercent: 101, volume24h: 10_000_000)
     await store.refreshStrategyUniverse([replacement])
     let second = await store.strategyUniverseTargets()
     #expect(second[0].instrumentIDs == [replacement.id])
@@ -119,8 +110,6 @@ func storeCanonicalizesEveryRuntimeStrategyToItsOwnUniverse() async throws {
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = PaperTradingStore(directory: directory)
 
-    let hlsr = try await store.create(StrategyConfig(name: "HLSR", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .hlsr))
-    #expect(hlsr.scope == .dynamic(.hlsrCandidates))
     let dme = try await store.create(StrategyConfig(name: "DME", scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes, type: .doublePumpExhaustionShort))
     #expect(dme.scope == .dynamic(.doublePumpCandidates))
 }
@@ -302,7 +291,7 @@ func tradingBackendAllowsSavingPausedStrategyWhileAccountKillSwitchIsLatched() a
             name: "熔断期间启动",
             scope: .dynamic(.hotAltcoins),
             interval: .fifteenMinutes,
-            type: .hlsr,
+            type: .doublePumpExhaustionShort,
             enabled: true,
             riskPercent: 0.5
         ))

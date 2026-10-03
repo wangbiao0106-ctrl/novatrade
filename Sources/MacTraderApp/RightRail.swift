@@ -182,7 +182,7 @@ struct StrategyStatusModule: View {
             return label
         }
         switch config.type {
-        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort:
+        case .sweepReversalShort, .doublePumpExhaustionShort:
             return "做空"
         case .external:
             return "方向未知"

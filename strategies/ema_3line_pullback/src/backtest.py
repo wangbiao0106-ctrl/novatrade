@@ -204,7 +204,7 @@ def simulate(bs: list[Bar], name: str, p: dict, start: int, end: int, fee: float
             pending=i
         i+=1
     if pos:
-        # 窗口末端仍持仓：按本窗口最后一根收盘价标记离场（与正式目录/HLSR 的
+        # 窗口末端仍持仓：按本窗口最后一根收盘价标记离场（与正式目录的
         # window_end 口径一致）。此前直接丢弃，未结束的交易会从统计里消失。
         last=bs[limit-1]; px=last.c
         gross=(px-pos["entry"]) if side=="long" else (pos["entry"]-px)

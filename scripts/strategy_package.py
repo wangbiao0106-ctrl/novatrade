@@ -201,13 +201,9 @@ def _validate_manifest(manifest: Mapping[str, Any], package_dir: Path, require_f
     elif require_finalized and lifecycle != INSTALLABLE_LIFECYCLE:
         errors.append("只有 lifecycle=finalized 的实验定稿包才能安装")
 
-    # Package metadata can describe a rule, but it may never turn on live
-    # submission. The runtime has its own gate as a second line of defence.
-    runtime = manifest.get("runtime")
-    if isinstance(runtime, dict) and runtime.get("auto_submit_live_orders") is True:
-        errors.append("策略包不得启用自动实盘下单")
-    if manifest.get("auto_submit_live_orders") is True:
-        errors.append("策略包不得启用自动实盘下单")
+    # Execution mode belongs to the connected account. Keep accepting the
+    # legacy auto-submit field when present so older packages remain portable;
+    # the runtime ignores it and routes every strategy through account mode.
 
     # A package must carry the rule source and machine configuration.  The
     # manifest's artifact hashes make an imported package tamper evident.
@@ -499,9 +495,6 @@ def uninstall_package(strategy_id: str, strategies_dir: Path | str = DEFAULT_STR
 
 def _infer_strategy_id(strategy_dir: Path, config: Mapping[str, Any]) -> str:
     name = _normalise_identifier(str(config.get("strategy_id") or config.get("strategy") or strategy_dir.name))
-    # Historical configs use SWEEP_REVERSAL_SHORT/HLSR uppercase constants.
-    if name == "hlsr":
-        return "hlsr"
     return name
 
 
@@ -550,7 +543,7 @@ def pack_strategy(strategy_dir: Path | str, output: Path | str, lifecycle: str =
             "runtime_handler": strategy_id,
             "runtime": {
                 "strategy_type": strategy_id,
-                "auto_submit_live_orders": False,
+                "order_routing": "account_mode",
                 "enabled_by_default": False,
             },
             "lifecycle": lifecycle,

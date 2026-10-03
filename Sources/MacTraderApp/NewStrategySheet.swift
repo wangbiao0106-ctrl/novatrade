@@ -359,7 +359,6 @@ struct NewStrategySheet: View {
     private func strategyIcon(_ strategyType: StrategyType) -> String {
         switch strategyType {
         case .sweepReversalShort: return "arrow.down.right.and.arrow.up.left"
-        case .hlsr: return "waveform.path.ecg"
         case .doublePumpExhaustionShort: return "chart.bar.xaxis"
         case .external: return "questionmark"
         }
@@ -369,8 +368,6 @@ struct NewStrategySheet: View {
         switch strategyType {
         case .sweepReversalShort:
             return "找出冲高后第二次扫顶的币，确认转弱后做空。"
-        case .hlsr:
-            return "观察高位流动性扫顶，反转确认后分批做空并逐步止盈。"
         case .doublePumpExhaustionShort:
             return "观察滚动 24 小时翻倍后的 15 分钟冲高衰竭，确认收盘后做空。"
         case .external:
@@ -380,7 +377,7 @@ struct NewStrategySheet: View {
 
     private func orderTypeDescription(_ strategyType: StrategyType) -> String {
         switch strategyType {
-        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort:
+        case .sweepReversalShort, .doublePumpExhaustionShort:
             return "市价下单"
         case .external:
             return "不可用"
@@ -389,7 +386,7 @@ struct NewStrategySheet: View {
 
     private func orderTypeIcon(_ strategyType: StrategyType) -> String {
         switch strategyType {
-        case .sweepReversalShort, .hlsr, .doublePumpExhaustionShort: return "bolt.fill"
+        case .sweepReversalShort, .doublePumpExhaustionShort: return "bolt.fill"
         case .external: return "questionmark"
         }
     }
@@ -425,12 +422,12 @@ struct NewStrategySheet: View {
         "\(formatPercent(Decimal(percent))) 资金池 ≈ \(formatted(amount))"
     }
 
-    /// Strategy entries are only ever sent to the OKX demo account; the
-    /// footer says so in terms of the account that is actually connected.
+    /// Strategy entries follow the account selected in the connected OKX
+    /// profile. The strategy definition never chooses paper versus live.
     private var submissionTarget: (text: String, icon: String, color: Color) {
         switch model.accountOverview.mode {
-        case .paper: return ("仅提交至当前 OKX 模拟账户", "shield.checkered", .secondary)
-        case .live: return ("策略只向 OKX 模拟账户下单；当前连接的是实盘账户，策略不会提交订单", "exclamationmark.shield.fill", .orange)
+        case .paper: return ("按当前 OKX 模拟账户提交", "shield.checkered", .secondary)
+        case .live: return ("按当前 OKX 实盘账户提交", "bolt.shield.fill", .orange)
         case .readOnly: return ("当前账户只读，策略不会提交订单", "lock.shield", .orange)
         }
     }

@@ -19,12 +19,12 @@ src/、research/、tests/  # 可选，随实验定稿一起留档
 ```json
 {
   "schema_version": 1,
-  "package_id": "hlsr",
-  "strategy_id": "hlsr",
-  "version": "1.0.0",
-  "display_name": "高位扫顶反转做空",
+  "package_id": "sweep_reversal_short",
+  "strategy_id": "sweep_reversal_short",
+  "version": "1.4.0",
+  "display_name": "山寨币二次扫顶做空",
   "lifecycle": "finalized",
-  "source_of_truth": "strategies/hlsr/STRATEGY.md",
+  "source_of_truth": "strategies/sweep_reversal_short/STRATEGY.md",
   "artifacts": [
     {"path": "STRATEGY.md", "sha256": "<64 位十六进制摘要>"},
     {"path": "config/strategy.json", "sha256": "<64 位十六进制摘要>"}
@@ -40,15 +40,15 @@ src/、research/、tests/  # 可选，随实验定稿一起留档
 
 ```bash
 # 调优阶段：包可分享和校验，但不能导入运行时目录
-python3 scripts/strategy_package.py pack strategies/hlsr \
-  --output /tmp/hlsr-1.1.0.zip --version 1.1.0 --lifecycle candidate
-python3 scripts/strategy_package.py validate /tmp/hlsr-1.1.0.zip --allow-unfinalized
+python3 scripts/strategy_package.py pack strategies/sweep_reversal_short \
+  --output /tmp/sweep-reversal-short-1.4.0.zip --version 1.4.0 --lifecycle candidate
+python3 scripts/strategy_package.py validate /tmp/sweep-reversal-short-1.4.0.zip --allow-unfinalized
 
 # 实验定稿：明确标记后才能安装/升级
-python3 scripts/strategy_package.py pack strategies/hlsr \
-  --output /tmp/hlsr-1.1.0.zip --version 1.1.0 --finalized
-python3 scripts/strategy_package.py validate /tmp/hlsr-1.1.0.zip
-python3 scripts/strategy_package.py install /tmp/hlsr-1.1.0.zip
+python3 scripts/strategy_package.py pack strategies/sweep_reversal_short \
+  --output /tmp/sweep-reversal-short-1.4.0.zip --version 1.4.0 --finalized
+python3 scripts/strategy_package.py validate /tmp/sweep-reversal-short-1.4.0.zip
+python3 scripts/strategy_package.py install /tmp/sweep-reversal-short-1.4.0.zip
 ```
 
 安装同一策略的新版本会执行版本比较，拒绝降级和相同版本覆盖；确实要重建同版本包时显式加 `--force`。安装过程先写临时目录、重新校验，再原子替换旧目录，失败会恢复旧版本。
@@ -58,7 +58,7 @@ python3 scripts/strategy_package.py install /tmp/hlsr-1.1.0.zip
 
 ```bash
 python3 scripts/strategy_package.py list --json
-python3 scripts/strategy_package.py uninstall hlsr
+python3 scripts/strategy_package.py uninstall sweep_reversal_short
 ```
 
 卸载只触碰运行时包目录和注册表，不会删除实验室源目录或交易服务源码；运行时服务直接扫描应用数据目录发现可用策略。正在运行的交易实例必须先由交易服务停止并清理持仓，然后再卸载包。

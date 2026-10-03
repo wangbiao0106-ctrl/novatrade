@@ -13,8 +13,8 @@ func backendStrategyPackageLifecycle() async throws {
     try fm.createDirectory(at: staging.appendingPathComponent("config"), withIntermediateDirectories: true)
     let config = """
     {
-      "identifier": "hlsr", "version": "1.0.0", "display_name": "HLSR",
-      "runtime": { "strategy_type": "hlsr", "scope": "dynamic.hotAltcoins", "enabled_by_default": false },
+      "identifier": "double_pump_exhaustion_short", "version": "1.0.0", "display_name": "DME",
+      "runtime": { "runtime_handler": "doublePumpExhaustionShort", "scope": "dynamic.doublePumpCandidates", "enabled_by_default": false },
       "entry_timeframe_minutes": 15,
       "signal_parameters": { "swing_lookback": 6 }
     }
@@ -28,12 +28,12 @@ func backendStrategyPackageLifecycle() async throws {
     await risk.synchronizeStrategyCapital(100_000)
     let backend = TradingBackend(paper: paper, riskEngine: risk, strategyPackages: registry)
     let installed = try await backend.installStrategyPackage(StrategyPackageInstallRequest(path: "demo"))
-    #expect(installed.identifier == "hlsr")
+    #expect(installed.identifier == "double_pump_exhaustion_short")
     #expect((await backend.strategyPackageManifests()).count == 1)
-    let created = try await backend.createStrategyFromPackage(identifier: "hlsr")
-    #expect(created.type == .hlsr)
+    let created = try await backend.createStrategyFromPackage(identifier: "double_pump_exhaustion_short")
+    #expect(created.type == .doublePumpExhaustionShort)
     #expect(created.enabled == false)
-    _ = try await backend.uninstallStrategyPackage(identifier: "hlsr")
+    _ = try await backend.uninstallStrategyPackage(identifier: "double_pump_exhaustion_short")
     #expect((await backend.strategyPackageManifests()).isEmpty)
     #expect((await backend.strategies()).isEmpty)
 }

@@ -23,7 +23,7 @@ ENGINE_PATH = ROOT / "Sources" / "TradingService" / "StrategyEngine.swift"
 STREAM_PATH = ROOT / "Sources" / "OKXLocalD" / "main.swift"
 UNIVERSE_RULES_PATH = ROOT / "Sources" / "TradingDomain" / "StrategyUniverseRules.swift"
 SIGNAL_PATH = LAB / "research" / "live_signal.py"
-RUNTIME_STRATEGY_DIRS = {"sweep_reversal_short", "hlsr", "double_pump_exhaustion_short"}
+RUNTIME_STRATEGY_DIRS = {"sweep_reversal_short", "double_pump_exhaustion_short"}
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -73,8 +73,10 @@ def main() -> int:
         fail(errors, "生产执行周期必须是 1h 结构 + 15m 确认")
     if config.get("confirmation_window_minutes") != 60:
         fail(errors, "15m 确认窗口必须为 60 分钟")
-    if config.get("entry_submission") != "market" or integration.get("entry_submission") != "okx_demo_market_order":
-        fail(errors, "策略入场必须声明为市价提交")
+    if config.get("entry_submission") != "market" or integration.get("entry_submission") != "okx_account_mode_market_order":
+        fail(errors, "策略入场必须声明为按账户类型路由的市价提交")
+    if integration.get("order_routing") != "account_mode":
+        fail(errors, "策略入场路由必须由账户类型决定")
     if "first confirmed 15m close" not in config.get("confirmation_rule", ""):
         fail(errors, "策略配置未声明首根符合条件的 15m 收盘确认")
     if integration.get("protective_exit_orders") != "implemented":
@@ -128,7 +130,7 @@ def main() -> int:
     ):
         fail(errors, "策略资金池必须按实例隔离、只用已实现盈亏滚仓且禁止浮盈释放或跨池借用")
 
-    if not re.search(r"availableCases\s*:.*\.sweepReversalShort.*\.hlsr.*\.doublePumpExhaustionShort", domain, re.DOTALL):
+    if not re.search(r"availableCases\s*:.*\.sweepReversalShort.*\.doublePumpExhaustionShort", domain, re.DOTALL):
         fail(errors, "StrategyType.availableCases 未包含全部已集成策略")
     if re.search(r"emaAltcoin|双均线交易山寨币做多", "".join(
             path.read_text() for path in sorted((ROOT / "Sources").rglob("*.swift")))):
@@ -350,26 +352,6 @@ def main() -> int:
         fail(errors, "实验室实时扫描器默认池不是 live（生产选币范围）")
     if 'json.load(handle)["runtime_universe"]' not in live_signal:
         fail(errors, "实验室实时扫描器未从 config.runtime_universe 读取生产选币范围")
-    # HLSR 的机器参数必须来自 config/strategy.json：此前 generator/backtest 各自
-    # 硬编码 40%/3000万/冷却16/杠杆2.0/分批30-30-40，改配置没有任何效果。
-    hlsr_lab = ROOT / "strategies" / "hlsr"
-    if not (hlsr_lab / "config" / "strategy.json").is_file():
-        fail(errors, "HLSR 缺少 config/strategy.json 机器参数真源")
-    for name in ("high_short_strategy.py", "hlsr_signal_generator.py", "hlsr_market_export.py"):
-        source = (hlsr_lab / "src" / name).read_text()
-        if "load_lab_config" not in source:
-            fail(errors, f"hlsr/src/{name} 未读取 config/strategy.json")
-        # 只针对"判定/记账处"的硬编码：兜底默认值集中在 high_short_strategy 里，
-        # 不参与任何判定。
-        for literal in ("<= 30_000_000", "> 30_000_000", "<= 0.40", "* 1.40",
-                        "cooldown = confirmation_index + 16", "leverage=2.0"):
-            if literal in source:
-                fail(errors, f"hlsr/src/{name} 仍在判定处硬编码 {literal}（应取自配置）")
-    if "def acceptance_criteria" not in (hlsr_lab / "src" / "high_short_strategy.py").read_text():
-        fail(errors, "HLSR 缺少唯一的接受标准实现 acceptance_criteria")
-    market = (hlsr_lab / "src" / "hlsr_market_export.py").read_text()
-    if "parameter_grid(" not in market or "export_grid" in market:
-        fail(errors, "HLSR 的市场导出与回测未共用同一套参数网格")
     # 分层证据必须能由已上线规则复现：静态分层 + 因果（按入场时点排名）两个入口，
     # 规范里要指向产物，否则旧的 1h 基线数字会被当成现行结论。
     report_rule = (LAB / "research" / "report_live_rule.py").read_text()
@@ -459,7 +441,7 @@ def main() -> int:
     # convention used when that report was produced and is not a live config.
     strategy_dirs = [
         ROOT / "strategies" / name for name in (
-            "sweep_reversal_short", "hlsr", "intraday_pump_retest_short",
+            "sweep_reversal_short", "intraday_pump_retest_short",
             "extreme_wick_short", "double_pump_exhaustion_short",
             "ema_3line_pullback",
         )
@@ -501,14 +483,13 @@ def main() -> int:
     try:
         dme_config = json.loads(dme_config_path.read_text())
         dme_runtime = dme_config.get("runtime", {})
-        if dme_config.get("status") != "finalized" or dme_config.get("runtime_integration") != "implemented_paper_only":
-            fail(errors, "DME 策略必须标记为 finalized 且仅纸面运行时")
+        if dme_config.get("status") != "finalized" or dme_config.get("runtime_integration") != "implemented":
+            fail(errors, "DME 策略必须标记为 finalized 且已接入运行时")
         for key, want in {
             "strategy_type": "doublePumpExhaustionShort",
             "scope": "dynamic.doublePumpCandidates",
             "evaluation_interval": "confirmed_15m_close",
-            "live_order_mode": "paper_only",
-            "auto_submit_live_orders": False,
+            "order_routing": "account_mode",
             "enabled_by_default": False,
             "max_open_risk_pct": 10.0,
         }.items():
@@ -520,172 +501,12 @@ def main() -> int:
         fail(errors, "DME 未注册领域层和 StrategyEngine 运行时处理器")
     if "isEligibleDoublePump" not in universe_rules or "doublePumpCandidates" not in domain or "strategyUniverseTargets" not in stream or "targetsByStrategy" not in stream:
         fail(errors, "DME 未接入策略专属的 10m USDT 报价成交额标的监控缓存")
-    if "isEligibleHLSR" not in universe_rules or "hlsrCandidates" not in domain:
-        fail(errors, "HLSR 未接入策略专属的涨幅和报价成交额标的监控")
-
-    # HLSR（高位扫顶反转）是独立的 15m + 4H 策略。实验室规则仍然是
-    # 唯一真源，但接入后必须由领域层、信号引擎、服务和前台共同注册；
-    # 这里检查集成契约，避免只改了名称或只加了一个 UI 选项。
-    hlsr_lab = ROOT / "strategies" / "hlsr"
-    hlsr_config_path = hlsr_lab / "config" / "strategy.json"
-    try:
-        hlsr_config = json.loads(hlsr_config_path.read_text())
-    except Exception as exc:
-        fail(errors, f"无法读取 HLSR config/strategy.json：{exc}")
-        hlsr_config = {}
-    if hlsr_config:
-        expected_metadata = {
-            "strategy": "HLSR",
-            "version": "1.0",
-            "name_zh": "高位扫顶反转",
-            "display_name": "高位扫顶反转做空",
-            "name_en": "High-Level Liquidity Sweep Reversal",
-            "source_of_truth": "strategies/hlsr/STRATEGY.md",
-            "status": "implemented_paper_demo",
-            "runtime_integration": "implemented_paper_demo",
-        }
-        for key, want in expected_metadata.items():
-            if hlsr_config.get(key) != want:
-                fail(errors, f"HLSR config.{key} 必须是 {want!r}")
-        runtime = hlsr_config.get("runtime", {})
-        runtime_expectations = {
-            "strategy_type": "hlsr",
-            "scope": "dynamic.hlsrCandidates",
-            "universe_refresh_seconds": 30,
-            "evaluation_interval": "confirmed_15m_close",
-            "higher_timeframe": "4H",
-            "higher_timeframe_minimum_history_bars": 55,
-            "entry_order": "next_15m_open_market",
-            "max_concurrent_positions": 1,
-            "one_position_per_symbol": True,
-            "one_active_symbol_per_strategy": True,
-            "live_order_mode": "okx_demo_only",
-            "auto_submit_live_orders": False,
-            "quote_volume_required": True,
-            "quote_volume_field": "volCcyQuote",
-        }
-        for key, want in runtime_expectations.items():
-            if runtime.get(key) != want:
-                fail(errors, f"HLSR runtime.{key} 必须是 {want!r}")
-        if hlsr_config.get("entry_timeframe_minutes") != 15 or hlsr_config.get("confirmation_timeframe_minutes") != 15:
-            fail(errors, "HLSR 必须使用 15m 入场和确认周期")
-        if hlsr_config.get("higher_timeframe_minutes") != 240:
-            fail(errors, "HLSR 高周期必须是 4H（240 分钟）")
-        if hlsr_config.get("candle_timestamp") != "bar_open_time" or hlsr_config.get("confirmation_window_origin") != "sweep_bar_close":
-            fail(errors, "HLSR 未声明 K 线开盘时间戳和扫顶 bar 收盘后的确认窗口")
-        hlsr_position = hlsr_config.get("position_management", {})
-        for key, want in {
-            "leverage": 2.0,
-            "partial_targets": [0.3, 0.3, 0.4],
-            "move_stop_to_entry_after_tp1": True,
-            "cooldown_bars": 16,
-            "risk_per_trade_pct": 10.0,
-            "risk_per_trade_max_pct": 10.0,
-            "max_concurrent_positions": 1,
-            "max_open_risk_percent": 10.0,
-        }.items():
-            if hlsr_position.get(key) != want:
-                fail(errors, f"HLSR position_management.{key} 未同步规则真源")
-        # Numeric defaults are copied into StrategyType.defaultParameters so
-        # new instances use the same machine source without reading the lab at
-        # runtime. Compare every scalar that participates in signal or exit
-        # evaluation; the three fractions are checked above as a list.
-        try:
-            hlsr_defaults = swift_default_parameters("case .hlsr:")
-            hlsr_lab_values = {
-                "entry_timeframe_minutes": hlsr_config.get("entry_timeframe_minutes"),
-                "higher_timeframe_minutes": hlsr_config.get("higher_timeframe_minutes"),
-                **hlsr_config.get("hard_filters", {}),
-                **hlsr_config.get("signal_parameters", {}),
-                "leverage": hlsr_position.get("leverage"),
-                "move_stop_to_entry_after_tp1": hlsr_position.get("move_stop_to_entry_after_tp1"),
-                "cooldown_bars": hlsr_position.get("cooldown_bars"),
-                "fee_rate_one_way": hlsr_config.get("costs", {}).get("fee_rate_one_way"),
-                "slippage": hlsr_config.get("costs", {}).get("slippage"),
-                "funding_rate": hlsr_config.get("costs", {}).get("funding_rate"),
-                "max_open_risk_percent": hlsr_position.get("max_open_risk_percent"),
-            }
-            hlsr_mapping = {
-                "entry_timeframe_minutes": ("entryTimeframeMinutes", 1),
-                "higher_timeframe_minutes": ("structureTimeframeMinutes", 1),
-                "gain_24h_gt": ("gain24hGt", 1),
-                "quote_volume_24h_gt": ("quoteVolume24hGt", 1),
-                "swing_lookback": ("swingLookback", 1),
-                "wick_ratio": ("wickRatio", 1),
-                "volume_multiple": ("volumeMultiple", 1),
-                "minimum_rejection_score": ("minimumRejectionScore", 1),
-                "reject_depth_atr": ("rejectDepthATR", 1),
-                "confirmation_window": ("confirmationWindow", 1),
-                "stop_atr": ("stopATR", 1),
-                "trail_bars": ("trailBars", 1),
-                "allow_range": ("allowRange", 1),
-                "leverage": ("leverage", 1),
-                "move_stop_to_entry_after_tp1": ("moveStopToEntryAfterTP1", 1),
-                "cooldown_bars": ("cooldownBars", 1),
-                "fee_rate_one_way": ("feeRateOneWay", 1),
-                "slippage": ("slippage", 1),
-                "funding_rate": ("fundingRate", 1),
-                "max_open_risk_percent": ("maxOpenRiskPercent", 1),
-            }
-            compare_parameters("HLSR", hlsr_lab_values, hlsr_defaults, hlsr_mapping)
-        except (ValueError, IndexError) as exc:
-            fail(errors, f"无法读取 StrategyType.hlsr 默认参数：{exc}")
-        if hlsr_config.get("validation", {}).get("research_status") != "FAIL":
-            fail(errors, "HLSR 必须保留样本外研究 FAIL 局限")
-
-        hlsr_manager_path = ROOT / "Sources" / "TradingService" / "HLSRPositionManager.swift"
-        if not hlsr_manager_path.is_file():
-            fail(errors, "HLSR 缺少 Sources/TradingService/HLSRPositionManager.swift 退出状态机")
-            hlsr_manager = ""
-        else:
-            hlsr_manager = hlsr_manager_path.read_text()
-        hlsr_sources = (domain, engine, service_source, main_source, stream, hlsr_manager)
-        hlsr_runtime_sources = "\n".join(hlsr_sources)
-        if not re.search(r"case\s+\.hlsr|\.hlsr\b", hlsr_runtime_sources):
-            fail(errors, "StrategyType.availableCases 未注册 HLSR（hlsr）")
-        if not re.search(r"evaluate(?:HLSR|Hlsr|HighShort)", engine):
-            fail(errors, "StrategyEngine 未接入 HLSR 信号评估入口")
-        if "高位扫顶反转做空" not in domain or "selectedRule.displayName" not in main_source:
-            fail(errors, "HLSR 中文显示名未同步到领域层和前台")
-        if "High-Level Liquidity Sweep Reversal" not in domain + main_source:
-            fail(errors, "HLSR 英文稳定名称未保留在运行时元数据")
-        if "fifteenMinutes" not in hlsr_runtime_sources or "fourHours" not in hlsr_runtime_sources:
-            fail(errors, "HLSR 运行时未同时订阅 15m 和 4H 数据")
-        if "quoteVolume" not in hlsr_runtime_sources and "volCcyQuote" not in hlsr_runtime_sources:
-            fail(errors, "HLSR 运行时未接入报价成交额字段（quoteVolume/volCcyQuote）")
-        if "config.type == .hlsr ? nil" in service_source and "config.type == .hlsr ||" not in service_source:
-            fail(errors, "HLSR 三段目标由监控管理时，入场下单仍被单一 takePrice guard 错误拒绝")
-        if not re.search(r"55|minimum.*History.*4H|higher.*History", hlsr_runtime_sources, re.IGNORECASE):
-            fail(errors, "HLSR 运行时未执行 4H 至少 55 根历史暖机")
-        if "partial" not in hlsr_runtime_sources.lower() or not re.search(r"break.?even|stop.?to.?entry|保本", hlsr_runtime_sources, re.IGNORECASE):
-            fail(errors, "HLSR 运行时未接入分批目标和 TP1 后保本")
-        if not re.search(r"trail|跟踪", hlsr_runtime_sources, re.IGNORECASE):
-            fail(errors, "HLSR 运行时未接入 TP2 后跟踪止损")
-        if "cooldown" not in hlsr_runtime_sources.lower() or "16" not in hlsr_runtime_sources:
-            fail(errors, "HLSR 运行时未接入 16 根 15m 冷却")
-        if "struct HLSRPositionManager" not in hlsr_manager or "PendingReduceOnlyLeg" not in hlsr_manager:
-            fail(errors, "HLSR 退出状态机未持久化 reduce-only leg 状态")
-        for name in ("high_short_strategy.py", "hlsr_signal_generator.py", "hlsr_market_export.py"):
-            source = (hlsr_lab / "src" / name).read_text()
-            if "load_lab_config" not in source and "LabConfig.load" not in source:
-                fail(errors, f"hlsr/src/{name} 未读取 config/strategy.json")
-
-        hlsr_doc = (hlsr_lab / "STRATEGY.md").read_text()
-        hlsr_readme = (hlsr_lab / "README.md").read_text()
-        for document, label in ((hlsr_doc, "hlsr/STRATEGY.md"), (hlsr_readme, "hlsr/README.md")):
-            if "高位扫顶反转" not in document or "高位扫顶反转做空" not in document:
-                fail(errors, f"{label} 未统一 HLSR 中文名称")
-            if "paper" not in document and "模拟盘" not in document:
-                fail(errors, f"{label} 未说明 HLSR 纸面/模拟盘执行边界")
-            if "FAIL" not in document:
-                fail(errors, f"{label} 未保留研究 FAIL 局限")
-
     if errors:
         print("策略实验室同步检查失败：")
         for error in errors:
             print(f"- {error}")
         return 1
-    print("策略实验室与运行时代码同步检查通过（运行时策略 10% 资金池风险契约 + sweep v1.4 + HLSR 1.0 + DME 1.0）")
+    print("策略实验室与运行时代码同步检查通过（运行时策略 10% 资金池风险契约 + sweep v1.4 + DME 1.0）")
     return 0
 
 

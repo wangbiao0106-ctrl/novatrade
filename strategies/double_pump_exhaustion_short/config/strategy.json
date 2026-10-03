@@ -5,7 +5,7 @@
   "name_en": "Double Pump Exhaustion Short",
   "source_of_truth": "strategies/double_pump_exhaustion_short/STRATEGY.md",
   "status": "finalized",
-  "runtime_integration": "implemented_paper_only",
+  "runtime_integration": "implemented",
   "market": "OKX_USDT_LINEAR_PERPETUAL",
   "input_timeframe_minutes": 5,
   "entry_timeframe_minutes": 15,
@@ -98,8 +98,7 @@
     "max_open_risk_pct": 10.0,
     "one_position_per_symbol": true,
     "one_active_symbol_per_strategy": true,
-    "live_order_mode": "paper_only",
-    "auto_submit_live_orders": false,
+    "order_routing": "account_mode",
     "enabled_by_default": false,
     "quote_volume_required": true,
     "quote_volume_field": "volCcyQuote"

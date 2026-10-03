@@ -14,8 +14,6 @@ public enum StrategyUniverseRules {
     /// quote-volume floor, then keep the top `limit` by 24h quote volume.
     public static let sweepCandidateLimit = 100
     public static let sweepMinimumQuoteVolume24h: Decimal = 3_000_000
-    public static let hlsrMinimumGainPercent: Decimal = 40
-    public static let hlsrMinimumQuoteVolume24h: Decimal = 30_000_000
     public static let doublePumpMinimumGainPercent: Decimal = 100
     public static let doublePumpMinimumQuoteVolume24h: Decimal = 10_000_000
     public static let mainstreamSymbols: Set<String> = [
@@ -70,9 +68,4 @@ public enum StrategyUniverseRules {
             && contract.volume24h >= doublePumpMinimumQuoteVolume24h
     }
 
-    public static func isEligibleHLSR(_ contract: ContractMarket) -> Bool {
-        isEligibleHotAltcoin(contract)
-            && contract.rollingChangePercent > hlsrMinimumGainPercent
-            && contract.volume24h > hlsrMinimumQuoteVolume24h
-    }
 }

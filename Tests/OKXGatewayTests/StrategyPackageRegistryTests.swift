@@ -7,34 +7,34 @@ import Testing
 func experimentManifestIsParsed() throws {
     let json = """
     {
-      "strategy": "HLSR",
+      "strategy": "DOUBLE_PUMP_EXHAUSTION_SHORT",
       "version": "1.0",
-      "name_zh": "高位扫顶反转",
-      "display_name": "高位扫顶反转做空",
-      "name_en": "High-Level Liquidity Sweep Reversal",
+      "name_zh": "日内翻倍动能衰竭确认做空",
+      "display_name": "日内翻倍动能衰竭确认做空",
+      "name_en": "Double Pump Exhaustion Short",
       "runtime": {
-        "strategy_type": "hlsr",
-        "scope": "dynamic.hotAltcoins",
+        "strategy_type": "doublePumpExhaustionShort",
+        "scope": "dynamic.doublePumpCandidates",
         "auto_submit_live_orders": false
       },
       "entry_timeframe_minutes": 15,
-      "signal_parameters": { "swing_lookback": 6, "allow_range": true },
+      "signal_parameters": { "atr_period": 14, "rsi_period": 14 },
       "position_management": { "leverage": 2.0, "risk_per_trade_pct": 1.0, "risk_per_trade_max_pct": 1.0, "cooldown_bars": 16 }
     }
     """.data(using: .utf8)!
     let manifest = try StrategyPackageRegistry.decodeManifest(json)
-    #expect(manifest.identifier == "hlsr")
-    #expect(manifest.runtimeHandler == "hlsr")
-    #expect(manifest.displayName == "高位扫顶反转做空")
+    #expect(manifest.identifier == "double_pump_exhaustion_short")
+    #expect(manifest.runtimeHandler == "doublePumpExhaustionShort")
+    #expect(manifest.displayName == "日内翻倍动能衰竭确认做空")
     #expect(manifest.entryTimeframeMinutes == 15)
-    #expect(manifest.defaultParameters["swingLookback"] == 6)
-    #expect(manifest.defaultParameters["allowRange"] == 1)
+    #expect(manifest.defaultParameters["atrPeriod"] == 14)
+    #expect(manifest.defaultParameters["rsiPeriod"] == 14)
     #expect(manifest.defaultParameters["leverage"] == 2)
-    #expect(manifest.executableStrategyType == .hlsr)
+    #expect(manifest.executableStrategyType == .doublePumpExhaustionShort)
     let config = try manifest.makeDefaultConfiguration()
-    #expect(config.type == .hlsr)
+    #expect(config.type == .doublePumpExhaustionShort)
     #expect(config.interval == .fifteenMinutes)
-    #expect(config.parameters["swingLookback"] == 6)
+    #expect(config.parameters["atrPeriod"] == 14)
     #expect(config.parameters["leverage"] == 2)
     #expect(config.enabled == false)
 }
@@ -43,7 +43,7 @@ func experimentManifestIsParsed() throws {
 func packageInstallAndUninstall() async throws {
     let fm = FileManager.default
     let root = fm.temporaryDirectory.appendingPathComponent("strategy-registry-\(UUID().uuidString)", isDirectory: true)
-    let source = root.appendingPathComponent("hlsr", isDirectory: true)
+    let source = root.appendingPathComponent("demo", isDirectory: true)
     let installed = root.appendingPathComponent("installed", isDirectory: true)
     try fm.createDirectory(at: source.appendingPathComponent("config"), withIntermediateDirectories: true)
     let json = """
@@ -87,13 +87,13 @@ func researchHandlerAliases() throws {
 func packageManifestFields() async throws {
     let fm = FileManager.default
     let root = fm.temporaryDirectory.appendingPathComponent("strategy-manifest-\(UUID().uuidString)", isDirectory: true)
-    let package = root.appendingPathComponent("hlsr", isDirectory: true)
+    let package = root.appendingPathComponent("double_pump_exhaustion_short", isDirectory: true)
     try fm.createDirectory(at: package.appendingPathComponent("config"), withIntermediateDirectories: true)
     let manifest = """
-    { "schema_version": 1, "strategy_id": "hlsr", "package_id": "hlsr", "version": "2.0.0", "display_name": "HLSR 2", "runtime_handler": "hlsr", "lifecycle": "finalized" }
+    { "schema_version": 1, "strategy_id": "double_pump_exhaustion_short", "package_id": "double_pump_exhaustion_short", "version": "2.0.0", "display_name": "DME 2", "runtime_handler": "doublePumpExhaustionShort", "lifecycle": "finalized" }
     """.data(using: .utf8)!
     let config = """
-    { "strategy": "HLSR", "version": "1.0.0", "display_name": "HLSR", "runtime": { "strategy_type": "hlsr" }, "signal_parameters": { "swing_lookback": 9 }, "position_management": { "leverage": 2.0 } }
+    { "strategy": "DOUBLE_PUMP_EXHAUSTION_SHORT", "version": "1.0.0", "display_name": "DME", "runtime": { "strategy_type": "doublePumpExhaustionShort" }, "signal_parameters": { "atr_period": 9 }, "position_management": { "leverage": 2.0 } }
     """.data(using: .utf8)!
     try fm.createDirectory(at: package, withIntermediateDirectories: true)
     try manifest.write(to: package.appendingPathComponent("manifest.json"))
@@ -103,7 +103,7 @@ func packageManifestFields() async throws {
     let installed = try await registry.install(package: package)
     #expect(installed.manifest.lifecycle == "finalized")
     #expect(installed.manifest.version == "2.0.0")
-    #expect(installed.manifest.defaultParameters["swingLookback"] == 9)
+    #expect(installed.manifest.defaultParameters["atrPeriod"] == 9)
     #expect(installed.manifest.defaultParameters["leverage"] == 2)
 }
 
