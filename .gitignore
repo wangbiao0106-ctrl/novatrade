@@ -6,7 +6,11 @@ __pycache__/
 *.py[cod]
 .cache/
 data/kline/okx/swap/
-strategies/sweep_reversal_short/results/
+# Rebuildable research arrays (npz per symbol per timeframe) stay out of git; the
+# review artifacts next to them are committed.
+strategies/sweep_reversal_short/results/*
+!strategies/sweep_reversal_short/results/full_history/
+strategies/sweep_reversal_short/results/full_history/data/
 # Rebuildable 1h arrays folded from data/kline by the strategy's own backtest.
 strategies/liquid_crypto_trend_long/results/cache/
 dist/
