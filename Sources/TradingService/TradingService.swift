@@ -34,6 +34,7 @@ public actor PaperTradingStore {
     public private(set) var orders: [PaperOrder]
     public private(set) var fills: [PaperFill]
     public private(set) var risk = RiskSnapshot()
+    private var strategyLifecycleEpochs: [UUID: UInt64] = [:]
 
     private let directory: URL
     private let encoder: JSONEncoder
@@ -64,6 +65,25 @@ public actor PaperTradingStore {
         for (key, value) in config.type.defaultParameters where normalized.parameters[key] == nil {
             normalized.parameters[key] = value
         }
+        if config.type.hasRuntimeHandler {
+            // Persisted state predates strict parameter validation.  Drop
+            // unknown/deprecated keys and restore invalid values to the
+            // strategy defaults before the config can reach the evaluator.
+            let ranges = config.type.parameterRanges
+            for key in Array(normalized.parameters.keys) where key != "maxOpenRiskPercent" && ranges[key] == nil {
+                normalized.parameters.removeValue(forKey: key)
+            }
+            normalized.parameters.removeValue(forKey: "maxOpenRiskPercent")
+            for (key, fallback) in config.type.defaultParameters {
+                guard let value = normalized.parameters[key],
+                      value.isFinite,
+                      let range = ranges[key], range.contains(value),
+                      (!config.type.integerParameterKeys.contains(key) || value.rounded() == value) else {
+                    normalized.parameters[key] = fallback
+                    continue
+                }
+            }
+        }
         // Leverage is a user-editable strategy parameter. A missing, NaN or
         // out-of-range value converges to the strategy's built-in default
         // before being written back to disk.
@@ -93,6 +113,7 @@ public actor PaperTradingStore {
         normalized.parameters["maxConcurrentPositions"] = 1
         normalized.parameters.removeValue(forKey: "maxOpenRiskPercent")
         normalized.capitalPoolPercent = min(max(normalized.capitalPoolPercent, 0.1), 100.0)
+        normalized.cooldownBars = min(max(normalized.cooldownBars, 0), StrategyConfig.maximumCooldownBars)
         if config.type.hasRuntimeHandler {
             // Migrate persisted configurations created before the fixed
             // account-breaker pool ceiling was introduced.
@@ -268,8 +289,12 @@ public actor PaperTradingStore {
               Self.supports(config),
               config.capitalPoolPercent > 0,
               config.capitalPoolPercent <= 100,
+              config.cooldownBars >= 0,
+              config.cooldownBars <= StrategyConfig.maximumCooldownBars,
+              config.type.validates(parameters: config.parameters),
               Self.validLeverage(config) else { throw StoreError.unsupported }
-        let normalized = Self.canonicalized(config)
+        var normalized = Self.canonicalized(config)
+        normalized.enabled = false
         guard !strategies.contains(where: { $0.id == normalized.id }) else { throw StoreError.conflict }
         guard !strategies.contains(where: { $0.type == normalized.type }) else { throw StoreError.conflict }
         strategies.append(normalized)
@@ -284,6 +309,9 @@ public actor PaperTradingStore {
               Self.supports(config),
               config.capitalPoolPercent > 0,
               config.capitalPoolPercent <= 100,
+              config.cooldownBars >= 0,
+              config.cooldownBars <= StrategyConfig.maximumCooldownBars,
+              config.type.validates(parameters: config.parameters),
               Self.validLeverage(config) else { throw StoreError.unsupported }
         let normalized = Self.canonicalized(config)
         guard let index = strategies.firstIndex(where: { $0.id == normalized.id }) else { throw StoreError.notFound }
@@ -350,6 +378,13 @@ public actor PaperTradingStore {
         statuses[id] = StrategyStatus(id: id, state: running ? .running : .paused)
         save()
         return strategies[index]
+    }
+
+    public func lifecycleEpoch(for id: UUID) -> UInt64 { strategyLifecycleEpochs[id] ?? 0 }
+    public func advanceLifecycleEpoch(for id: UUID) -> UInt64 {
+        let next = (strategyLifecycleEpochs[id] ?? 0) &+ 1
+        strategyLifecycleEpochs[id] = next
+        return next
     }
 
     @discardableResult
@@ -866,6 +901,8 @@ public actor TradingBackend {
     /// pause/delete operation, including tasks that resume after its closing
     /// set has been cleared.
     private var strategyEntryClosureEpochs: [UUID: UInt64] = [:]
+    private var strategyLifecycleInFlight: Set<UUID> = []
+    private var strategyLifecycleWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
     private var strategyEntryInFlightInstruments: Set<String> = []
     private var runtimeLogs: [RuntimeLog] = []
     private var runtimeLogFileLines = 0
@@ -1336,6 +1373,24 @@ public actor TradingBackend {
         self.remoteReservations = Self.loadRemoteReservations(from: self.remoteReservationURL)
     }
 
+    private func acquireStrategyLifecycle(_ id: UUID) async {
+        if strategyLifecycleInFlight.contains(id) {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                strategyLifecycleWaiters[id, default: []].append(continuation)
+            }
+        }
+        strategyLifecycleInFlight.insert(id)
+    }
+
+    private func releaseStrategyLifecycle(_ id: UUID) {
+        if let waiter = strategyLifecycleWaiters[id]?.first {
+            strategyLifecycleWaiters[id]?.removeFirst()
+            waiter.resume()
+        } else {
+            strategyLifecycleInFlight.remove(id)
+        }
+    }
+
     private static func loadPendingRemoteExits(from url: URL) -> [String: PendingRemoteExit] {
         guard let data = try? Data(contentsOf: url),
               let values = try? JSONDecoder().decode([String: PendingRemoteExit].self, from: data) else { return [:] }
@@ -1615,17 +1670,9 @@ public actor TradingBackend {
 
     public func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig {
         await restoreRiskIfNeeded()
-        // Saving a paused strategy does not create an order or change the
-        // account's exposure.  Keep configuration work available while the
-        // daily-loss circuit is latched, but never let an enabled request
-        // bypass that circuit.
-        if config.enabled {
-            try await requireStrategyMutationsAllowed()
-        }
-        let normalized = try await normalizedCapitalPoolConfig(config)
-        if normalized.enabled {
-            try await requireCircuitBreakerHeadroom(enabling: normalized)
-        }
+        var request = config
+        request.enabled = false
+        let normalized = try await normalizedCapitalPoolConfig(request)
         let created = try await paper.create(normalized)
         _ = await riskEngine.registerStrategy(created.id, allocationPercent: Decimal(created.capitalPoolPercent))
         await paper.setRisk(await riskEngine.snapshot())
@@ -1634,7 +1681,10 @@ public actor TradingBackend {
     }
 
     public func updateStrategy(_ config: StrategyConfig) async throws -> StrategyConfig {
+        await acquireStrategyLifecycle(config.id)
+        defer { releaseStrategyLifecycle(config.id) }
         await restoreRiskIfNeeded()
+        let epoch = await paper.advanceLifecycleEpoch(for: config.id)
         // Pausing or editing a paused strategy is a non-trading operation and
         // remains available during a kill switch. Enabling a strategy still
         // requires an unfaulted risk state.
@@ -1644,6 +1694,9 @@ public actor TradingBackend {
         let normalized = try await normalizedCapitalPoolConfig(config, excluding: config.id)
         if normalized.enabled {
             try await requireCircuitBreakerHeadroom(enabling: normalized)
+        }
+        guard await paper.lifecycleEpoch(for: config.id) == epoch else {
+            throw ATKError.unavailable("策略生命周期已变更，请刷新后重试")
         }
         let updated = try await paper.update(normalized)
         _ = await riskEngine.updateStrategyAllocation(updated.id, allocationPercent: Decimal(updated.capitalPoolPercent))
@@ -1696,7 +1749,10 @@ public actor TradingBackend {
     }
 
     public func deleteStrategy(_ id: UUID) async throws -> StrategyConfig {
+        await acquireStrategyLifecycle(id)
+        defer { releaseStrategyLifecycle(id) }
         await restoreRiskIfNeeded()
+        _ = await paper.advanceLifecycleEpoch(for: id)
         guard let config = await paper.allStrategies().first(where: { $0.id == id }) else {
             throw PaperTradingStore.StoreError.notFound
         }
@@ -1734,7 +1790,10 @@ public actor TradingBackend {
     }
 
     public func startStrategy(_ id: UUID) async throws -> StrategyConfig {
+        await acquireStrategyLifecycle(id)
+        defer { releaseStrategyLifecycle(id) }
         await restoreRiskIfNeeded()
+        let epoch = await paper.advanceLifecycleEpoch(for: id)
         let riskSnapshot = await riskEngine.snapshot()
         guard !riskSnapshot.killSwitch else {
             appendLog("策略启动被拒绝：账户风控已熔断，需新日手动复位后才能启动", level: "warning")
@@ -1745,6 +1804,10 @@ public actor TradingBackend {
         }
         enabling.enabled = true
         try await requireCircuitBreakerHeadroom(enabling: enabling)
+        guard await paper.lifecycleEpoch(for: id) == epoch,
+              let current = await paper.allStrategies().first(where: { $0.id == id }), !current.enabled else {
+            throw ATKError.unavailable("策略生命周期已变更，请刷新后重试")
+        }
         let config = try await paper.setState(id, running: true)
         _ = await riskEngine.registerStrategy(config.id, allocationPercent: Decimal(config.capitalPoolPercent))
         await paper.setRisk(await riskEngine.snapshot())
@@ -1753,7 +1816,10 @@ public actor TradingBackend {
     }
 
     public func pauseStrategy(_ id: UUID) async throws -> StrategyConfig {
+        await acquireStrategyLifecycle(id)
+        defer { releaseStrategyLifecycle(id) }
         await restoreRiskIfNeeded()
+        _ = await paper.advanceLifecycleEpoch(for: id)
         let config = try await paper.setState(id, running: false)
         strategyEntryClosureEpochs[id, default: 0] &+= 1
         strategyEntryClosures.insert(id)
@@ -1795,8 +1861,13 @@ public actor TradingBackend {
         return snapshot
     }
 
-    public func recordLog(_ log: RuntimeLog) {
-        appendLog(log)
+    public func recordLog(_ log: RuntimeLog) -> RuntimeLog {
+        let allowedLevels: Set<String> = ["info", "warning", "risk", "order", "signal", "fill", "strategy", "exit"]
+        let level = allowedLevels.contains(log.level.lowercased()) ? log.level.lowercased() : "info"
+        let message = String(log.message.prefix(4_096))
+        let accepted = RuntimeLog(level: level, message: message)
+        appendLog(accepted)
+        return accepted
     }
 
     private func logSignals(_ statuses: [StrategyStatus], configs: [StrategyConfig], instrumentID: String) {
@@ -1934,6 +2005,7 @@ public actor TradingBackend {
             let positionIsShort = normalizedPositionSide == "short" || (normalizedPositionSide == "net" && position.quantity < 0)
             guard let order = orders.reversed().first(where: { order in
                 order.instrumentID == position.instrumentID &&
+                    order.signal != nil &&
                     ["submitted", "filled", "pending"].contains(order.status.lowercased()) &&
                     (positionIsShort ? order.side.lowercased() == "short" : order.side.lowercased() == "long")
             }),
@@ -2673,6 +2745,7 @@ public actor TradingBackend {
             let positionIsShort = normalizedPositionSide == "short" || (normalizedPositionSide == "net" && position.quantity < 0)
             guard let order = orders.reversed().first(where: { order in
                 order.instrumentID == position.instrumentID &&
+                    order.signal != nil &&
                     ["submitted", "filled", "pending"].contains(order.status.lowercased()) &&
                     (positionIsShort ? order.side.lowercased() == "short" : order.side.lowercased() == "long")
             }) else { continue }
@@ -3042,20 +3115,26 @@ public actor TradingBackend {
     }
 }
 
-/// Rejects browser-originated and DNS-rebound requests to the loopback API.
-/// The daemon has no credentials of its own, so without this any web page
-/// could POST a `text/plain` body (no CORS preflight) to enable live trading
-/// and place orders, or open the stream and read account data. Native
-/// clients (URLSession, curl) send no `Origin`; browsers always send one on
-/// cross-origin POST and WebSocket upgrades.
+/// Rejects browser-originated and DNS-rebound requests to the loopback API,
+/// and requires the per-user daemon token on every REST and upgrade request.
 public struct LoopbackOriginGuardMiddleware: HBMiddleware {
-    public init() {}
+    public let token: String
+
+    public init(token: String = LocalService.tokenFromEnvironmentOrFile()) { self.token = token }
 
     public func apply(to request: HBRequest, next: HBResponder) -> EventLoopFuture<HBResponse> {
-        guard Self.isAllowed(host: request.headers.first(name: "host"), origin: request.headers.first(name: "origin")) else {
+        guard Self.isAllowed(host: request.headers.first(name: "host"), origin: request.headers.first(name: "origin")),
+              Self.isAuthorized(request: request, token: token) else {
             return request.failure(HBHTTPError(.forbidden))
         }
         return next.respond(to: request)
+    }
+
+    public static func isAuthorized(request: HBRequest, token: String) -> Bool {
+        let supplied = request.headers.first(name: "authorization")?.replacingOccurrences(of: "Bearer ", with: "", options: [.anchored, .caseInsensitive])
+            ?? request.headers.first(name: "x-novatrade-token")
+        guard let supplied, !supplied.isEmpty else { return false }
+        return supplied == token
     }
 
     public static func isAllowed(host: String?, origin: String?) -> Bool {
@@ -3082,11 +3161,15 @@ public struct LoopbackOriginGuardMiddleware: HBMiddleware {
 
 public struct TradingHTTPServer {
     public let backend: TradingBackend
+    public let authToken: String
 
-    public init(backend: TradingBackend = TradingBackend()) { self.backend = backend }
+    public init(backend: TradingBackend = TradingBackend(), authToken: String = LocalService.tokenFromEnvironmentOrFile()) {
+        self.backend = backend
+        self.authToken = authToken
+    }
 
     public func configure(_ app: HBApplication) throws {
-        app.middleware.add(LoopbackOriginGuardMiddleware())
+        app.middleware.add(LoopbackOriginGuardMiddleware(token: authToken))
         let jsonEncoder = JSONEncoder()
         jsonEncoder.dateEncodingStrategy = .iso8601
         app.encoder = jsonEncoder
@@ -3153,9 +3236,10 @@ public struct TradingHTTPServer {
         app.router.get("api/v1/paper/fills") { [backend] request in try request.application.encoder.encode(await backend.fills(), from: request) }
         app.router.get("api/v1/logs") { [backend] request in try request.application.encoder.encode(await backend.logs(), from: request) }
         app.router.post("api/v1/logs") { [backend] request in
+            guard (request.body.buffer?.readableBytes ?? 0) <= 16_384 else { throw HBHTTPError(.payloadTooLarge) }
             let log = try request.decode(as: RuntimeLog.self)
-            await backend.recordLog(log)
-            return try request.application.encoder.encode(log, from: request)
+            let accepted = await backend.recordLog(log)
+            return try request.application.encoder.encode(accepted, from: request)
         }
         app.router.post("api/v1/strategies") { [backend] request in
             let config = try request.decode(as: StrategyConfig.self)

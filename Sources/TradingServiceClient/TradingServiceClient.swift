@@ -73,6 +73,7 @@ public actor TradingServiceClient {
                     components.path = "/api/v1/stream"
                     var request = URLRequest(url: components.url!)
                     request.timeoutInterval = 15
+                    request.setValue("Bearer \(LocalService.tokenFromEnvironmentOrFile())", forHTTPHeaderField: "Authorization")
                     let socket = session.webSocketTask(with: request)
                     defer { socket.cancel(with: .goingAway, reason: nil) }
                     do {
@@ -123,6 +124,7 @@ public actor TradingServiceClient {
         // Every REST call is bounded so a stalled local daemon cannot block
         // the UI actor indefinitely.
         request.timeoutInterval = 15
+        request.setValue("Bearer \(LocalService.tokenFromEnvironmentOrFile())", forHTTPHeaderField: "Authorization")
         if let body { request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try encoder.encode(body) }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw TradingServiceClientError.invalidResponse }
@@ -162,6 +164,8 @@ public actor LocalServiceProcess {
         launcher.arguments = ["-c", "nohup \(quotedPath) >/dev/null 2>&1 </dev/null & printf '%s' $!"]
         var environment = ProcessInfo.processInfo.environment
         environment[LocalService.portEnvironmentKey] = String(LocalService.defaultPort)
+        let token = LocalService.tokenFromEnvironmentOrFile()
+        environment[LocalService.tokenEnvironmentKey] = token
         launcher.environment = environment
         let output = Pipe()
         launcher.standardOutput = output

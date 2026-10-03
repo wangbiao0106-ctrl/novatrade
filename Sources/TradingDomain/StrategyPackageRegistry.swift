@@ -32,8 +32,8 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
     public let autoSubmitLiveOrders: Bool
     public let enabledByDefault: Bool
     /// `candidate`/`draft` packages can be staged in the laboratory but are
-    /// refused by the runtime installer. Research directories without a root
-    /// manifest have no lifecycle and remain readable for development imports.
+    /// refused by the runtime installer. Runtime packages must carry a root
+    /// manifest; config-only research directories are not installable.
     public let lifecycle: String?
 
     public init(identifier: String,
@@ -222,6 +222,13 @@ public actor StrategyPackageRegistry {
             .appendingPathComponent("strategy-packages", isDirectory: true)
     }
 
+    /// Keep untrusted package imports bounded before hashing/copying them.
+    /// Research packages can contain optional source and reports, but runtime
+    /// artifacts should never be allowed to consume unbounded memory or disk.
+    private static let maxArtifactBytes: Int64 = 64 * 1024 * 1024
+    private static let maxPackageBytes: Int64 = 512 * 1024 * 1024
+    private static let requiredArtifactPaths: Set<String> = ["STRATEGY.md", "config/strategy.json"]
+
     /// Returns all valid installed packages. Invalid directories are ignored
     /// here so a broken import cannot take down the trading service; callers
     /// that need diagnostics should use `validate(package:)` first.
@@ -319,42 +326,41 @@ public actor StrategyPackageRegistry {
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw StrategyPackageError.invalidPackage("策略包必须是目录：\(url.lastPathComponent)")
         }
-        let candidates = [
-            // Packed laboratory artifacts carry lifecycle/version metadata in
-            // a root manifest. Research directories only have config/strategy.
-            url.appendingPathComponent("manifest.json"),
-            url.appendingPathComponent("config/strategy.json")
-        ]
-        guard let manifestURL = candidates.first(where: { fileManager.fileExists(atPath: $0.path) }) else {
-            throw StrategyPackageError.invalidPackage("策略包缺少 config/strategy.json 或 manifest.json：\(url.lastPathComponent)")
+        // Runtime installation is deliberately stricter than laboratory
+        // config parsing: identity, lifecycle and artifact hashes must come
+        // from a root manifest that can be verified before copying.
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        guard fileManager.fileExists(atPath: manifestURL.path) else {
+            throw StrategyPackageError.invalidPackage("策略包必须包含根 manifest.json：\(url.lastPathComponent)")
         }
         // Do not let an imported package escape its root through a symlink.
         // FileManager.copyItem preserves symlinks, so this check must happen
         // before the copy and again on the temporary destination.
-        if let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isSymbolicLinkKey], options: [.skipsHiddenFiles]) {
+        if let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isSymbolicLinkKey], options: []) {
             for case let item as URL in enumerator {
                 if (try? item.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
                     throw StrategyPackageError.invalidPackage("策略包不允许符号链接：\(item.lastPathComponent)")
                 }
             }
         }
+        try verifyPackageFileSizes(at: url, fileManager: fileManager)
         do {
             let data = try Data(contentsOf: manifestURL)
-            if manifestURL.lastPathComponent == "manifest.json",
-               let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let lifecycle = root["lifecycle"] as? String,
-               lifecycle != "finalized" {
+            guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw StrategyPackageError.invalidManifest("manifest.json 根节点必须是 JSON 对象")
+            }
+            guard integer(root["schema_version"]) == 1 else {
+                throw StrategyPackageError.invalidManifest("schema_version 必须为 1")
+            }
+            guard root["lifecycle"] as? String == "finalized" else {
                 throw StrategyPackageError.invalidPackage("只有 lifecycle=finalized 的实验定稿包才能安装")
             }
-            if manifestURL.lastPathComponent == "manifest.json",
-               let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               root["artifacts"] != nil {
-                try verifyArtifacts(root, at: url, fileManager: fileManager)
-            }
+            try verifyArtifacts(root, at: url, fileManager: fileManager)
             let manifest = try decodeManifest(data)
             let configURL = url.appendingPathComponent("config/strategy.json")
-            guard manifestURL.lastPathComponent == "manifest.json",
-                  fileManager.fileExists(atPath: configURL.path) else { return manifest }
+            guard fileManager.fileExists(atPath: configURL.path) else {
+                throw StrategyPackageError.invalidPackage("策略包缺少 config/strategy.json")
+            }
             // The package manifest carries identity/lifecycle while the lab
             // config carries tuned signal and risk defaults.
             let config = try decodeManifest(Data(contentsOf: configURL))
@@ -397,8 +403,8 @@ public actor StrategyPackageRegistry {
             ?? string(object["runtime_handler"])
             ?? identifier
         let source = string(object["source_of_truth"])
-        let entry = integer(object["entry_timeframe_minutes"])
-            ?? integer(runtime["entry_timeframe_minutes"])
+        let entry = try strictInteger(object["entry_timeframe_minutes"], key: "entry_timeframe_minutes")
+            ?? strictInteger(runtime["entry_timeframe_minutes"], key: "entry_timeframe_minutes")
         var defaults = signal.reduce(into: [String: Double]()) { result, pair in
             if let number = number(pair.value) { result[camelCase(pair.key)] = number }
         }
@@ -410,7 +416,7 @@ public actor StrategyPackageRegistry {
         if let leverage = number(position["leverage"]) {
             defaults["leverage"] = leverage
         }
-        let cooldown = integer(position["cooldown_bars"])
+        let cooldown = try strictInteger(position["cooldown_bars"], key: "cooldown_bars")
         let mode = string(runtime["live_order_mode"])
             ?? string(object["live_order_mode"])
         let autoSubmit = bool(runtime["auto_submit_live_orders"])
@@ -419,7 +425,7 @@ public actor StrategyPackageRegistry {
             ?? bool(object["enabled_by_default"]) ?? false
         let scope = string(runtime["scope"])
         let packageID = string(object["package_id"])
-        let schemaVersion = integer(object["schema_version"])
+        let schemaVersion = try strictInteger(object["schema_version"], key: "schema_version")
         let lifecycleCandidate = string(object["lifecycle"]) ?? string(object["status"])
         let lifecycle = ["draft", "candidate", "finalized", "retired"].contains(lifecycleCandidate ?? "")
             ? lifecycleCandidate : nil
@@ -443,6 +449,10 @@ public actor StrategyPackageRegistry {
 
     private static func merge(_ package: StrategyPackageManifest,
                               with config: StrategyPackageManifest) throws -> StrategyPackageManifest {
+        guard StrategyPackageManifest.normalizePackageIdentifier(package.identifier) ==
+              StrategyPackageManifest.normalizePackageIdentifier(config.identifier) else {
+            throw StrategyPackageError.invalidManifest("manifest.json 与 config/strategy.json 的策略标识不一致")
+        }
         guard StrategyPackageManifest.canonicalIdentifier(package.runtimeHandler) ==
               StrategyPackageManifest.canonicalIdentifier(config.runtimeHandler) else {
             throw StrategyPackageError.invalidManifest("manifest.json 与 config/strategy.json 的运行时标识不一致")
@@ -481,6 +491,8 @@ public actor StrategyPackageRegistry {
             throw StrategyPackageError.invalidManifest("artifacts 必须是非空数组")
         }
         let rootPath = root.standardizedFileURL.path
+        var seen = Set<String>()
+        var totalBytes: Int64 = 0
         for artifact in artifacts {
             guard let rawPath = artifact["path"] as? String,
                   let expected = artifact["sha256"] as? String,
@@ -490,18 +502,65 @@ public actor StrategyPackageRegistry {
             let relative = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
             let candidate = root.appendingPathComponent(relative).standardizedFileURL
             let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
-            guard !relative.isEmpty, !relative.contains("\\"), candidate.path.hasPrefix(prefix),
-                  fileManager.fileExists(atPath: candidate.path) else {
+            guard !relative.isEmpty, !relative.contains("\\"), relative != ".",
+                  !relative.split(separator: "/", omittingEmptySubsequences: false).contains(".."),
+                  !relative.split(separator: "/", omittingEmptySubsequences: false).contains("."),
+                  candidate.path.hasPrefix(prefix), fileManager.fileExists(atPath: candidate.path) else {
                 throw StrategyPackageError.invalidPackage("artifact 路径非法或不是普通文件：\(rawPath)")
             }
-            let values = try candidate.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-            guard values.isDirectory != true, values.isSymbolicLink != true else {
+            guard seen.insert(relative).inserted else {
+                throw StrategyPackageError.invalidManifest("artifact 重复：\(relative)")
+            }
+            let values = try candidate.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
+            let attributes = try fileManager.attributesOfItem(atPath: candidate.path)
+            guard values.isDirectory != true, values.isSymbolicLink != true,
+                  attributes[.type] as? FileAttributeType == .typeRegular else {
                 throw StrategyPackageError.invalidPackage("artifact 路径非法或不是普通文件：\(rawPath)")
             }
+            guard let fileSize = attributes[.size] as? NSNumber else {
+                throw StrategyPackageError.invalidPackage("无法读取 artifact 大小：\(rawPath)")
+            }
+            let bytes = fileSize.int64Value
+            guard bytes >= 0, bytes <= maxArtifactBytes,
+                  totalBytes <= maxPackageBytes - bytes else {
+                throw StrategyPackageError.invalidPackage("artifact 总大小超过限制：\(rawPath)")
+            }
+            totalBytes += bytes
             let digest = SHA256.hash(data: try Data(contentsOf: candidate)).map { String(format: "%02x", $0) }.joined()
             guard digest.caseInsensitiveCompare(expected) == .orderedSame else {
                 throw StrategyPackageError.invalidPackage("artifact 校验失败：\(rawPath)")
             }
+        }
+        guard requiredArtifactPaths.isSubset(of: seen) else {
+            let missing = requiredArtifactPaths.subtracting(seen).sorted().joined(separator: ", ")
+            throw StrategyPackageError.invalidManifest("artifacts 必须声明：\(missing)")
+        }
+    }
+
+    private static func verifyPackageFileSizes(at root: URL, fileManager: FileManager) throws {
+        guard let enumerator = fileManager.enumerator(at: root,
+                                                       includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                                                       options: []) else { return }
+        var totalBytes: Int64 = 0
+        for case let item as URL in enumerator {
+            let values = try item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard values.isSymbolicLink != true else {
+                throw StrategyPackageError.invalidPackage("策略包不允许符号链接：\(item.lastPathComponent)")
+            }
+            if values.isDirectory == true { continue }
+            let attributes = try fileManager.attributesOfItem(atPath: item.path)
+            guard attributes[.type] as? FileAttributeType == .typeRegular else {
+                throw StrategyPackageError.invalidPackage("策略包只允许普通文件：\(item.lastPathComponent)")
+            }
+            guard let fileSize = attributes[.size] as? NSNumber else {
+                throw StrategyPackageError.invalidPackage("无法读取策略包文件大小：\(item.lastPathComponent)")
+            }
+            let bytes = fileSize.int64Value
+            guard bytes >= 0, bytes <= maxArtifactBytes,
+                  totalBytes <= maxPackageBytes - bytes else {
+                throw StrategyPackageError.invalidPackage("策略包文件总大小超过限制：\(item.lastPathComponent)")
+            }
+            totalBytes += bytes
         }
     }
 
@@ -513,14 +572,32 @@ public actor StrategyPackageRegistry {
 
     private static func number(_ value: Any?) -> Double? {
         guard let value else { return nil }
-        if let value = value as? NSNumber { return value.doubleValue.isFinite ? value.doubleValue : nil }
+        if let value = value as? NSNumber {
+            // JSONSerialization bridges both numbers and booleans to
+            // NSNumber; the Objective-C type code distinguishes them.
+            guard String(cString: value.objCType) != "c" else { return nil }
+            return value.doubleValue.isFinite ? value.doubleValue : nil
+        }
+        guard !(value is Bool) else { return nil }
         if let value = value as? String, let parsed = Double(value), parsed.isFinite { return parsed }
         return nil
     }
 
     private static func integer(_ value: Any?) -> Int? {
         guard let number = number(value) else { return nil }
-        return Int(number.rounded())
+        let rounded = number.rounded()
+        guard rounded.isFinite,
+              rounded == number,
+              rounded >= Double(Int.min), rounded <= Double(Int.max) else { return nil }
+        return Int(exactly: rounded)
+    }
+
+    private static func strictInteger(_ value: Any?, key: String) throws -> Int? {
+        guard value != nil else { return nil }
+        guard let result = integer(value) else {
+            throw StrategyPackageError.invalidManifest("\(key) 必须是有效的整数")
+        }
+        return result
     }
 
     private static func bool(_ value: Any?) -> Bool? {

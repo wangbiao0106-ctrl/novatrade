@@ -352,7 +352,8 @@ func sweepReversalOneHourEventNeverLeaksAnotherInstrumentsSignal() async throws 
         type: .sweepReversalShort, parameters: makeSweepConfig().parameters,
         enabled: true, cooldownBars: 96
     )
-    _ = try await store.create(config)
+    let created = try await store.create(config)
+    _ = try await store.setState(created.id, running: true)
 
     // 两个标的都高于 sweepCandidates 的 300 万 USDT 成交额下限。
     let contracts = [

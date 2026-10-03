@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Testing
 import TradingDomain
 @testable import TradingService
@@ -11,15 +12,23 @@ func backendStrategyPackageLifecycle() async throws {
     let staging = state.appendingPathComponent("strategy-staging/demo", isDirectory: true)
     let packages = root.appendingPathComponent("packages", isDirectory: true)
     try fm.createDirectory(at: staging.appendingPathComponent("config"), withIntermediateDirectories: true)
+    let rule = Data("# Sweep\n".utf8)
     let config = """
     {
       "identifier": "sweep_reversal_short", "version": "1.0.0", "display_name": "Sweep",
       "runtime": { "runtime_handler": "sweepReversalShort", "scope": "dynamic.sweepCandidates", "enabled_by_default": false },
       "entry_timeframe_minutes": 60,
-      "signal_parameters": { "swing_lookback": 6 }
+      "signal_parameters": { "L": 10 }
     }
     """.data(using: .utf8)!
+    try rule.write(to: staging.appendingPathComponent("STRATEGY.md"))
     try config.write(to: staging.appendingPathComponent("config/strategy.json"))
+    let ruleDigest = SHA256.hash(data: rule).map { String(format: "%02x", $0) }.joined()
+    let configDigest = SHA256.hash(data: config).map { String(format: "%02x", $0) }.joined()
+    let manifest = """
+    { "schema_version": 1, "strategy_id": "sweep_reversal_short", "package_id": "sweep_reversal_short", "version": "1.0.0", "display_name": "Sweep", "runtime_handler": "sweepReversalShort", "lifecycle": "finalized", "artifacts": [{"path":"STRATEGY.md","sha256":"\(ruleDigest)"},{"path":"config/strategy.json","sha256":"\(configDigest)"}] }
+    """
+    try Data(manifest.utf8).write(to: staging.appendingPathComponent("manifest.json"))
     defer { try? fm.removeItem(at: root) }
 
     let paper = PaperTradingStore(directory: state)

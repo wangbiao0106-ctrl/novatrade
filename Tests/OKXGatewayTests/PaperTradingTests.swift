@@ -111,6 +111,44 @@ func strategyStoreRejectsInvalidLeverage() async throws {
     }
 }
 
+@Test("Strategy store rejects unknown and unsafe runtime parameters")
+func strategyStoreRejectsUnsafeRuntimeParameters() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("novatrade-strategy-invalid-parameters-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PaperTradingStore(directory: directory)
+
+    var unknown = StrategyType.sweepReversalShort.defaultParameters
+    unknown["operatorBypass"] = 1
+    do {
+        _ = try await store.create(StrategyConfig(name: "invalid", scope: .dynamic(.sweepCandidates), interval: .oneHour,
+                                                   type: .sweepReversalShort, parameters: unknown))
+        Issue.record("expected unknown strategy parameters to be rejected")
+    } catch PaperTradingStore.StoreError.unsupported { }
+
+    var unsafeGate = StrategyType.sweepReversalShort.defaultParameters
+    unsafeGate["btcGateEnabled"] = 0
+    do {
+        _ = try await store.create(StrategyConfig(name: "invalid", scope: .dynamic(.sweepCandidates), interval: .oneHour,
+                                                   type: .sweepReversalShort, parameters: unsafeGate))
+        Issue.record("expected a disabled BTC gate to be rejected")
+    } catch PaperTradingStore.StoreError.unsupported { }
+}
+
+@Test("Strategy store rejects cooldown values that could overflow execution math")
+func strategyStoreRejectsUnsafeCooldown() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("novatrade-strategy-invalid-cooldown-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PaperTradingStore(directory: directory)
+    let config = StrategyConfig(name: "invalid", scope: .dynamic(.sweepCandidates), interval: .oneHour,
+                                type: .sweepReversalShort, cooldownBars: StrategyConfig.maximumCooldownBars + 1)
+    do {
+        _ = try await store.create(config)
+        Issue.record("expected excessive cooldown to be rejected")
+    } catch PaperTradingStore.StoreError.unsupported { }
+}
+
 @Test
 func strategyStoreRejectsFixedInstrumentScopes() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-single-scope-\(UUID().uuidString)", isDirectory: true)

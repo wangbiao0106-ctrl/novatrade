@@ -36,17 +36,28 @@ struct OKXLocalD {
             writer.send(StreamEvent(type: "connection", timestamp: .now, payload: "connected"))
             ws.onRead { data, _ in
                 guard case let .text(text) = data,
+                      text.utf8.count <= StreamHub.maxSubscriptionBytes,
                       let body = text.data(using: .utf8),
-                      let subscription = try? JSONDecoder().decode(StreamSubscription.self, from: body) else { return }
-                writer.send(StreamEvent(type: "connection", timestamp: .now, payload: "subscribed:\(subscription.channels.joined(separator: ","))"))
+                      let subscription = try? JSONDecoder().decode(StreamSubscription.self, from: body),
+                      StreamHub.isValid(subscription: subscription) else {
+                    writer.send(StreamEvent(type: "connection", timestamp: .now, payload: "subscription_rejected"))
+                    return
+                }
                 if let previous = state.active {
                     hub.unsubscribe(id: previous.id, instrumentID: previous.subscription.instrumentID, interval: previous.subscription.interval)
                 }
                 state.active = nil
-                guard !subscription.channels.isEmpty else { return }
+                guard !subscription.channels.isEmpty else {
+                    writer.send(StreamEvent(type: "connection", timestamp: .now, payload: "unsubscribed"))
+                    return
+                }
                 let id = UUID()
+                guard hub.subscribe(StreamHub.Subscriber(id: id, writer: writer, channels: Set(subscription.channels)), instrumentID: subscription.instrumentID, interval: subscription.interval) else {
+                    writer.send(StreamEvent(type: "connection", timestamp: .now, payload: "subscription_limit"))
+                    return
+                }
                 state.active = (id, subscription)
-                hub.subscribe(StreamHub.Subscriber(id: id, writer: writer, channels: Set(subscription.channels)), instrumentID: subscription.instrumentID, interval: subscription.interval)
+                writer.send(StreamEvent(type: "connection", timestamp: .now, payload: "subscribed:\(subscription.channels.joined(separator: ","))"))
             }
             ws.onClose { _ in
                 if let active = state.active {
@@ -123,6 +134,11 @@ private actor PrewarmGate {
 /// every WebSocket client watching the same instrument and interval. Fan-out
 /// happens here; the backend ingests each realtime candle exactly once.
 private final class StreamHub: @unchecked Sendable {
+    static let maxSubscriptionBytes = 16 * 1024
+    private static let maxSubscribers = 128
+    private static let maxUpstreamKeys = 512
+    private static let allowedChannels: Set<String> = ["candle", "strategy", "risk", "account", "log"]
+
     struct Subscriber {
         let id: UUID
         let writer: StreamWriter
@@ -143,6 +159,17 @@ private final class StreamHub: @unchecked Sendable {
     private var strategyTargets: Set<StrategyTarget> = []
 
     init(backend: TradingBackend) { self.backend = backend }
+
+    static func isValid(subscription: StreamSubscription) -> Bool {
+        guard subscription.channels.count <= allowedChannels.count,
+              Set(subscription.channels).count == subscription.channels.count,
+              Set(subscription.channels).isSubset(of: allowedChannels),
+              subscription.instrumentID.count <= 32,
+              subscription.instrumentID.range(of: "^[A-Za-z0-9]+-USDT-SWAP$", options: .regularExpression) != nil else {
+            return false
+        }
+        return true
+    }
 
     func startStrategyRuntime() {
         Task { [weak self] in
@@ -198,14 +225,19 @@ private final class StreamHub: @unchecked Sendable {
 
     private static func key(instrumentID: String, interval: KlineInterval) -> String { "\(instrumentID):\(interval.rawValue)" }
 
-    func subscribe(_ subscriber: Subscriber, instrumentID: String, interval: KlineInterval) {
+    @discardableResult
+    func subscribe(_ subscriber: Subscriber, instrumentID: String, interval: KlineInterval) -> Bool {
         lock.lock()
+        defer { lock.unlock() }
         let hubKey = Self.key(instrumentID: instrumentID, interval: interval)
+        let subscriberCount = subscribersByKey.values.reduce(0) { $0 + $1.count }
+        guard subscriberCount < Self.maxSubscribers else { return false }
+        guard tasksByKey[hubKey] != nil || tasksByKey.count < Self.maxUpstreamKeys else { return false }
         subscribersByKey[hubKey, default: []].append(subscriber)
         if tasksByKey[hubKey] == nil {
             tasksByKey[hubKey] = supervisor(hubKey: hubKey, instrumentID: instrumentID, interval: interval)
         }
-        lock.unlock()
+        return true
     }
 
     func unsubscribe(id: UUID, instrumentID: String, interval: KlineInterval) {

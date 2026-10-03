@@ -491,6 +491,57 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
     /// rejecting a value the selected instrument cannot support.
     public var leverageRange: ClosedRange<Double> { 1.0...100.0 }
 
+    /// Hard bounds for every built-in runtime parameter.  These are a
+    /// persistence/runtime contract, rather than UI hints: values outside the
+    /// ranges can make indicator windows unexpectedly expensive or disable a
+    /// protective gate.  Integer-valued parameters are checked separately by
+    /// `integerParameterKeys`.
+    public var parameterRanges: [String: ClosedRange<Double>] {
+        switch self {
+        case .sweepReversalShort:
+            return [
+                "L": 1...10_000, "R": 1...10_000, "majorWindow": 1...10_000,
+                "sweepWait": 1...10_000, "rejectWait": 1...10_000,
+                "resweepWait": 1...10_000, "rsiMin": 0...100,
+                "volMult": 0...100, "rsDeep": 0...1, "atrPeriod": 1...10_000,
+                "bufATR": 0...100, "tpMult": 0...100, "minATRPct": 0...100,
+                "maxRiskATR": 0...100, "btcGateEnabled": 1...1,
+                "entryTimeframeMinutes": 60...60,
+                "confirmationTimeframeMinutes": 15...15,
+                "confirmationWindowMinutes": 1...1_440,
+                "leverage": leverageRange, "maxConcurrentPositions": 1...1
+            ]
+        case .external:
+            return [:]
+        }
+    }
+
+    public var integerParameterKeys: Set<String> {
+        switch self {
+        case .sweepReversalShort:
+            return ["L", "R", "majorWindow", "sweepWait", "rejectWait", "resweepWait",
+                    "atrPeriod", "btcGateEnabled", "entryTimeframeMinutes",
+                    "confirmationTimeframeMinutes", "confirmationWindowMinutes",
+                    "maxConcurrentPositions"]
+        case .external:
+            return []
+        }
+    }
+
+    /// Validates the caller supplied parameter map before defaults or legacy
+    /// migrations are applied. `maxOpenRiskPercent` was removed from the
+    /// runtime contract; it is accepted only as a discarded migration key.
+    public func validates(parameters: [String: Double]) -> Bool {
+        guard hasRuntimeHandler else { return parameters.isEmpty }
+        let ranges = parameterRanges
+        for (key, value) in parameters {
+            if key == "maxOpenRiskPercent" { continue }
+            guard let range = ranges[key], value.isFinite, range.contains(value) else { return false }
+            if integerParameterKeys.contains(key), value.rounded() != value { return false }
+        }
+        return true
+    }
+
     /// Default leverage shown when creating a new instance.
     public var defaultLeverage: Double { defaultParameters["leverage"] ?? 2.0 }
 
@@ -763,6 +814,7 @@ public struct StrategyUniverseSnapshot: Codable, Equatable, Sendable {
 }
 
 public struct StrategyConfig: Codable, Equatable, Sendable, Identifiable {
+    public static let maximumCooldownBars = 10_000
     public let id: UUID
     public var name: String
     public var interval: KlineInterval
@@ -1099,7 +1151,29 @@ public struct ServiceHealth: Codable, Equatable, Sendable {
 public enum LocalService {
     public static let defaultPort = 8787
     public static let portEnvironmentKey = "OKX_LOCALD_PORT"
+    public static let tokenEnvironmentKey = "OKX_LOCALD_AUTH_TOKEN"
     public static var defaultBaseURL: URL { URL(string: "http://127.0.0.1:\(defaultPort)")! }
+
+    public static var tokenURL: URL {
+        if let directory = ProcessInfo.processInfo.environment["OKX_LOCALD_STATE_DIR"], !directory.isEmpty {
+            return URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent("locald.token")
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("NovaTrade", isDirectory: true).appendingPathComponent("locald.token")
+    }
+
+    public static func tokenFromEnvironmentOrFile() -> String {
+        if let value = ProcessInfo.processInfo.environment[tokenEnvironmentKey], !value.isEmpty { return value }
+        if let value = try? String(contentsOf: tokenURL, encoding: .utf8) {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        let value = UUID().uuidString.replacingOccurrences(of: "-", with: "") + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        try? FileManager.default.createDirectory(at: tokenURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? value.write(to: tokenURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenURL.path)
+        return value
+    }
 }
 
 /// One frame on the `/api/v1/stream` websocket. `payload` carries a

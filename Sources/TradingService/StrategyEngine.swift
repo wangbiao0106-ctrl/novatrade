@@ -224,8 +224,12 @@ public struct StrategyEngine: Sendable {
         // confirmation_window_origin = structure_bar_close。窗口是半开区间
         // [结构 bar 收盘, 结构 bar 收盘 + confirmationWindowMinutes)，
         // 在 15m 数据上恰好等于 +60/+75/+90/+105 分钟四根 K 线。
-        let structureMinutes = max(1, config.parameters["entryTimeframeMinutes"] ?? 60)
-        let windowMinutes = max(1, config.parameters["confirmationWindowMinutes"] ?? 60)
+        // Configs normally pass through PaperTradingStore validation, but the
+        // engine is also a public value type and can be called directly by a
+        // package/test. Bound time arithmetic here so malformed doubles cannot
+        // produce infinite Date offsets.
+        let structureMinutes = Self.boundedFinite(config.parameters["entryTimeframeMinutes"], fallback: 60, lower: 1, upper: 1_440)
+        let windowMinutes = Self.boundedFinite(config.parameters["confirmationWindowMinutes"], fallback: 60, lower: 1, upper: 1_440)
         let windowStart = setup.timestamp.addingTimeInterval(structureMinutes * 60)
         let deadline = windowStart.addingTimeInterval(windowMinutes * 60)
         guard let confirmation = confirmations.first(where: {
@@ -243,7 +247,8 @@ public struct StrategyEngine: Sendable {
         }
         // cooldownBars is defined in 1h bars; four confirmed 15m evaluations
         // represent one hour in the execution path.
-        let cooldown = max(0, config.cooldownBars) * 4
+        let safeCooldownBars = min(max(0, config.cooldownBars), StrategyConfig.maximumCooldownBars)
+        let cooldown = safeCooldownBars * 4
         return evaluated(StrategyStatus(id: status.id, state: .running, direction: "short", cooldown: cooldown, pnl: status.pnl, lastSignal: signal, indicators: indicators))
     }
 
@@ -257,14 +262,20 @@ public struct StrategyEngine: Sendable {
     }
 
     private static func makeSweepSignal(config: StrategyConfig, setup: SweepSetup, entry: Double, timestamp: Date, reason: String) -> StrategySignal? {
-        let minATRPct = (config.parameters["minATRPct"] ?? 0.5) / 100
-        let maxRiskATR = config.parameters["maxRiskATR"] ?? 5.0
-        let tpMult = config.parameters["tpMult"] ?? 2.2
+        let minATRPct = Self.boundedFinite(config.parameters["minATRPct"], fallback: 0.5, lower: 0, upper: 100) / 100
+        let maxRiskATR = Self.boundedFinite(config.parameters["maxRiskATR"], fallback: 5.0, lower: 0, upper: 100)
+        let tpMult = Self.boundedFinite(config.parameters["tpMult"], fallback: 2.2, lower: 0, upper: 100)
         guard entry > 0, setup.atr > 0, setup.atr / entry >= minATRPct else { return nil }
         let risk = setup.stop - entry
         guard risk > 0, risk / setup.atr <= maxRiskATR else { return nil }
         let take = entry - tpMult * risk
+        guard take.isFinite, take > 0 else { return nil }
         return StrategySignal(strategyID: config.id, type: "entry_short", price: Decimal(entry), reason: reason, timestamp: timestamp, stopPrice: Decimal(setup.stop), takePrice: Decimal(take))
+    }
+
+    private static func boundedFinite(_ value: Double?, fallback: Double, lower: Double, upper: Double) -> Double {
+        guard let value, value.isFinite else { return fallback }
+        return min(max(value, lower), upper)
     }
 
     private static func btcGateAllows(at timestamp: Date, btcCandles: [Candle]?, enabled: Bool) -> Bool {
