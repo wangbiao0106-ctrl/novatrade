@@ -61,6 +61,7 @@ def _load_signal_parameters() -> dict:
         "tp_mult": float(signal["take_profit_r"]),
         "min_atr_pct": float(signal["min_atr_pct"]),
         "max_risk_atr": float(signal["max_risk_atr"]),
+        "max_stop_pct": float(position.get("max_stop_distance_pct", 15.0)),
         "max_hold": int(position.get("time_exit_bars", 96)),
         "max_hold_15m": int(position.get("time_exit_bars", 96)) * 4,
         "fee_rate": float(costs.get("fee_rate_one_way", 0.0005)),
@@ -243,6 +244,9 @@ def symbol_state(d, btc_d, cfg, d15=None):
             continue
         if risk / A[j] > cfg.get("max_risk_atr", 5.0):
             continue
+        # 执行层：止损距离超过池亏损上限（默认 15%）的信号不下单。
+        if risk / entry > cfg.get("max_stop_pct", 15.0) / 100:
+            continue
         # 出场扫描：从确认 K 线的下一根 15m 起，最多 max_hold_15m 根（=96 根 1h）。
         o15a, h15a, l15a = d15["o"], d15["h"], d15["l"]
         n15 = len(c15)
@@ -323,6 +327,7 @@ def main():
     run_cfg = dict(PARAMS)
     run_cfg["min_atr_pct"] = PARAMS["min_atr_pct"] if args.min_atr_pct is None else args.min_atr_pct
     run_cfg["max_risk_atr"] = PARAMS["max_risk_atr"] if args.max_risk_atr is None else args.max_risk_atr
+    run_cfg["max_stop_pct"] = PARAMS["max_stop_pct"]
 
     # 已上线规则要等 15m 收盘确认，所以必须把 15m 序列一起载入并对齐到同一时点。
     data15 = E.load_tf("15m")

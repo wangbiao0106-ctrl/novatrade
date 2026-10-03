@@ -544,7 +544,6 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "confirmationWindowMinutes": 60,
                 "leverage": 2,
                 "maxConcurrentPositions": 1,
-                "maxOpenRiskPercent": 10.0,
             ]
         case .doublePumpExhaustionShort:
             return [
@@ -553,37 +552,25 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
                 "rsiMin": 50.0, "volumeMultiple": 0.5, "stopATR": 0.45,
                 "targetR": 1.0, "minRiskATR": 0.5, "maxRiskATR": 3.0,
                 "minimumHistoryBars": 97, "leverage": 2,
-                "maxConcurrentPositions": 1, "maxOpenRiskPercent": 10.0,
+                "maxConcurrentPositions": 1,
             ]
         case .external: return [:]
         }
     }
 
-    /// 单笔止损风险预算上限，按**本策略资金池权益**的百分比计算（不是账户
-    /// 总资产）。运行时会把用户输入收敛到这个上限。
-    public var maxRiskPercent: Double {
-        switch self {
-        case .sweepReversalShort, .doublePumpExhaustionShort: return 10.0
-        case .external: return 0
-        }
-    }
+    /// 仓位契约：每个入场订单的名义仓位 = 本策略资金池可用余额 ×
+    /// ``notionalPoolMultiple``。没有按止损距离反推的风险预算；单笔最坏
+    /// 亏损就等于止损距离占入场价的百分比，由 ``maxStopDistancePercent``
+    /// 封顶。杠杆只决定保证金占用，不放大名义仓位。
+    public static let notionalPoolMultiple: Double = 1.0
 
-    /// 单笔止损风险预算默认值，同样以本策略资金池权益为基数。
-    public var defaultRiskPercent: Double {
-        switch self {
-        case .sweepReversalShort, .doublePumpExhaustionShort: return 10.0
-        case .external: return 0
-        }
-    }
+    /// 止损距离（|止损价 − 入场价| / 入场价）超过这个百分比的信号不下单。
+    /// 它把单笔亏损封顶在资金池权益的这个比例上；账户级日内熔断阈值必须
+    /// 大于各启用策略「资金池占比 × 本上限」之和，否则熔断会先于止损触发。
+    public static let maxStopDistancePercent: Double = 15.0
 
-    /// 策略全部未平仓位的止损风险合计上限，按本策略资金池权益的百分比计算。
-    /// 每个实例同时只允许一个持仓，所以它与单笔预算相同。
-    public var maxOpenRiskPercent: Double {
-        switch self {
-        case .sweepReversalShort, .doublePumpExhaustionShort: return 10.0
-        case .external: return 0
-        }
-    }
+    /// 单笔最坏亏损占本策略资金池权益的上限（= 止损距离上限 × 名义倍数）。
+    public static var maxLossPerTradePercent: Double { maxStopDistancePercent * notionalPoolMultiple }
 
     /// This rule supplies its own ATR-based protective stop. It is deliberately
     /// descriptive because the stop distance is calculated per signal, not a
@@ -796,9 +783,9 @@ public struct StrategyConfig: Codable, Equatable, Sendable, Identifiable {
     public var type: StrategyType
     public var parameters: [String: Double]
     public var enabled: Bool
-    public var riskPercent: Double
-    /// Percentage of account equity assigned to this strategy instance's
-    /// isolated capital pool. This is separate from the per-trade risk cap.
+    /// Percentage of account USDT equity assigned to this strategy instance's
+    /// isolated capital pool. Every entry order uses the pool's available
+    /// balance as its notional, so this is the only position-size knob.
     public var capitalPoolPercent: Double
     public var cooldownBars: Int
     public var scope: StrategyScope
@@ -817,9 +804,9 @@ public struct StrategyConfig: Codable, Equatable, Sendable, Identifiable {
         set { parameters["leverage"] = newValue }
     }
 
-    public init(id: UUID = UUID(), name: String, scope: StrategyScope, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, riskPercent: Double = 1, capitalPoolPercent: Double = 100, cooldownBars: Int = 3) {
+    public init(id: UUID = UUID(), name: String, scope: StrategyScope, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, capitalPoolPercent: Double = 100, cooldownBars: Int = 3) {
         self.id = id; self.name = name; self.interval = interval; self.type = type; self.parameters = parameters; self.enabled = enabled
-        self.riskPercent = riskPercent; self.capitalPoolPercent = capitalPoolPercent; self.cooldownBars = cooldownBars; self.scope = scope
+        self.capitalPoolPercent = capitalPoolPercent; self.cooldownBars = cooldownBars; self.scope = scope
     }
 }
 
@@ -1078,7 +1065,16 @@ public struct RiskLimits: Equatable, Sendable {
     public var maxDailyLossPercent: Decimal
     public var maxDrawdownPercent: Decimal
 
-    public init(maxInstrumentNotional: Decimal = 25_000, maxTotalNotional: Decimal = 100_000, maxMarginPercent: Decimal = 25, minOrderIntervalSeconds: Int = 15, maxOrdersPerHour: Int = 60, maxDailyLossPercent: Decimal = 5, maxDrawdownPercent: Decimal = 10) {
+    /// Account-level limits. Strategy-pool orders are bounded by their own
+    /// pool (`RiskEngine.authorize` skips the notional and margin ceilings
+    /// for them); the daily-loss circuit breaker applies to everything. The
+    /// default daily limit must exceed the sum over enabled strategies of
+    /// `capitalPoolPercent × StrategyType.maxLossPerTradePercent`, which
+    /// `TradingBackend` checks before a strategy is enabled. The cumulative
+    /// drawdown breaker is off by default: it measures from the all-time
+    /// equity peak and cannot be reset, so with full-pool sizing a normal
+    /// losing streak would latch the account permanently.
+    public init(maxInstrumentNotional: Decimal = 25_000, maxTotalNotional: Decimal = 100_000, maxMarginPercent: Decimal = 25, minOrderIntervalSeconds: Int = 15, maxOrdersPerHour: Int = 60, maxDailyLossPercent: Decimal = 20, maxDrawdownPercent: Decimal = 0) {
         // Limits are an input boundary.  A negative or non-finite ceiling can
         // otherwise make the comparison logic wrap into an unintended allow
         // path (or disable throttling entirely).  Invalid values fail closed

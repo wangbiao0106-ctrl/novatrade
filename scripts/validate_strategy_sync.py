@@ -24,6 +24,11 @@ STREAM_PATH = ROOT / "Sources" / "OKXLocalD" / "main.swift"
 UNIVERSE_RULES_PATH = ROOT / "Sources" / "TradingDomain" / "StrategyUniverseRules.swift"
 SIGNAL_PATH = LAB / "research" / "live_signal.py"
 RUNTIME_STRATEGY_DIRS = {"sweep_reversal_short", "double_pump_exhaustion_short"}
+# 运行时策略共用的仓位契约（与 StrategyType.notionalPoolMultiple /
+# maxStopDistancePercent 和 RiskLimits 默认日损熔断对应）。
+MAX_NOTIONAL_POOL_MULTIPLE = 1.0
+MAX_STOP_DISTANCE_PCT = 15.0
+ACCOUNT_DAILY_LOSS_PCT = 20.0
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -81,8 +86,12 @@ def main() -> int:
         fail(errors, "策略配置未声明首根符合条件的 15m 收盘确认")
     if integration.get("protective_exit_orders") != "implemented":
         fail(errors, "策略实验室未声明条件保护单已接入")
-    if integration.get("risk_distance_position_sizing") != "implemented":
-        fail(errors, "策略实验室未声明按止损距离 sizing 已接入")
+    if integration.get("full_pool_position_sizing") != "implemented":
+        fail(errors, "策略实验室未声明全池名义仓位 sizing 已接入")
+    if integration.get("stop_distance_cap") != "implemented":
+        fail(errors, "策略实验室未声明止损距离上限已接入")
+    if integration.get("circuit_breaker_headroom_check") != "implemented":
+        fail(errors, "策略实验室未声明熔断阈值余量校验已接入")
     if integration.get("strategy_time_exit") != "implemented":
         fail(errors, "策略实验室未声明时间离场已接入")
     if integration.get("account_daily_loss_circuit_breaker") != "implemented":
@@ -90,23 +99,25 @@ def main() -> int:
     position_management = config.get("position_management", {})
     if position_management.get("leverage") != 2.0:
         fail(errors, "扫顶策略实验室杠杆必须为 2 倍")
-    if position_management.get("risk_per_trade_pct") != 10.0:
-        fail(errors, "策略实验室单笔风险默认值必须为资金池权益的 10%")
-    if position_management.get("risk_per_trade_max_pct") != 10.0:
-        fail(errors, "策略实验室单笔风险硬上限必须为资金池权益的 10%")
     if position_management.get("max_concurrent_positions") != 1:
         fail(errors, "策略实验室必须限制策略实例同时只持有一个币种")
-    if position_management.get("max_open_risk_percent") != 10.0:
-        fail(errors, "策略实验室开放止损风险上限必须为资金池权益的 10%")
-    if position_management.get("risk_per_trade_scope") != "each_entry_order":
-        fail(errors, "策略实验室必须把单笔风险定义为每个入场订单")
-    if position_management.get("risk_per_trade_basis") != "strategy_pool_equity_at_authorization":
-        fail(errors, "策略实验室单笔风险基准必须是授权时策略资金池权益")
-    expected_sizing = "min(available_capital, pool_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))"
-    if position_management.get("sizing_formula") != expected_sizing:
-        fail(errors, "策略实验室 sizing 公式未明确按相对止损距离和可用余额封顶")
-    if position_management.get("risk_budget_costs_included") is not False:
-        fail(errors, "策略实验室必须明确单笔止损预算不包含成交成本，账户熔断负责 mark-to-market 成本")
+    # 仓位契约：每笔用满资金池可用余额（名义倍数 1），止损距离 > 15% 不下单；
+    # 没有 risk_per_trade_pct / 开放风险上限这类按止损距离反推的预算。
+    if position_management.get("sizing") != "full_pool_available_capital":
+        fail(errors, "策略实验室 sizing 必须是 full_pool_available_capital")
+    if position_management.get("notional_pool_multiple") != MAX_NOTIONAL_POOL_MULTIPLE:
+        fail(errors, f"策略实验室名义倍数必须为 {MAX_NOTIONAL_POOL_MULTIPLE}")
+    if position_management.get("sizing_formula") != "pool_available_capital * notional_pool_multiple":
+        fail(errors, "策略实验室 sizing 公式必须是 pool_available_capital * notional_pool_multiple")
+    if position_management.get("max_stop_distance_pct") != MAX_STOP_DISTANCE_PCT:
+        fail(errors, f"策略实验室止损距离上限必须为 {MAX_STOP_DISTANCE_PCT}%")
+    if position_management.get("max_loss_per_trade_pct_of_pool") != MAX_STOP_DISTANCE_PCT * MAX_NOTIONAL_POOL_MULTIPLE:
+        fail(errors, "策略实验室单笔最坏亏损必须等于止损距离上限 × 名义倍数")
+    if position_management.get("leverage_effect") != "margin_only":
+        fail(errors, "策略实验室必须声明杠杆只影响保证金占用")
+    for legacy in ("risk_per_trade_pct", "risk_per_trade_max_pct", "max_open_risk_percent", "risk_per_trade_basis", "risk_budget_costs_included"):
+        if legacy in position_management:
+            fail(errors, f"策略实验室仍保留已废弃的按止损距离 sizing 字段 {legacy}")
     risk_policy = config.get("risk_policy", {})
     required_actions = {
         "stop_all_strategies",
@@ -115,12 +126,14 @@ def main() -> int:
         "latch_until_manual_reset",
     }
     if (
-        risk_policy.get("account_daily_loss_percent") != 5.0
+        risk_policy.get("account_daily_loss_percent") != ACCOUNT_DAILY_LOSS_PCT
         or risk_policy.get("baseline") != "calendar_day_start_equity"
         or risk_policy.get("measurement") != "mark_to_market"
         or not required_actions.issubset(set(risk_policy.get("actions", [])))
     ):
-        fail(errors, "账户级日损熔断必须是 mark-to-market 的 5%")
+        fail(errors, f"账户级日损熔断必须是 mark-to-market 的 {ACCOUNT_DAILY_LOSS_PCT:g}%")
+    if ACCOUNT_DAILY_LOSS_PCT <= MAX_STOP_DISTANCE_PCT * MAX_NOTIONAL_POOL_MULTIPLE:
+        fail(errors, "账户日损熔断阈值必须高于单策略全池时的单笔最坏亏损")
     capital_pool = config.get("capital_pool", {})
     if (
         capital_pool.get("mode") != "per_strategy_instance"
@@ -222,18 +235,29 @@ def main() -> int:
         fail(errors, "新建策略表单未显示领域层的策略名称")
     if "isEligibleHotAltcoin" not in service_source:
         fail(errors, "后台热门榜未使用统一资产类别过滤")
-    if "config.type.maxRiskPercent" not in service_source:
-        fail(errors, "后端未按策略类型收敛单笔风险上限")
-    if "maxRiskPercent" not in domain or "10.0" not in domain[domain.index("public var maxRiskPercent"):domain.index("public var defaultRiskPercent")]:
-        fail(errors, "领域层策略风险上限未同步为资金池权益的 10%")
     if "capitalPoolPercent" not in service_source or "strategyCapital" not in service_source:
         fail(errors, "后端未接入策略资金池")
-    if "let riskBudget = pool.equity * Decimal(config.riskPercent) / 100" not in service_source:
-        fail(errors, "后端未以授权时策略资金池权益计算单笔风险预算")
-    if "let limit = pool.equity * cap / 100" not in (ROOT / "Sources" / "TradingService" / "PaperTrading.swift").read_text():
-        fail(errors, "风控引擎的开放止损风险上限未按策略资金池权益计算")
-    if "targetNotional = min(pool.availableCapital, riskBudget * entry / riskDistance)" not in service_source:
-        fail(errors, "后端未按止损距离 sizing 并受资金池可用余额封顶")
+    if "riskPercent" in domain or "maxRiskPercent" in domain or "maxOpenRiskPercent" in domain:
+        fail(errors, "领域层仍保留按止损距离 sizing 的风险预算字段")
+    stop_cap = re.search(r"maxStopDistancePercent:\s*Double\s*=\s*([0-9.]+)", domain)
+    multiple = re.search(r"notionalPoolMultiple:\s*Double\s*=\s*([0-9.]+)", domain)
+    if not stop_cap or float(stop_cap.group(1)) != MAX_STOP_DISTANCE_PCT:
+        fail(errors, f"StrategyType.maxStopDistancePercent 与实验室止损距离上限 {MAX_STOP_DISTANCE_PCT}% 不一致")
+    if not multiple or float(multiple.group(1)) != MAX_NOTIONAL_POOL_MULTIPLE:
+        fail(errors, f"StrategyType.notionalPoolMultiple 与实验室名义倍数 {MAX_NOTIONAL_POOL_MULTIPLE} 不一致")
+    if "let targetNotional = pool.availableCapital * Decimal(StrategyType.notionalPoolMultiple)" not in service_source:
+        fail(errors, "后端未按资金池可用余额 × 名义倍数 sizing")
+    if "stopDistancePercent <= Decimal(StrategyType.maxStopDistancePercent)" not in service_source:
+        fail(errors, "后端未执行止损距离上限")
+    if "func requireCircuitBreakerHeadroom" not in service_source or "StrategyType.maxLossPerTradePercent" not in service_source:
+        fail(errors, "后端未在启用策略时校验熔断阈值高于全池单笔最坏亏损")
+    limits_default = re.search(r"maxDailyLossPercent:\s*Decimal\s*=\s*([0-9.]+),\s*maxDrawdownPercent:\s*Decimal\s*=\s*([0-9.]+)\)", domain)
+    if not limits_default or float(limits_default.group(1)) != ACCOUNT_DAILY_LOSS_PCT:
+        fail(errors, f"RiskLimits 默认日损熔断与实验室 {ACCOUNT_DAILY_LOSS_PCT:g}% 不一致")
+    if limits_default and float(limits_default.group(2)) != 0:
+        fail(errors, "RiskLimits 默认累计回撤熔断必须关闭（无法复位）")
+    if "if strategyID == nil {" not in (ROOT / "Sources" / "TradingService" / "PaperTrading.swift").read_text():
+        fail(errors, "风控引擎未把账户级名义/保证金上限限定为非策略订单")
     if "enforceGlobalRiskIfNeeded" not in service_source or "closeDemoPosition" not in service_source:
         fail(errors, "后端未接入账户级熔断处置")
 
@@ -246,10 +270,8 @@ def main() -> int:
         fail(errors, "新建策略表单未使用领域层的规则默认参数")
     if "stopLossDescription" not in domain or "stopLossDescription" not in main_source:
         fail(errors, "策略自带止损规则未在领域层和前台展示")
-    if '"maxConcurrentPositions": 1' not in domain or '"maxOpenRiskPercent": 10.0' not in domain:
-        fail(errors, "运行时默认参数未同步策略级单币种并发和开放风险上限")
-    if "pool.equity * Decimal(config.riskPercent)" not in service_source:
-        fail(errors, "后端单笔风险预算未按策略资金池权益计算")
+    if '"maxConcurrentPositions": 1' not in domain:
+        fail(errors, "运行时默认参数未同步策略级单币种并发上限")
 
     # 运行时默认参数必须与实验室 config 的 signal_parameters 逐项一致。
     def swift_default_parameters(case_label: str) -> dict[str, float]:
@@ -362,6 +384,17 @@ def main() -> int:
     for artifact in ("live_rule_report_tiers.json", "live_rule_report_rolling_rank.json"):
         if artifact not in spec_text:
             fail(errors, f"STRATEGY_SPEC 未指向分层产物 {artifact}")
+    # 全历史复核脚本必须存在，且必须通过 prep.py 的独立数据集复现（不覆盖 177 币基线）。
+    full_history = LAB / "research" / "report_full_history.py"
+    if not full_history.exists() or "prep.main" not in full_history.read_text():
+        fail(errors, "缺少从 prep.py 独立数据集复现的全历史复核脚本 research/report_full_history.py")
+    if "report_full_history.py" not in spec_text:
+        fail(errors, "STRATEGY_SPEC 未指向全历史复核脚本 report_full_history.py")
+    dme_full_history = ROOT / "strategies" / "double_pump_exhaustion_short" / "research" / "report_full_history.py"
+    if not dme_full_history.exists():
+        fail(errors, "DME 缺少全历史复核脚本 research/report_full_history.py")
+    if not (ROOT / "strategies" / "double_pump_exhaustion_short" / "results" / "full_history" / "report.json").exists():
+        fail(errors, "DME 缺少 results/full_history/report.json 复核产物")
     if "universe.json" not in live_signal or "EXCLUDED_BASES" not in live_signal:
         fail(errors, "实验室实时扫描器未复用 universe.json 的排除清单")
     if "def _load_signal_parameters" not in live_signal or "strategy.json" not in live_signal:
@@ -428,8 +461,10 @@ def main() -> int:
             fail(errors, f"{label} 未明确 BTC 历史不足时关闭门控")
         if "15m" not in document or "市价" not in document:
             fail(errors, f"{label} 未明确 15m 收盘确认和市价入场")
-        if "每个入场订单" not in document or "授权时" not in document or ("账户权益" not in document and "策略资金池权益" not in document):
-            fail(errors, f"{label} 未明确单笔风险的订单范围和权益基准")
+        if "资金池可用余额" not in document or "15%" not in document or "止损距离" not in document:
+            fail(errors, f"{label} 未明确全池名义仓位和 15% 止损距离上限")
+        if "20%" not in document or "熔断" not in document:
+            fail(errors, f"{label} 未明确 20% 账户日内熔断及其余量要求")
         if "未实现浮盈" not in document or "已实现盈亏" not in document or "滚仓" not in document:
             fail(errors, f"{label} 未明确资金池滚仓和浮盈不可释放规则")
     if not ("执行边界" in strategy_doc or "执行状态" in strategy_doc) or "保护单" not in strategy_doc:
@@ -461,18 +496,17 @@ def main() -> int:
         except Exception as exc:
             fail(errors, f"无法读取 {config_path.relative_to(ROOT)}：{exc}")
             continue
-        # 运行时接入的策略共用一份风险契约：单笔与开放止损风险都是本策略
-        # 资金池权益的 10%。纯研究目录保留各自回测时声明的口径。
-        risk_blocks = [strategy_config.get("position_management", {}),
-                       strategy_config.get("portfolio", {})]
-        for block in risk_blocks if strategy_dir.name in RUNTIME_STRATEGY_DIRS else []:
-            if "risk_per_trade_pct" in block and block.get("risk_per_trade_pct") != 10.0:
-                fail(errors, f"{strategy_dir.name} 单笔风险必须为资金池权益的 10%")
-            for key in ("risk_per_trade_max_pct", "max_open_risk_pct", "max_open_risk_percent"):
-                if key in block and block.get(key) != 10.0:
-                    fail(errors, f"{strategy_dir.name} 的 {key} 必须为资金池权益的 10%")
-            if "risk_per_trade_basis" in block and block.get("risk_per_trade_basis") != "strategy_pool_equity_at_authorization":
-                fail(errors, f"{strategy_dir.name} 单笔风险基准必须是授权时策略资金池权益")
+        # 运行时接入的策略共用一份仓位契约：每笔用满资金池可用余额（名义倍数 1），
+        # 止损距离 > 15% 不下单。纯研究目录保留各自回测时声明的口径。
+        if strategy_dir.name in RUNTIME_STRATEGY_DIRS:
+            block = strategy_config.get("position_management", {})
+            if block.get("sizing") != "full_pool_available_capital" or block.get("notional_pool_multiple") != MAX_NOTIONAL_POOL_MULTIPLE:
+                fail(errors, f"{strategy_dir.name} 必须声明全池名义仓位 sizing（倍数 {MAX_NOTIONAL_POOL_MULTIPLE}）")
+            if block.get("max_stop_distance_pct") != MAX_STOP_DISTANCE_PCT:
+                fail(errors, f"{strategy_dir.name} 止损距离上限必须为 {MAX_STOP_DISTANCE_PCT}%")
+            for key in ("risk_per_trade_pct", "risk_per_trade_max_pct", "max_open_risk_pct", "max_open_risk_percent", "risk_per_trade_basis"):
+                if key in block:
+                    fail(errors, f"{strategy_dir.name} 仍保留已废弃的按止损距离 sizing 字段 {key}")
         if strategy_dir.name != "ema_3line_pullback" and not any(key in strategy_config for key in ("universe", "runtime_universe", "market")):
             fail(errors, f"{strategy_dir.name} 未声明适合标的范围")
         document = doc_path.read_text()
@@ -491,7 +525,8 @@ def main() -> int:
             "evaluation_interval": "confirmed_15m_close",
             "order_routing": "account_mode",
             "enabled_by_default": False,
-            "max_open_risk_pct": 10.0,
+            "sizing": "full_pool_available_capital",
+            "max_stop_distance_pct": MAX_STOP_DISTANCE_PCT,
         }.items():
             if dme_runtime.get(key) != want:
                 fail(errors, f"DME runtime.{key} 未同步为 {want!r}")
@@ -506,7 +541,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}")
         return 1
-    print("策略实验室与运行时代码同步检查通过（运行时策略 10% 资金池风险契约 + sweep v1.4 + DME 1.0）")
+    print("策略实验室与运行时代码同步检查通过（运行时策略全池仓位契约：名义 1× 资金池、止损距离 ≤15%、日损熔断 20% + sweep v1.4 + DME 1.0）")
     return 0
 
 

@@ -166,7 +166,7 @@ func strategyStoreRejectsFixedInstrumentScopes() async throws {
     ]
     for scope in invalidScopes {
         do {
-            _ = try await store.create(StrategyConfig(name: "无效范围", scope: scope, interval: .oneHour, type: .sweepReversalShort, riskPercent: 0.5))
+            _ = try await store.create(StrategyConfig(name: "无效范围", scope: scope, interval: .oneHour, type: .sweepReversalShort))
             Issue.record("expected a strategy scope with anything other than one instrument to be rejected")
         } catch PaperTradingStore.StoreError.unsupported {
             // Expected.
@@ -250,7 +250,7 @@ func strategyStoreAllowsOneInstancePerRuleAndDeletesIt() async throws {
 func tradingBackendCannotRestartStrategyWhileAccountKillSwitchIsLatched() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-kill-switch-start-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
-    let risk = RiskEngine(initialEquity: 1_000)
+    let risk = RiskEngine(limits: RiskLimits(maxDailyLossPercent: 5), initialEquity: 1_000)
     await risk.synchronizeStrategyCapital(1_000)
     let backend = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: risk)
     let config = try await backend.createStrategy(StrategyConfig(name: "山寨币二次扫顶做空", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort))
@@ -269,7 +269,7 @@ func tradingBackendCannotRestartStrategyWhileAccountKillSwitchIsLatched() async 
 func tradingBackendAllowsSavingPausedStrategyWhileAccountKillSwitchIsLatched() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-kill-switch-save-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
-    let risk = RiskEngine(initialEquity: 1_000)
+    let risk = RiskEngine(limits: RiskLimits(maxDailyLossPercent: 5), initialEquity: 1_000)
     await risk.synchronizeStrategyCapital(1_000)
     let backend = TradingBackend(paper: PaperTradingStore(directory: directory), riskEngine: risk)
     let lossTime = Date(timeIntervalSince1970: 1_700_000_000)
@@ -292,8 +292,7 @@ func tradingBackendAllowsSavingPausedStrategyWhileAccountKillSwitchIsLatched() a
             scope: .dynamic(.hotAltcoins),
             interval: .fifteenMinutes,
             type: .doublePumpExhaustionShort,
-            enabled: true,
-            riskPercent: 0.5
+            enabled: true
         ))
         Issue.record("expected enabled strategy creation to be blocked by the account kill switch")
     } catch {
@@ -321,21 +320,37 @@ func deletingStrategyPersistsRemovalOfItsCapitalPool() async throws {
 }
 
 @Test
-func strategyStoreAcceptsTenPercentRiskAndRejectsAboveIt() async throws {
+func strategyStoreDropsLegacyPerTradeRiskParameters() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("novatrade-strategy-risk-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = PaperTradingStore(directory: directory)
-    let accepted = StrategyConfig(name: "上限内", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 10.0)
-    let created = try await store.create(accepted)
-    #expect(created.riskPercent == 10.0)
-    #expect(created.parameters["maxOpenRiskPercent"] == 10.0)
-    let config = StrategyConfig(name: "超限", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, riskPercent: 10.1)
-    do {
-        _ = try await store.create(config)
-        Issue.record("expected risk above ten percent of the pool to be rejected")
-    } catch PaperTradingStore.StoreError.unsupported {
-        // Expected.
-    }
+    var parameters = StrategyType.sweepReversalShort.defaultParameters
+    parameters["maxOpenRiskPercent"] = 10.0
+    let created = try await store.create(StrategyConfig(name: "全池仓位", scope: .dynamic(.hotAltcoins), interval: .oneHour, type: .sweepReversalShort, parameters: parameters))
+    // Position size is the pool itself; a persisted legacy open-risk cap must
+    // not survive canonicalization and no per-trade risk knob exists.
+    #expect(created.parameters["maxOpenRiskPercent"] == nil)
+    #expect(created.parameters["maxConcurrentPositions"] == 1)
+    #expect(StrategyType.sweepReversalShort.defaultParameters["maxOpenRiskPercent"] == nil)
+    #expect(StrategyType.doublePumpExhaustionShort.defaultParameters["maxOpenRiskPercent"] == nil)
+    #expect(StrategyType.maxLossPerTradePercent == 15)
+}
+
+@Test
+func riskEngineSizesStrategyOrdersByPoolNotAccountMarginCeiling() async {
+    // Account-level margin/notional ceilings are for standalone orders. A
+    // strategy order that uses its whole pool must pass with default limits.
+    let risk = RiskEngine(initialEquity: 10_000)
+    await risk.synchronizeStrategyCapital(10_000)
+    let strategyID = UUID()
+    _ = await risk.registerStrategy(strategyID, allocationPercent: 100)
+    let fullPool = await risk.authorize(instrumentID: "ALT-USDT-SWAP", notional: 10_000, margin: 10_000, strategyID: strategyID, maxConcurrentPositions: 1)
+    #expect(fullPool.allowed)
+    let overPool = await risk.authorize(instrumentID: "ALT2-USDT-SWAP", notional: 1, margin: 1, strategyID: strategyID, maxConcurrentPositions: 1)
+    #expect(!overPool.allowed)
+    #expect(overPool.reason == "策略资金池可用余额不足")
+    let standalone = await risk.authorize(instrumentID: "BTC-USDT-SWAP", notional: 5_000, margin: 5_000)
+    #expect(standalone.reason == "单笔保证金超过权益比例")
 }
 
 @Test
@@ -564,6 +579,18 @@ func riskEngineEnforcesNotionalAndThrottleLimits() async {
 }
 
 @Test
+func riskLimitsDefaultBreakerSitsAboveFullPoolSingleTradeLoss() {
+    // One strategy with the whole account as its pool can lose
+    // `maxLossPerTradePercent` on a single stop; the default daily breaker
+    // must leave headroom above that and the unresettable drawdown breaker
+    // stays off.
+    let limits = RiskLimits()
+    #expect(limits.maxDailyLossPercent == 20)
+    #expect(limits.maxDailyLossPercent > Decimal(StrategyType.maxLossPerTradePercent))
+    #expect(limits.maxDrawdownPercent == 0)
+}
+
+@Test
 func riskLimitsNormalizeInvalidCeilingsToFailClosedValues() {
     let limits = RiskLimits(maxInstrumentNotional: -1, maxTotalNotional: -2, maxMarginPercent: -3,
                             minOrderIntervalSeconds: -4, maxOrdersPerHour: -5,
@@ -674,13 +701,13 @@ func riskEngineRestoresPriorDayKillAndAllowsResetOnTheNewDay() async {
     let dayOne = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 23))!
     let dayTwo = calendar.date(from: DateComponents(year: 2026, month: 9, day: 2, hour: 0, minute: 1))!
 
-    let source = RiskEngine(initialEquity: 1_000)
+    let source = RiskEngine(limits: RiskLimits(maxDailyLossPercent: 5), initialEquity: 1_000)
     await source.record(realizedPnL: -60, now: dayOne)
     let persisted = await source.snapshot(now: dayOne)
     #expect(persisted.killSwitch)
     #expect(persisted.dayStartAt != nil)
 
-    let restored = RiskEngine(initialEquity: 100_000)
+    let restored = RiskEngine(limits: RiskLimits(maxDailyLossPercent: 5), initialEquity: 100_000)
     await restored.restore(persisted, now: dayTwo)
     let afterRestart = await restored.snapshot(now: dayTwo)
     #expect(afterRestart.dayStartEquity == Decimal(940))
@@ -697,7 +724,7 @@ func riskEngineTripwiresDailyLossLimit() async {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     let dayOne = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 23, minute: 0))!
-    let risk = RiskEngine(initialEquity: 1000)
+    let risk = RiskEngine(limits: RiskLimits(maxDailyLossPercent: 5), initialEquity: 1000)
     await risk.record(realizedPnL: -20, now: dayOne)
     #expect(!(await risk.snapshot(now: dayOne)).killSwitch)
     await risk.record(realizedPnL: -40, now: dayOne.addingTimeInterval(60))
@@ -708,7 +735,7 @@ func riskEngineTripwiresDailyLossLimit() async {
 
 @Test
 func riskEngineTripwiresDailyLossOnMarkToMarketEquity() async {
-    let risk = RiskEngine(initialEquity: 10_000)
+    let risk = RiskEngine(limits: RiskLimits(maxDailyLossPercent: 5), initialEquity: 10_000)
     let now = Date(timeIntervalSince1970: 1_700_000_000)
     await risk.markToMarket(unrealizedPnL: -500, now: now)
     let snapshot = await risk.snapshot(now: now)
@@ -720,7 +747,7 @@ func riskEngineTripwiresDailyLossOnMarkToMarketEquity() async {
 
 @Test
 func riskEngineTripwiresCumulativeDrawdownLimit() async {
-    let risk = RiskEngine(initialEquity: 10_000)
+    let risk = RiskEngine(limits: RiskLimits(maxDailyLossPercent: 5, maxDrawdownPercent: 10), initialEquity: 10_000)
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     let dayOne = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 12))!

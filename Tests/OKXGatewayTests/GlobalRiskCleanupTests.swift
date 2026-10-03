@@ -54,7 +54,7 @@ func globalCircuitBreakerRetriesAcceptedCloseUntilRemotePositionIsFlat() async t
     let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory))
     _ = try await backend.account()
 
-    await runner.setEquity(900)
+    await runner.setEquity(700)
     _ = try await backend.account()
     #expect((await backend.riskEngine.snapshot()).killSwitch)
     #expect(await runner.closes() == 1)
@@ -76,7 +76,7 @@ func globalCircuitBreakerClosesIsolatedPositionInIsolatedMode() async throws {
     let backend = TradingBackend(market: market, paper: PaperTradingStore(directory: directory))
     _ = try await backend.account()
 
-    await runner.setEquity(900)
+    await runner.setEquity(700)
     _ = try await backend.account()
     let closes = await runner.closeArguments()
     #expect(closes.count == 1)

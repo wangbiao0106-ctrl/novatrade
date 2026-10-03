@@ -56,6 +56,7 @@ MAX_HOLD_15M = COSTS["max_hold_bars"] * 4   # 96 根 1h = 384 根 15m
 FEE = COSTS["fee"]
 MIN_ATR_PCT = COSTS["min_atr_pct"] / 100    # config 里是百分数
 MAX_RISK_ATR = COSTS["max_risk_atr"]
+MAX_STOP_PCT = COSTS["max_stop_pct"] / 100     # 止损距离占入场价上限（运行时 StrategyType.maxStopDistancePercent）
 
 
 def btc_flags(ev, btc):
@@ -78,7 +79,7 @@ def collect(pool: str, data1: dict, data15: dict, btc, fee: float = FEE,
     else:
         pool_set = set(json.load(open(os.path.join(CONFIG, "universe_recommended.json")))["recommended_low_mid"])
     rows: list[dict] = []
-    counters = {"events": 0, "no_15m": 0, "atr_guard": 0, "risk_guard": 0, "no_confirmation": 0}
+    counters = {"events": 0, "no_15m": 0, "atr_guard": 0, "risk_guard": 0, "stop_distance_guard": 0, "no_confirmation": 0}
     for sym in sorted(pool_set):
         d1 = data1.get(sym)
         d15 = data15.get(sym)
@@ -120,6 +121,10 @@ def collect(pool: str, data1: dict, data15: dict, btc, fee: float = FEE,
             risk = stop - entry
             if risk <= 0 or risk / atr_j > MAX_RISK_ATR:
                 counters["risk_guard"] += 1
+                continue
+            # 执行层：止损距离 > 15% 的信号不下单（名义 = 1 × 池，即单笔亏损上限）。
+            if risk / entry > MAX_STOP_PCT:
+                counters["stop_distance_guard"] += 1
                 continue
             event = {"ext": float(ev["ext"][i]), "atr_k": atr_j}
             trade = T.market_trade(sym, pool, "live_rule", d15, event, entry_idx, entry,
@@ -372,7 +377,7 @@ def main() -> None:
         "window": {"start": int(df.entry_ts.min()), "end": int(df.entry_ts.max())},
         "leverage": COSTS["leverage"],
         "costs": {"fee_per_side": args.fee, "slippage": 0.0},
-        "guards": {"min_atr_pct": MIN_ATR_PCT, "max_risk_atr": MAX_RISK_ATR, "btc_gate": True,
+        "guards": {"min_atr_pct": MIN_ATR_PCT, "max_risk_atr": MAX_RISK_ATR, "max_stop_distance_pct": MAX_STOP_PCT * 100, "btc_gate": True,
                    "confirmation_window_minutes": 60, "max_hold_bars_15m": MAX_HOLD_15M},
         "structures": counters,
         "full": stats(df),

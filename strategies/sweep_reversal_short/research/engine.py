@@ -110,6 +110,8 @@ def lab_parameters(config_path=LAB_CONFIG_PATH):
         "atr_period": int(signal["atr_period"]), "buf_atr": float(signal["buffer_atr"]),
         "tp_mult": float(signal["take_profit_r"]), "min_atr_pct": float(signal["min_atr_pct"]),
         "max_risk_atr": float(signal["max_risk_atr"]), "max_hold_bars": int(payload.get("position_management", {}).get("time_exit_bars", 96)),
+        # 执行层止损距离上限（价格百分比）：名义仓位 = 1 × 资金池，所以它就是单笔亏损上限。
+        "max_stop_pct": float(payload.get("position_management", {}).get("max_stop_distance_pct", 15.0)),
         "leverage": float(payload.get("position_management", {}).get("leverage", 2.0)),
         "fee": float(costs.get("fee_rate_one_way", 0.0005)),
     }

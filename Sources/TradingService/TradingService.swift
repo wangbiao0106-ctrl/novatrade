@@ -82,12 +82,10 @@ public actor PaperTradingStore {
             // Strategy instances scan their own live universe; stale generic
             // scopes converge to the strategy's canonical scope.
             normalized.scope = config.type.defaultScope
-            normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
         case .doublePumpExhaustionShort:
             normalized.name = config.type.displayName
             normalized.interval = config.type.entryInterval
             normalized.scope = config.type.defaultScope
-            normalized.riskPercent = min(max(normalized.riskPercent, 0.1), config.type.maxRiskPercent)
             normalized.cooldownBars = config.type.defaultCooldownBars
         case .external:
             // Keep an orphaned package instance visible so its ledger and
@@ -96,11 +94,10 @@ public actor PaperTradingStore {
             normalized.enabled = false
         }
         // A strategy may scan many symbols, but its instance-level execution
-        // policy allows only one active symbol at a time. The open-risk cap is
-        // a percentage of the strategy's own pool equity, like the per-trade
-        // budget, so a strategy cannot be sized off the whole account.
+        // policy allows only one active symbol at a time. Position size is not
+        // a parameter: every entry uses the pool's available balance.
         normalized.parameters["maxConcurrentPositions"] = 1
-        normalized.parameters["maxOpenRiskPercent"] = config.type.maxOpenRiskPercent
+        normalized.parameters.removeValue(forKey: "maxOpenRiskPercent")
         normalized.capitalPoolPercent = min(max(normalized.capitalPoolPercent, 0.1), 100.0)
         return normalized
     }
@@ -272,8 +269,6 @@ public actor PaperTradingStore {
     public func create(_ config: StrategyConfig) throws -> StrategyConfig {
         guard config.type.hasRuntimeHandler,
               Self.supports(config),
-              config.riskPercent > 0,
-              config.riskPercent <= config.type.maxRiskPercent,
               config.capitalPoolPercent > 0,
               config.capitalPoolPercent <= 100,
               Self.validLeverage(config) else { throw StoreError.unsupported }
@@ -290,8 +285,6 @@ public actor PaperTradingStore {
     public func update(_ config: StrategyConfig) throws -> StrategyConfig {
         guard config.type.hasRuntimeHandler,
               Self.supports(config),
-              config.riskPercent > 0,
-              config.riskPercent <= config.type.maxRiskPercent,
               config.capitalPoolPercent > 0,
               config.capitalPoolPercent <= 100,
               Self.validLeverage(config) else { throw StoreError.unsupported }
@@ -1529,6 +1522,21 @@ public actor TradingBackend {
         }
     }
 
+    /// Full-pool sizing makes a strategy's worst single-trade loss equal to
+    /// `capitalPoolPercent × StrategyType.maxLossPerTradePercent` of the
+    /// account. The daily-loss circuit breaker has to sit above the sum of
+    /// those losses across enabled strategies; otherwise it fires on an
+    /// ordinary adverse move before the stop does and latches the account.
+    private func requireCircuitBreakerHeadroom(enabling config: StrategyConfig) async throws {
+        let limit = await riskEngine.limits.maxDailyLossPercent
+        let others = await paper.allStrategies().filter { $0.enabled && $0.id != config.id }
+        let perTrade = Decimal(StrategyType.maxLossPerTradePercent) / 100
+        let exposure = (others + [config]).reduce(Decimal(0)) { $0 + Decimal($1.capitalPoolPercent) * perTrade }
+        guard exposure < limit else {
+            throw ATKError.unavailable("账户日内熔断阈值 \(limit)% 未高于启用策略的单笔最坏亏损合计 \(exposure)%（资金池占比 × \(StrategyType.maxLossPerTradePercent)%），请降低资金池占比或提高熔断阈值")
+        }
+    }
+
     /// Returns remote order ids which this service can attribute to a
     /// strategy. The exchange does not carry strategy metadata, so the
     /// persisted order ledger and the in-flight reservation ledger are the
@@ -1638,6 +1646,9 @@ public actor TradingBackend {
             try await requireStrategyMutationsAllowed()
         }
         let normalized = try await normalizedCapitalPoolConfig(config)
+        if normalized.enabled {
+            try await requireCircuitBreakerHeadroom(enabling: normalized)
+        }
         let created = try await paper.create(normalized)
         _ = await riskEngine.registerStrategy(created.id, allocationPercent: Decimal(created.capitalPoolPercent))
         await paper.setRisk(await riskEngine.snapshot())
@@ -1654,6 +1665,9 @@ public actor TradingBackend {
             try await requireStrategyMutationsAllowed()
         }
         let normalized = try await normalizedCapitalPoolConfig(config, excluding: config.id)
+        if normalized.enabled {
+            try await requireCircuitBreakerHeadroom(enabling: normalized)
+        }
         let updated = try await paper.update(normalized)
         _ = await riskEngine.updateStrategyAllocation(updated.id, allocationPercent: Decimal(updated.capitalPoolPercent))
         await paper.setRisk(await riskEngine.snapshot())
@@ -1746,6 +1760,11 @@ public actor TradingBackend {
             appendLog("策略启动被拒绝：账户风控已熔断，需新日手动复位后才能启动", level: "warning")
             throw ATKError.unavailable("账户风控已熔断，请在新日复位后再启动策略")
         }
+        guard var enabling = await paper.allStrategies().first(where: { $0.id == id }) else {
+            throw PaperTradingStore.StoreError.notFound
+        }
+        enabling.enabled = true
+        try await requireCircuitBreakerHeadroom(enabling: enabling)
         let config = try await paper.setState(id, running: true)
         _ = await riskEngine.registerStrategy(config.id, allocationPercent: Decimal(config.capitalPoolPercent))
         await paper.setRisk(await riskEngine.snapshot())
@@ -2811,17 +2830,18 @@ public actor TradingBackend {
             }
         }
         let riskDistance = stopPrice.map { abs($0 - entry) } ?? 0
-        // The stop-loss budget is a percentage of this strategy's own pool
-        // equity at authorization (realized results compound into it,
-        // unrealized ones do not). Sizing off the whole account would let a
-        // 1% pool carry a position sized for the full balance.
-        let riskBudget = pool.equity * Decimal(config.riskPercent) / 100
-        let targetNotional: Decimal
+        // Full-pool sizing: the notional is the pool's available balance times
+        // a fixed multiple (1×), so the worst loss of this order equals its
+        // stop distance. The stop-distance cap below is therefore the per-trade
+        // loss cap, expressed in price percent. Leverage only changes margin.
         if riskDistance > 0, entry > 0 {
-            targetNotional = min(pool.availableCapital, riskBudget * entry / riskDistance)
-        } else {
-            targetNotional = pool.availableCapital
+            let stopDistancePercent = riskDistance / entry * 100
+            guard stopDistancePercent <= Decimal(StrategyType.maxStopDistancePercent) else {
+                appendLog("策略 \(config.name) 未发送：\(instrumentID) 止损距离 \(stopDistancePercent)% 超过 \(StrategyType.maxStopDistancePercent)% 上限，不下单", level: "warning")
+                return false
+            }
         }
+        let targetNotional = pool.availableCapital * Decimal(StrategyType.notionalPoolMultiple)
         guard targetNotional > 0, ticker.last > 0 else {
             appendLog("策略 \(config.name) 未发送：资金池无可用余额", level: "warning")
             return false
@@ -2833,10 +2853,8 @@ public actor TradingBackend {
             return false
         }
         let notional = abs(spec.notional(forContracts: quantity, price: ticker.last))
-        // 本单的止损风险，用于执行策略资金池的"开放风险 ≤ 池权益比例"上限
-        // 风险金额用于累计开放止损风险的授权检查。
+        // 本单的止损风险只用于资金池快照展示，不再作为授权上限。
         let orderRisk = riskDistance > 0 ? quantity * riskDistance * spec.contractValue : 0
-        let maxOpenRiskPercent: Decimal? = Decimal(config.parameters["maxOpenRiskPercent"] ?? 0)
         // A pause or update may have arrived during account/ticker reads.
         // Never submit a signal using a stale strategy definition.
         guard await paper.allStrategies().contains(config) else { return false }
@@ -2856,7 +2874,7 @@ public actor TradingBackend {
         let (decision, submissionToken) = await authorizeRemoteSubmission(
             instrumentID: instrumentID, notional: notional,
             strategyID: config.id, poolAllocationPercent: Decimal(config.capitalPoolPercent),
-            riskAmount: orderRisk, maxOpenRiskPercent: maxOpenRiskPercent,
+            riskAmount: orderRisk,
             maxConcurrentPositions: maxConcurrent,
             clientOrderID: clientOrderID, demo: demo, localOrderID: order.id
         )

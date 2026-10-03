@@ -35,7 +35,7 @@ private func doublePumpConfig() -> StrategyConfig {
                    scope: .dynamic(.hotAltcoins), interval: .fifteenMinutes,
                    type: .doublePumpExhaustionShort,
                    parameters: StrategyType.doublePumpExhaustionShort.defaultParameters,
-                   enabled: true, riskPercent: 1.0, cooldownBars: 16)
+                   enabled: true, cooldownBars: 16)
 }
 
 private func doublePumpCandles(quoteVolume: Decimal? = 50, contiguous: Bool = true, boundary: Bool = false) -> [Candle] {

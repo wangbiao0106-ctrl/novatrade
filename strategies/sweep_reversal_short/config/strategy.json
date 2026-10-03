@@ -61,7 +61,7 @@
     "when_off": "停止新开仓，已持仓位按原止损止盈管理"
   },
   "risk_policy": {
-    "account_daily_loss_percent": 5.0,
+    "account_daily_loss_percent": 20.0,
     "baseline": "calendar_day_start_equity",
     "measurement": "mark_to_market",
     "actions": [
@@ -70,7 +70,9 @@
       "close_all_positions_reduce_only",
       "latch_until_manual_reset"
     ],
-    "strategy_rules_before_trip": "strategy_specific_stop_take_time_exit"
+    "strategy_rules_before_trip": "strategy_specific_stop_take_time_exit",
+    "headroom_rule": "account_daily_loss_percent 必须大于 Σ(启用策略资金池占比 × max_loss_per_trade_pct_of_pool)/100，运行时在创建/更新/启动启用策略时校验",
+    "cumulative_drawdown_breaker": "disabled_by_default_cannot_be_reset"
   },
   "capital_pool": {
     "mode": "per_strategy_instance",
@@ -85,15 +87,15 @@
     "take_profit": "入场价 - 2.2 * (止损 - 入场价)",
     "time_exit_bars": 96,
     "cooldown_bars": 96,
-    "risk_per_trade_pct": 10.0,
-    "risk_per_trade_max_pct": 10.0,
-    "risk_per_trade_scope": "each_entry_order",
-    "risk_per_trade_basis": "strategy_pool_equity_at_authorization",
-    "sizing_formula": "min(available_capital, pool_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))",
-    "risk_budget_costs_included": false,
-    "risk_reference": "strategy_pool_equity",
+    "sizing": "full_pool_available_capital",
+    "notional_pool_multiple": 1.0,
+    "sizing_formula": "pool_available_capital * notional_pool_multiple",
+    "sizing_basis": "strategy_pool_available_capital_at_authorization",
+    "max_stop_distance_pct": 15.0,
+    "max_loss_per_trade_pct_of_pool": 15.0,
+    "max_loss_per_trade_note": "单笔最坏亏损 = 止损距离占入场价的百分比（名义倍数 1），由 max_stop_distance_pct 封顶；不再按止损距离反推风险预算，也没有 risk_per_trade_pct",
+    "leverage_effect": "margin_only",
     "max_concurrent_positions": 1,
-    "max_open_risk_percent": 10.0,
     "min_atr_pct": 0.5,
     "max_risk_atr": 5.0
   },
@@ -102,39 +104,42 @@
     "entry_submission": "okx_account_mode_market_order",
     "order_routing": "account_mode",
     "protective_exit_orders": "implemented",
-    "risk_distance_position_sizing": "implemented",
+    "full_pool_position_sizing": "implemented",
+    "stop_distance_cap": "implemented",
+    "circuit_breaker_headroom_check": "implemented",
     "strategy_time_exit": "implemented",
     "account_daily_loss_circuit_breaker": "implemented",
     "evaluation_is_idempotent_per_confirmed_bar": true,
     "cooldown_advances": "per_confirmed_bar",
     "per_instrument_status_isolation": true,
     "signal_ownership_check_before_submit": true,
-    "note": "动态扫描24h报价成交额前100、且成交额不低于300万USDT的合规山寨币；1h只建立二次扫顶结构，后续最多1小时等待首根符合条件的15m阴线收盘，随后从扫描结果中只选择一个币种以市价做空。入场按策略资金池权益和止损距离计算数量，并附带条件止损/止盈；运行时按当前账户类型路由 OKX 模拟或实盘订单，监控负责96根1h（384根15m）时间离场，账户级5% mark-to-market 熔断负责停止策略、撤单和全平。"
+    "note": "动态扫描24h报价成交额前100、且成交额不低于300万USDT的合规山寨币；1h只建立二次扫顶结构，后续最多1小时等待首根符合条件的15m阴线收盘，随后从扫描结果中只选择一个币种以市价做空。入场名义仓位 = 本策略资金池可用余额 × 1，止损距离超过 15% 的信号不下单，并附带条件止损/止盈；运行时按当前账户类型路由 OKX 模拟或实盘订单，监控负责96根1h（384根15m）时间离场，账户级 20% mark-to-market 日内熔断负责停止策略、撤单和全平，启用策略前校验熔断阈值高于各池「占比 × 15%」之和。"
   },
   "costs": {
     "fee_rate_one_way": 0.0005,
     "funding_note": "做空需评估资金费率"
   },
   "backtest": {
-    "rule": "1h structure + first 15m bearish close confirmation + market short",
+    "rule": "1h structure + first 15m bearish close confirmation + market short (stop distance <= 15%)",
     "evidence_script": "strategies/sweep_reversal_short/research/report_live_rule.py",
     "btc_gate_semantics": "fail_closed_requires_200_prior_hourly_bars",
     "pool": "177个中低流动性山寨币（历史基线）",
     "structures": 54,
-    "trades": 41,
-    "win_rate": 0.561,
-    "reward_risk_ratio": 1.53,
-    "expectancy_R_per_trade": 0.37,
-    "train_trades": 18,
-    "train_expectancy_R_per_trade": 0.23,
-    "test_trades": 23,
-    "test_expectancy_R_per_trade": 0.48,
-    "expectancy_R_per_trade_at_10bps_per_side": 0.35,
-    "max_drawdown_R": 4.09,
+    "trades": 39,
+    "win_rate": 0.564,
+    "reward_risk_ratio": 1.59,
+    "expectancy_R_per_trade": 0.41,
+    "train_trades": 17,
+    "train_expectancy_R_per_trade": 0.3,
+    "test_trades": 22,
+    "test_expectancy_R_per_trade": 0.49,
+    "expectancy_R_per_trade_at_10bps_per_side": 0.39,
+    "max_drawdown_R": 3.08,
     "max_consecutive_losses": 4,
     "worst_month_expectancy_R": -1.02,
     "period": "2026-03-31 ~ 2026-09-27",
-    "superseded_note": "更早的 60 笔/+0.37R/回撤 7.9R 来自 1h 收盘市价基线 research/final_report.py；中间一版 47 笔/+0.39R 的门控用了 min_periods=1 的均线、把 BTC 历史不足 200 根的开头 8 天算成门控开。两版均已作废"
+    "superseded_note": "更早的 60 笔/+0.37R/回撤 7.9R 来自 1h 收盘市价基线 research/final_report.py；中间一版 47 笔/+0.39R 的门控用了 min_periods=1 的均线、把 BTC 历史不足 200 根的开头 8 天算成门控开；v1.4 定稿时的 41 笔/+0.37R/回撤 4.09R 未含 15% 止损距离上限（被挡下的 2 笔均为止损出局）。以上均已作废",
+    "stop_distance_guard_rejections": 2
   },
   "universe": {
     "asset_type": "altcoin_usdt_linear_perpetual",

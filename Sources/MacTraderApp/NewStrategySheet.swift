@@ -288,13 +288,13 @@ struct NewStrategySheet: View {
                         }
                         Divider().overlay(Color.white.opacity(0.08))
                         VStack(alignment: .leading, spacing: 8) {
-                            infoRow("单笔风险", value: riskRowText(percent: effectiveRisk, amount: perTradeRiskAmount), valueColor: .primary)
+                            infoRow("单笔名义仓位", value: "资金池可用余额 × \(String(format: "%.0f", StrategyType.notionalPoolMultiple)) ≈ \(formatted(currentStrategyCapital))", valueColor: .primary)
+                            infoRow("单笔最大亏损", value: "等于止损距离，上限 \(formatPercent(Decimal(StrategyType.maxLossPerTradePercent))) 资金池 ≈ \(formatted(maxLossPerTradeAmount))")
+                            infoRow("止损距离上限", value: "超过 \(formatPercent(Decimal(StrategyType.maxStopDistancePercent))) 的信号不下单")
                             infoRow("最多同时持仓", value: "\(maxConcurrentPositions) 个")
-                            infoRow("开放风险上限", value: riskRowText(percent: selectedRule.maxOpenRiskPercent, amount: maxOpenRiskAmount))
-                            infoRow("单笔最大名义", value: "不超过资金池可用余额，与杠杆无关")
                         }
-                        if let perTradeRiskAmount, perTradeRiskAmount < Self.minimumUsefulRiskAmount {
-                            Label("单笔风险额不足 \(formatUSD(Self.minimumUsefulRiskAmount))，多数合约会因最小张数无法下单，建议提高资金池比例", systemImage: "exclamationmark.triangle.fill")
+                        if let currentStrategyCapital, currentStrategyCapital < Self.minimumUsefulPoolCapital {
+                            Label("资金池不足 \(formatUSD(Self.minimumUsefulPoolCapital))，多数合约会因最小张数无法下单，建议提高资金池比例", systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption2)
                                 .foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -391,35 +391,23 @@ struct NewStrategySheet: View {
         }
     }
 
-    /// Risk is supplied by the selected strategy's laboratory defaults. It is
-    /// shown in the risk summary but is intentionally not editable here.
-    private var effectiveRisk: Double { min(selectedRule.defaultRiskPercent, selectedRule.maxRiskPercent) }
-
     private var usdtTotalAssets: Decimal? { model.accountOverview.usdtEquity }
 
-    /// Below this the sized order is smaller than one contract on most
+    /// Below this the full-pool order is smaller than one contract on most
     /// instruments, so every signal would be refused at the lot-size check.
-    private static let minimumUsefulRiskAmount: Decimal = 5
+    private static let minimumUsefulPoolCapital: Decimal = 50
 
     private var maxConcurrentPositions: Int { Int(selectedRule.defaultParameters["maxConcurrentPositions"] ?? 1) }
 
-    /// Stop-loss budget of one entry: a share of this strategy's own pool.
-    private var perTradeRiskAmount: Decimal? {
-        currentStrategyCapital.map { $0 * Decimal(effectiveRisk) / 100 }
-    }
-
-    private var maxOpenRiskAmount: Decimal? {
-        currentStrategyCapital.map { $0 * Decimal(selectedRule.maxOpenRiskPercent) / 100 }
+    /// Worst loss of one entry: the stop-distance cap applied to the pool.
+    private var maxLossPerTradeAmount: Decimal? {
+        currentStrategyCapital.map { $0 * Decimal(StrategyType.maxLossPerTradePercent) / 100 }
     }
 
     /// What the slider can still hand out, in USDT, after the other pools.
     private var remainingAllocatableCapital: Decimal? {
         guard usdtTotalAssets != nil else { return nil }
         return capitalAllocation.capital(for: capitalAllocation.availableAllocationPercent)
-    }
-
-    private func riskRowText(percent: Double, amount: Decimal?) -> String {
-        "\(formatPercent(Decimal(percent))) 资金池 ≈ \(formatted(amount))"
     }
 
     /// Strategy entries follow the account selected in the connected OKX
@@ -474,7 +462,7 @@ struct NewStrategySheet: View {
         // 参数默认值来自领域层（与实验室 config 对齐），不再在界面里重复一份。
         var parameters = selectedRule.defaultParameters
         parameters["leverage"] = leverage
-        let config = StrategyConfig(name: selectedRule.displayName, scope: selectedRule.defaultScope, interval: selectedRule.entryInterval, type: selectedRule, parameters: parameters, enabled: false, riskPercent: effectiveRisk, capitalPoolPercent: effectiveCapitalPoolPercent, cooldownBars: selectedRule.defaultCooldownBars)
+        let config = StrategyConfig(name: selectedRule.displayName, scope: selectedRule.defaultScope, interval: selectedRule.entryInterval, type: selectedRule, parameters: parameters, enabled: false, capitalPoolPercent: effectiveCapitalPoolPercent, cooldownBars: selectedRule.defaultCooldownBars)
         isCreating = true
         Task {
             defer { isCreating = false }

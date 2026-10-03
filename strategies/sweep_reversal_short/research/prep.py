@@ -22,6 +22,9 @@ def parse_one(path):
             if not line:
                 continue
             d = json.loads(line)
+            # 未确认的末根 K 线不进入研究数组，与运行时只用已确认 K 线一致。
+            if d.get("confirmed") is not True:
+                continue
             rows["t"].append(int(d["timestamp_ms"]))
             rows["o"].append(float(d["open"]))
             rows["h"].append(float(d["high"]))
@@ -51,20 +54,21 @@ def parse_one(path):
         if len(np.unique(bins)) < MIN_BARS[tf]:
             continue
         df = pd.DataFrame({"bin": bins, "o": o, "h": h, "l": l, "c": c, "v": v, "qv": qv})
-        g = df.groupby("bin", sort=True)
         # Input is 5-minute candles.  A partial bucket or a gap must not be
         # silently turned into a complete higher-timeframe candle; doing so
         # changes closes/volumes and can create a signal from unavailable data.
+        # A bucket is complete iff its (unique) children are exactly the
+        # expected 5m grid points: all aligned to 5m and exactly `expected`
+        # of them. Counting per bucket is O(n); the previous per-bucket mask
+        # was O(buckets × n) and took hours on 18 months of data.
         expected_children = max(1, mins // 5)
-        complete_bins = []
-        for bucket, child in g:
-            timestamps = sorted(int(value) for value in t[bins == bucket])
-            expected = [int(bucket) + index * 300_000 for index in range(expected_children)]
-            if timestamps == expected:
-                complete_bins.append(bucket)
-        if not complete_bins:
+        unique_bins, inverse = np.unique(bins, return_inverse=True)
+        total = np.bincount(inverse, minlength=len(unique_bins))
+        aligned = np.bincount(inverse, weights=(t % 300_000 == 0).astype(np.int64), minlength=len(unique_bins))
+        complete = (total == expected_children) & (aligned == expected_children)
+        if not complete.any():
             continue
-        df = df[df["bin"].isin(complete_bins)]
+        df = df[complete[inverse]]
         g = df.groupby("bin", sort=True)
         r = pd.DataFrame({
             "t": g["bin"].first(),

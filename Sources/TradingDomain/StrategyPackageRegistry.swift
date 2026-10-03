@@ -23,8 +23,6 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
     public let sourceOfTruth: String?
     public let entryTimeframeMinutes: Int?
     public let defaultParameters: [String: Double]
-    public let defaultRiskPercent: Double?
-    public let maxRiskPercent: Double?
     public let defaultCooldownBars: Int?
     public let scope: String?
     /// Legacy package metadata retained for decoding and catalog display. The
@@ -48,8 +46,6 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
                 sourceOfTruth: String? = nil,
                 entryTimeframeMinutes: Int? = nil,
                 defaultParameters: [String: Double] = [:],
-                defaultRiskPercent: Double? = nil,
-                maxRiskPercent: Double? = nil,
                 defaultCooldownBars: Int? = nil,
                 scope: String? = nil,
                 liveOrderMode: String? = nil,
@@ -76,8 +72,6 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
         self.sourceOfTruth = sourceOfTruth
         self.entryTimeframeMinutes = entryTimeframeMinutes
         self.defaultParameters = defaultParameters.filter { $0.key.isEmpty == false && $0.value.isFinite }
-        self.defaultRiskPercent = defaultRiskPercent.flatMap { $0.isFinite ? $0 : nil }
-        self.maxRiskPercent = maxRiskPercent.flatMap { $0.isFinite ? $0 : nil }
         self.defaultCooldownBars = defaultCooldownBars
         self.scope = scope
         self.liveOrderMode = liveOrderMode
@@ -110,7 +104,6 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
         var parameters = type.defaultParameters
         for (key, value) in defaultParameters { parameters[key] = value }
         let interval = type.entryInterval
-        let risk = defaultRiskPercent ?? type.defaultRiskPercent
         let cooldown = defaultCooldownBars ?? type.defaultCooldownBars
         return StrategyConfig(id: id,
                               name: name ?? displayName,
@@ -119,7 +112,6 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
                               type: type,
                               parameters: parameters,
                               enabled: false,
-                              riskPercent: risk,
                               cooldownBars: cooldown)
     }
 
@@ -157,7 +149,7 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
     private enum CodingKeys: String, CodingKey {
         case identifier, packageID, schemaVersion, version, displayName, englishName, runtimeHandler
         case sourceOfTruth, entryTimeframeMinutes, defaultParameters
-        case defaultRiskPercent, maxRiskPercent, defaultCooldownBars, scope
+        case defaultCooldownBars, scope
         case liveOrderMode, autoSubmitLiveOrders, enabledByDefault, lifecycle
     }
 
@@ -173,8 +165,6 @@ public struct StrategyPackageManifest: Codable, Equatable, Sendable, Identifiabl
                       sourceOfTruth: try c.decodeIfPresent(String.self, forKey: .sourceOfTruth),
                       entryTimeframeMinutes: try c.decodeIfPresent(Int.self, forKey: .entryTimeframeMinutes),
                       defaultParameters: try c.decodeIfPresent([String: Double].self, forKey: .defaultParameters) ?? [:],
-                      defaultRiskPercent: try c.decodeIfPresent(Double.self, forKey: .defaultRiskPercent),
-                      maxRiskPercent: try c.decodeIfPresent(Double.self, forKey: .maxRiskPercent),
                       defaultCooldownBars: try c.decodeIfPresent(Int.self, forKey: .defaultCooldownBars),
                       scope: try c.decodeIfPresent(String.self, forKey: .scope),
                       liveOrderMode: try c.decodeIfPresent(String.self, forKey: .liveOrderMode),
@@ -421,10 +411,6 @@ public actor StrategyPackageRegistry {
         if let leverage = number(position["leverage"]) {
             defaults["leverage"] = leverage
         }
-        let defaultRisk = number(position["risk_per_trade_pct"])
-            ?? number(position["default_risk_percent"])
-        let maxRisk = number(position["risk_per_trade_max_pct"])
-            ?? number(position["max_open_risk_percent"])
         let cooldown = integer(position["cooldown_bars"])
         let mode = string(runtime["live_order_mode"])
             ?? string(object["live_order_mode"])
@@ -448,8 +434,6 @@ public actor StrategyPackageRegistry {
                                             sourceOfTruth: source,
                                             entryTimeframeMinutes: entry,
                                             defaultParameters: defaults,
-                                            defaultRiskPercent: defaultRisk,
-                                            maxRiskPercent: maxRisk,
                                             defaultCooldownBars: cooldown,
                                             scope: scope,
                                             liveOrderMode: mode,
@@ -479,8 +463,6 @@ public actor StrategyPackageRegistry {
                                     sourceOfTruth: package.sourceOfTruth ?? config.sourceOfTruth,
                                     entryTimeframeMinutes: package.entryTimeframeMinutes ?? config.entryTimeframeMinutes,
                                     defaultParameters: defaults,
-                                    defaultRiskPercent: package.defaultRiskPercent ?? config.defaultRiskPercent,
-                                    maxRiskPercent: package.maxRiskPercent ?? config.maxRiskPercent,
                                     defaultCooldownBars: package.defaultCooldownBars ?? config.defaultCooldownBars,
                                     scope: package.scope ?? config.scope,
                                     liveOrderMode: package.liveOrderMode ?? config.liveOrderMode,

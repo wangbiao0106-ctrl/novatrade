@@ -185,14 +185,20 @@ public actor RiskEngine {
             return RiskDecision(allowed: false, reason: "账户权益为零")
         }
         if killSwitch { return RiskDecision(allowed: false, reason: reason ?? "风险熔断") }
-        if notionals[instrumentID, default: 0] + notional > limits.maxInstrumentNotional {
-            return RiskDecision(allowed: false, reason: "单标的名义价值超过上限")
-        }
-        if notionals.values.reduce(0, +) + notional > limits.maxTotalNotional {
-            return RiskDecision(allowed: false, reason: "总名义价值超过上限")
-        }
-        if equity > 0, margin / equity * 100 > limits.maxMarginPercent {
-            return RiskDecision(allowed: false, reason: "单笔保证金超过权益比例")
+        if strategyID == nil {
+            // Account-level notional and margin ceilings bound standalone
+            // (manual / paper) orders. A strategy order is sized to its own
+            // isolated pool below, and that pool is its only size limit; the
+            // daily-loss circuit breaker above still covers it.
+            if notionals[instrumentID, default: 0] + notional > limits.maxInstrumentNotional {
+                return RiskDecision(allowed: false, reason: "单标的名义价值超过上限")
+            }
+            if notionals.values.reduce(0, +) + notional > limits.maxTotalNotional {
+                return RiskDecision(allowed: false, reason: "总名义价值超过上限")
+            }
+            if equity > 0, margin / equity * 100 > limits.maxMarginPercent {
+                return RiskDecision(allowed: false, reason: "单笔保证金超过权益比例")
+            }
         }
         if let strategyID {
             let pool = strategyCapital(strategyID, allocationPercent: poolAllocationPercent, now: now)
