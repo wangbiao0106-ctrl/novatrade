@@ -1,0 +1,21 @@
+{
+  "strategy": "range_rejection_confirmation_short",
+  "version": "0.1.0",
+  "generated_at": "2026-10-03T00:43:07.332779+00:00",
+  "symbols": 288,
+  "bars_15m": 4731758,
+  "trades": 2,
+  "wins": 2,
+  "win_rate": 1.0,
+  "total_r": 0.572328240538487,
+  "profit_factor": 999.0,
+  "max_drawdown_r": 0.0,
+  "risk_budget_return_pct": 0.572328240538487,
+  "cost_assumptions": {
+    "fee_rate_one_way": 0.0006,
+    "slippage_one_way": 0.0002,
+    "funding_rate_round_trip": 0.0
+  },
+  "daily_loss_limit_mode": "realized_r_at_exit",
+  "status": "research_only"
+}

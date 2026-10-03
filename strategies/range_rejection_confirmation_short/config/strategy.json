@@ -1,0 +1,67 @@
+{
+  "strategy": "range_rejection_confirmation_short",
+  "version": "0.1.0",
+  "name_zh": "冲高失败大阴回落确认做空",
+  "name_en": "Range Rejection Confirmation Short",
+  "source_of_truth": "strategies/range_rejection_confirmation_short/STRATEGY.md",
+  "status": "research_candidate",
+  "runtime_integration": "not_integrated",
+  "market": "OKX_USDT_LINEAR_PERPETUAL",
+  "input_timeframe_minutes": 5,
+  "entry_timeframe_minutes": 15,
+  "candle_timestamp": "bar_open_time",
+  "universe": {
+    "asset_type": "altcoin_usdt_linear_perpetual",
+    "excluded_symbols": ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "TRX", "USDT", "USDC", "DAI"],
+    "quote_volume24h_min_usdt": 3000000,
+    "minimum_contiguous_15m_bars": 120,
+    "production_scope": null
+  },
+  "signal": {
+    "ema_fast_period": 20,
+    "ema_slow_period": 60,
+    "atr_period": 14,
+    "rsi_period": 14,
+    "volume_period": 20,
+    "prior_high_lookback": 20,
+    "breakout_min_atr": 0.10,
+    "body_ratio_min": 0.40,
+    "upper_wick_ratio_min": 0.20,
+    "close_position_max": 0.40,
+    "range_atr_min": 1.50,
+    "volume_multiple_min": 1.50,
+    "rsi_min": 60.0,
+    "rsi_must_fall": true,
+    "ema20_distance_atr_max": 0.75,
+    "confirmation_bars": 4,
+    "confirmation_atr_break_min": 0.10
+  },
+  "entry": {
+    "mode": "next_15m_open_after_confirmed_close",
+    "fill_reference": "next_15m_open",
+    "max_entry_slippage_pct": 0.003
+  },
+  "risk": {
+    "stop_atr": 0.35,
+    "min_risk_atr": 0.75,
+    "max_risk_atr": 3.0,
+    "tp1_r": 1.0,
+    "tp1_fraction": 0.5,
+    "tp2_r": 2.0,
+    "max_hold_bars": 24,
+    "cooldown_bars": 16
+  },
+  "position_management": {
+    "leverage": 2.0,
+    "risk_per_trade_pct": 1.0,
+    "max_concurrent_positions": 1,
+    "one_position_per_symbol": true,
+    "daily_realized_loss_limit_pct": 5.0,
+    "sizing_formula": "min(available_capital, pool_equity * risk_per_trade_pct / 100 * entry_price / abs(stop_price - entry_price))"
+  },
+  "costs": {
+    "fee_rate_one_way": 0.0006,
+    "slippage_one_way": 0.0002,
+    "funding_rate_round_trip": 0.0
+  }
+}

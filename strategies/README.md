@@ -26,6 +26,7 @@ git diff --check
 - [`ema_3line_pullback/`](ema_3line_pullback/)：EMA 回踩策略族的四方向历史研究归档，不是规则真源，未接入运行时。
 - [`extreme_wick_short/`](extreme_wick_short/)：山寨日内涨幅超过 100% 的 15m 动能衰竭做空研究候选；未接入运行时。
 - [`double_pump_exhaustion_short/`](double_pump_exhaustion_short/)：由 `extreme_wick_short` 的 `grid_0580` 固定出的日内翻倍动能衰竭确认做空正式规则；已接入纸面/模拟运行时，默认停用。
+- [`range_rejection_confirmation_short/`](range_rejection_confirmation_short/)：突破近期高点后出现大实体阴线、收盘回到 EMA20 附近，等待右侧确认再做空的研究候选；未接入运行时。
 - [`intraday_pump_retest_short/`](intraday_pump_retest_short/)：山寨日内涨幅超过 60% 后，高点回落再突涨并缩量收高做空研究候选；未接入运行时。
 
 `hlsr/` 的规则和参数仍以本目录为真源，运行时只移植定稿规则，不读取研究目录。HLSR 的稳定代码标识是 `hlsr`，界面显示“高位扫顶反转做空”，执行范围是确认的 15m + 已完成 4H 候选山寨币：24h 涨幅严格大于 40%、报价成交额严格大于 3,000 万 USDT；它不复用通用热门榜前 20。研究结果目前为 FAIL，只能作为 OKX 模拟盘候选。资产类别排除清单（主流币、稳定币、股票/ETF/指数/商品）的唯一真源是 [`sweep_reversal_short/config/universe.json`](sweep_reversal_short/config/universe.json) 的 `exclude`，`Sources/TradingDomain/StrategyUniverseRules.swift`、`research/live_signal.py` 和 `ema_3line_pullback/src/backtest.py` 都只是副本，由 `scripts/validate_strategy_sync.py` 逐一对齐。
