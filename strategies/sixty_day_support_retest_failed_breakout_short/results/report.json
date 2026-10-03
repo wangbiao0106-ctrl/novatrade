@@ -1,0 +1,117 @@
+{
+  "strategy": "sixty_day_support_retest_failed_breakout_short",
+  "study": "sixty_day_pump_support_retest_failed_breakout_short",
+  "validation_mode": "price_only",
+  "parameters": {
+    "strategy": "sixty_day_support_retest_failed_breakout_short",
+    "version": "0.1.0",
+    "status": "research_candidate",
+    "runtime_integration": "not_integrated",
+    "market": "OKX_USDT_LINEAR_PERPETUAL",
+    "source_of_truth": "strategies/sixty_day_support_retest_failed_breakout_short/STRATEGY.md",
+    "input_timeframe_minutes": 5,
+    "signal_timeframe_minutes": 15,
+    "universe": {
+      "source": "strategies/sweep_reversal_short/config/universe.json",
+      "allowed_symbols_field": "altcoins"
+    },
+    "signal": {
+      "lookback_days": 60,
+      "lookback_gain_gt": 3.0,
+      "utc_day_gain_gt": 0.4,
+      "pivot_left_bars": 2,
+      "pivot_right_bars": 2,
+      "support_retest_tolerance": 0.01,
+      "support_break_tolerance": 0.02,
+      "pullback_max_bars": 32,
+      "breakout_max_bars": 32,
+      "failure_next_bar_only": true
+    },
+    "risk": {
+      "leverage": 1.0,
+      "initial_stop_above_entry_pct": 0.05,
+      "tp1_favorable_move_pct": 0.05,
+      "tp1_close_fraction": 0.5,
+      "tp2_favorable_move_pct": 0.1,
+      "tp2_close_fraction": 0.2,
+      "runner_favorable_move_pct": 0.15,
+      "runner_close_fraction": 0.3,
+      "max_hold_bars_15m": 96
+    },
+    "costs": {
+      "fee_rate_one_way": 0.0006,
+      "slippage_one_way": 0.0002
+    }
+  },
+  "event_definition": "15m pivot high -> pivot support -> support retest -> strict prior-high breakout -> bearish next-bar failure",
+  "data": {
+    "directory": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m",
+    "symbols": 295,
+    "quality_totals": {
+      "confirmed_rows": 35729185,
+      "timestamp_gaps": 3
+    }
+  },
+  "counts": {
+    "aggregated_15m_bars": 11909683,
+    "signals": 9
+  },
+  "results": {
+    "signals": 9,
+    "trades": 9,
+    "unfilled_or_rejected": 0,
+    "return_basis": "net_return_per_trade_relative_to_entry_notional",
+    "overlapping_positions_serialized": false,
+    "wins": 2,
+    "losses": 7,
+    "win_rate": 0.2222222222222222,
+    "total_net_return": -0.24778910819999994,
+    "compound_return": -0.23000311718946076,
+    "average_net_return": -0.027532123133333326,
+    "profit_factor": 0.3118515295127499,
+    "max_drawdown": 0.23000311718946076,
+    "exit_reasons": {
+      "runner_target": 1,
+      "stop": 7,
+      "breakeven_stop": 1
+    },
+    "train": {
+      "signals": 2,
+      "trades": 2,
+      "wins": 0,
+      "losses": 2,
+      "win_rate": 0.0,
+      "total_net_return": -0.10288025199999996,
+      "compound_return": -0.10023416543710406,
+      "average_net_return": -0.05144012599999998,
+      "profit_factor": 0.0,
+      "max_drawdown": 0.10023416543710406,
+      "exit_reasons": {
+        "stop": 2
+      }
+    },
+    "validation": {
+      "signals": 7,
+      "trades": 7,
+      "wins": 2,
+      "losses": 5,
+      "win_rate": 0.2857142857142857,
+      "total_net_return": -0.1449088562,
+      "compound_return": -0.144225249245431,
+      "average_net_return": -0.02070126517142857,
+      "profit_factor": 0.4365921413178499,
+      "max_drawdown": 0.144225249245431,
+      "exit_reasons": {
+        "runner_target": 1,
+        "stop": 5,
+        "breakeven_stop": 1
+      }
+    }
+  },
+  "limitations": [
+    "15m bars are aggregated from confirmed 5m candles; intrabar ordering remains unknown.",
+    "The natural-language support/retest/failure pattern is represented by the documented pivot and tolerance rules.",
+    "Runner target 15% and 96-bar expiry are explicit research assumptions because no runner target or expiry was supplied.",
+    "Funding, liquidation, queue position, and portfolio contention are not modeled."
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "strategy": "extreme_negative_funding_110_short",
+  "study": "previous_day_close_gt_100_following_day_close_0_to_10_short",
+  "validation_mode": "price_only_ignore_funding",
+  "rule": {
+    "previous_day_close_gain_gt": 1.0,
+    "following_day_close_gain_min": 0.0,
+    "following_day_close_gain_max": 0.1,
+    "entry": "following UTC-day close",
+    "leverage": 1.0,
+    "tp1": "20% favorable move; close 50%",
+    "tp2": "40% cumulative favorable move; close remaining 50%",
+    "stop": "none specified"
+  },
+  "event_definition": "one qualifying consecutive complete UTC-day pair per symbol",
+  "data": {
+    "directory": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m",
+    "symbols": 295,
+    "quality_totals": {
+      "confirmed_rows": 35729185,
+      "timestamp_gaps": 3
+    }
+  },
+  "counts": {
+    "complete_utc_days": 123746,
+    "nonconsecutive_day_pairs": 3,
+    "qualifying_day_pairs": 1
+  },
+  "results": {
+    "signals": 1,
+    "trades": 1,
+    "unfilled_or_rejected": 0,
+    "return_basis": "net_return_per_trade_relative_to_entry_notional",
+    "overlapping_positions_serialized": false,
+    "wins": 1,
+    "losses": 0,
+    "win_rate": 1.0,
+    "total_net_return": 0.298839916,
+    "compound_return": 0.2988399159999999,
+    "average_net_return": 0.298839916,
+    "profit_factor": null,
+    "max_drawdown": 0.0,
+    "exit_reasons": {
+      "target_2": 1
+    },
+    "train": {
+      "signals": 0,
+      "trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": null,
+      "total_net_return": 0,
+      "compound_return": 0.0,
+      "average_net_return": null,
+      "profit_factor": null,
+      "max_drawdown": 0.0,
+      "exit_reasons": {}
+    },
+    "validation": {
+      "signals": 1,
+      "trades": 1,
+      "wins": 1,
+      "losses": 0,
+      "win_rate": 1.0,
+      "total_net_return": 0.298839916,
+      "compound_return": 0.2988399159999999,
+      "average_net_return": 0.298839916,
+      "profit_factor": null,
+      "max_drawdown": 0.0,
+      "exit_reasons": {
+        "target_2": 1
+      }
+    }
+  },
+  "limitations": [
+    "Funding is ignored and no funding PnL is applied.",
+    "No stop was specified; positions remain open until targets or data termination.",
+    "Fixed-notional trade returns are reported; overlapping positions are not serialized into an account simulation.",
+    "OHLC cannot establish the intrabar order between TP1 and TP2 beyond the defined low-price checks."
+  ]
+}

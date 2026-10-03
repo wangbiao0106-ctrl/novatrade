@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "status": "research_candidate",
   "source_of_truth": "strategies/personal_style_strategy_variants/STRATEGY.md",
-  "name_zh": "个人做单偏好多分支回顾实验",
+  "name_zh": "交易偏好分支",
   "market": "OKX_USDT_LINEAR_PERPETUAL",
   "data": {
     "manifest": "data/kline/okx/swap/5m/manifest.json",

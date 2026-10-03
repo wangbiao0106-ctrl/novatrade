@@ -1,4 +1,4 @@
-# 冲高失败大阴回落确认做空
+# 冲高阴线确认
 
 版本：0.1.0（研究候选，未接入运行时）  
 稳定标识：`range_rejection_confirmation_short`  

@@ -1,0 +1,2 @@
+symbol,signal_index,signal_ts,entry_index,entry_ts,order_price,entry,initial_stop,tp1,tp2,tp1_exit,final_exit,exit_index,exit_ts,exit_reason,net_return,leveraged_return_pct,bars_held,signal_utc,entry_utc,exit_utc
+LAB,70991,1783296000000,70991,1783296000000,16.594,16.590681200000002,0.0,13.272544960000003,9.954408720000002,13.272544960000003,9.954408720000002,71412,1783422300000,target_2,0.298839916,29.883991599999998,422,2026-07-06T00:00:00Z,2026-07-06T00:00:00Z,2026-07-07T11:05:00Z

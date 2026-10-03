@@ -1,7 +1,7 @@
 {
   "strategy": "intraday_pump_retest_short",
   "version": "0.1.0",
-  "name_zh": "日内大涨震荡回落后二次拉升缩量做空",
+  "name_zh": "缩量二次拉升",
   "source_of_truth": "strategies/intraday_pump_retest_short/STRATEGY.md",
   "status": "research_candidate",
   "runtime_integration": "not_integrated",

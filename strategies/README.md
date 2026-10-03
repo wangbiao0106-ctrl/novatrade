@@ -36,6 +36,7 @@ git diff --check
 - [`liquid_crypto_trend_long/`](liquid_crypto_trend_long/)：高流动性趋势，在**下单时点**滚动 24h 报价成交额 ≥ 3000 万 USDT 的加密永续上做纯多头 1 小时趋势跟随（MA72 + 1% 滞回带 + 96 小时持仓上限 + 200% 波动率目标），以同池与全池买入持有篮子作为硬验收基准；未接入运行时。
 - [`five_minute_surge_waterfall_short/`](five_minute_surge_waterfall_short/)：5m 大涨（严格 >20% / >30%）与前 4 小时高点突破状态组合，比较下一根开盘和最近 72 根实体顶部限价做空；研究候选，未接入运行时。
 - [`extreme_negative_funding_110_short/`](extreme_negative_funding_110_short/)：独立验证 5m 日内涨幅 >80%、价格触及日内开盘价 +110% 且资金费率达到币种负值上限后挂限价做空，1 倍杠杆、20% 止损、分段止盈；当前行情目录没有历史资金费率，未接入运行时。
+- [`sixty_day_support_retest_failed_breakout_short/`](sixty_day_support_retest_failed_breakout_short/)：最近 60 日暴涨超过 300%、当日冲高后支撑回踩、二次突破失败的 15m 市价做空研究候选；未接入运行时。
 - [`spot_perp_hedged_accumulation/`](spot_perp_hedged_accumulation/)：单一主流币的 1:1 现货多头 + USDT 永续空头对冲研究；1h 背离/EMA20 回踩激活，价格每跨 4% 尝试转移 25% 基础币单位，但名义偏离硬限 20%，资金费和基差尚未建模，研究候选，未接入运行时。
 
 资产类别排除清单（主流币、稳定币、股票/ETF/指数/商品）的唯一真源是 [`sweep_reversal_short/config/universe.json`](sweep_reversal_short/config/universe.json) 的 `exclude`，`Sources/TradingDomain/StrategyUniverseRules.swift`、`research/live_signal.py` 和 `ema_3line_pullback/src/backtest.py` 都只是副本，由 `scripts/validate_strategy_sync.py` 逐一对齐。

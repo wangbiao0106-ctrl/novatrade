@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "status": "research_candidate",
   "source_of_truth": "strategies/personal_trading_style_backtest/STRATEGY.md",
-  "name_zh": "个人交易风格回测实验",
+  "name_zh": "交易风格回放",
   "market": "OKX_UNIFIED_BILL_PERPETUAL_REPLAY",
   "input": {
     "format": "OKX unified bill history ZIP containing one UTF-8 BOM CSV",

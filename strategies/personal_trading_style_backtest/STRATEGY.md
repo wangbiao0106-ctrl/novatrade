@@ -1,4 +1,4 @@
-# 个人交易风格回测实验
+# 交易风格回放
 
 版本：0.2.0（研究候选，不接入运行时）  
 稳定标识：`personal_trading_style_backtest`

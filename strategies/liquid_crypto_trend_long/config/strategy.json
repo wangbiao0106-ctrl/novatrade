@@ -1,7 +1,7 @@
 {
   "strategy": "liquid_crypto_trend_long",
   "version": "1.0.0",
-  "name_zh": "高流动性加密永续趋势跟随（纯多头）",
+  "name_zh": "高流动性趋势",
   "name_en": "Liquid Crypto Trend Long",
   "source_of_truth": "strategies/liquid_crypto_trend_long/STRATEGY.md",
   "status": "research_candidate",

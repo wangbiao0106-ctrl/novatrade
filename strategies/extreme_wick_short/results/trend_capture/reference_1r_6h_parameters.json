@@ -1,8 +1,0 @@
-{
-  "family": "reference",
-  "exit": {
-    "mode": "fixed",
-    "target_r": 1.0,
-    "max_hold_bars": 24
-  }
-}

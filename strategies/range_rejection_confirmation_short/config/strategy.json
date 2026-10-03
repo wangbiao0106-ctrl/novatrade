@@ -1,7 +1,7 @@
 {
   "strategy": "range_rejection_confirmation_short",
   "version": "0.1.0",
-  "name_zh": "冲高失败大阴回落确认做空",
+  "name_zh": "冲高阴线确认",
   "name_en": "Range Rejection Confirmation Short",
   "source_of_truth": "strategies/range_rejection_confirmation_short/STRATEGY.md",
   "status": "research_candidate",

@@ -1,0 +1,74 @@
+{
+  "strategy": "extreme_negative_funding_110_short",
+  "version": "0.1.0",
+  "name_zh": "极限负资金费率 110% 逼空做空",
+  "name_en": "Extreme Negative Funding 110% Short",
+  "source_of_truth": "strategies/extreme_negative_funding_110_short/STRATEGY.md",
+  "status": "research_candidate",
+  "runtime_integration": "not_integrated",
+  "market": "OKX_USDT_LINEAR_PERPETUAL",
+  "input_timeframe_minutes": 5,
+  "candle_timestamp": "bar_open_time",
+  "bar_requirements": {
+    "confirmed_only": true,
+    "timestamp_alignment_minutes": 5,
+    "utc_day_open_required": true,
+    "no_timestamp_gaps": true
+  },
+  "signal": {
+    "utc_day_gain_gt": 0.8,
+    "trigger_gain_pct": 1.1,
+    "day_high_field": "running_high",
+    "day_open_field": "first_confirmed_bar_open",
+    "trigger_once_per_utc_day": true,
+    "funding_asof": "trigger_bar_close",
+    "funding_max_age_minutes": 480
+  },
+  "funding": {
+    "required": true,
+    "snapshot_fields": ["symbol", "timestamp_ms", "funding_rate", "symbol_max_negative_rate"],
+    "comparison": "funding_rate_less_than_or_equal_to_symbol_max_negative_rate",
+    "missing_policy": "reject_signal_and_report_unavailable",
+    "no_inference_from_price_or_other_symbols": true
+  },
+  "entry": {
+    "order_type": "sell_limit",
+    "limit_price": "utc_day_open_times_limit_price_factor",
+    "limit_price_factor": 2.1,
+    "activation": "first_contiguous_bar_after_trigger",
+    "valid_until": "utc_day_end",
+    "open_at_or_above_limit": "fill_at_open",
+    "high_touches_limit": "fill_at_limit",
+    "intrabar_fill_exit_eligibility": "next_bar",
+    "unfilled_policy": "cancel_at_utc_day_end_or_data_gap"
+  },
+  "risk": {
+    "leverage": 1.0,
+    "initial_stop_above_entry_pct": 0.2,
+    "tp1_favorable_move_pct": 0.2,
+    "tp1_close_fraction": 0.5,
+    "tp1_stop": "entry_breakeven_on_next_bar",
+    "tp2_additional_favorable_move_pct_from_entry": 0.2,
+    "tp2_price": "entry_times_0.60",
+    "same_bar_priority": "stop_before_targets",
+    "data_gap_policy": "exit_at_last_contiguous_close"
+  },
+  "costs": {
+    "fee_rate_one_way": 0.0006,
+    "slippage_one_way": 0.0002,
+    "funding_pnl_model": "not_applied_filter_only"
+  },
+  "universe": {
+    "asset_type": "altcoin_usdt_linear_perpetual",
+    "source": "strategies/sweep_reversal_short/config/universe.json",
+    "allowed_symbols_field": "altcoins",
+    "exclude_non_crypto": true,
+    "minimum_contiguous_bars": 2
+  },
+  "research": {
+    "split_utc": "2026-04-01T00:00:00+00:00",
+    "funding_data_available": false,
+    "validation_command": "python3 strategies/extreme_negative_funding_110_short/src/backtest.py --scan",
+    "selection_policy": "do_not_merge_or_select_from_five_minute_surge_waterfall_short"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "strategy": "five_minute_surge_waterfall_short",
+  "version": "0.1.0",
+  "name_zh": "5分钟大涨回调/瀑布做空",
+  "name_en": "Five-minute Surge Waterfall Short",
+  "source_of_truth": "strategies/five_minute_surge_waterfall_short/STRATEGY.md",
+  "status": "research_candidate",
+  "runtime_integration": "not_integrated",
+  "market": "OKX_USDT_LINEAR_PERPETUAL",
+  "input_timeframe_minutes": 5,
+  "candle_timestamp": "bar_open_time",
+  "signal": {
+    "return_basis": "high_over_previous_close",
+    "thresholds_exclusive": [0.2, 0.3],
+    "prior_four_hour_high_bars": 48,
+    "breakout_field": "signal_high",
+    "breakout_comparison": "strict_greater_than",
+    "no_breakout_comparison": "less_than_or_equal",
+    "limit_reference_bars": 72,
+    "limit_reference_field": "body_top_max",
+    "limit_reference_body_top": "bullish_close_bearish_open",
+    "limit_reference_includes_signal_bar": true
+  },
+  "entry": {
+    "variants": ["next_5m_open", "limit_recent_72_body_top"],
+    "limit_activation": "next_5m_bar",
+    "limit_wait_bars": 72,
+    "sell_limit_gap_fill": "opening_price_if_open_above_limit_else_limit_on_high_touch"
+  },
+  "risk": {
+    "atr_period": 14,
+    "stop_atr": 0.5,
+    "target_r": 1.0,
+    "max_hold_bars": 72,
+    "max_stop_distance_pct": 0.15,
+    "cooldown_bars": 72
+  },
+  "position_management": {
+    "leverage": 2.0,
+    "risk_per_trade_pct": 1.0,
+    "max_concurrent_positions": 1,
+    "one_position_per_symbol": true,
+    "account_daily_loss_limit_pct": 5.0
+  },
+  "costs": {
+    "fee_rate_one_way": 0.0006,
+    "slippage_one_way": 0.0002,
+    "funding_rate_round_trip": 0.0
+  },
+  "universe": {
+    "asset_type": "altcoin_usdt_linear_perpetual",
+    "source": "strategies/sweep_reversal_short/config/universe.json",
+    "exclude_non_crypto": true,
+    "minimum_contiguous_bars": 73
+  },
+  "research": {
+    "split_utc": "2026-04-01T00:00:00+00:00",
+    "survivorship_bias": true,
+    "funding_data_available": false,
+    "comparison_design": "breakout_4h_and_no_breakout_4h_are_paired_control_groups",
+    "selection_policy": "compare_all_fixed_variants_without_selecting_the_best_full_sample_result"
+  }
+}

@@ -148,7 +148,7 @@ class ConfigContractTests(unittest.TestCase):
         self.assertEqual(config["signal"]["ma_window_bars"], 72)
         self.assertEqual(config["signal"]["max_direction_bars"], 96)
         self.assertEqual(config["universe"]["min_quote_volume_24h_usdt"], 30_000_000)
-        self.assertIn("# 高流动性加密永续趋势跟随（纯多头）",
+        self.assertIn("# 高流动性趋势",
                       (LAB / "STRATEGY.md").read_text().splitlines()[0])
 
     def test_universe_snapshot_is_partitioned(self):

@@ -1,0 +1,2949 @@
+{
+  "strategy": "five_minute_surge_waterfall_short",
+  "config": {
+    "strategy": "five_minute_surge_waterfall_short",
+    "version": "0.1.0",
+    "name_zh": "5分钟大涨回调/瀑布做空",
+    "name_en": "Five-minute Surge Waterfall Short",
+    "source_of_truth": "strategies/five_minute_surge_waterfall_short/STRATEGY.md",
+    "status": "research_candidate",
+    "runtime_integration": "not_integrated",
+    "market": "OKX_USDT_LINEAR_PERPETUAL",
+    "input_timeframe_minutes": 5,
+    "candle_timestamp": "bar_open_time",
+    "signal": {
+      "return_basis": "high_over_previous_close",
+      "thresholds_exclusive": [
+        0.2,
+        0.3
+      ],
+      "prior_four_hour_high_bars": 48,
+      "breakout_field": "signal_high",
+      "breakout_comparison": "strict_greater_than",
+      "no_breakout_comparison": "less_than_or_equal",
+      "limit_reference_bars": 72,
+      "limit_reference_field": "body_top_max",
+      "limit_reference_body_top": "bullish_close_bearish_open",
+      "limit_reference_includes_signal_bar": true
+    },
+    "entry": {
+      "variants": [
+        "next_5m_open",
+        "limit_recent_72_body_top"
+      ],
+      "limit_activation": "next_5m_bar",
+      "limit_wait_bars": 72,
+      "sell_limit_gap_fill": "opening_price_if_open_above_limit_else_limit_on_high_touch"
+    },
+    "risk": {
+      "atr_period": 14,
+      "stop_atr": 0.5,
+      "target_r": 1.0,
+      "max_hold_bars": 72,
+      "max_stop_distance_pct": 0.15,
+      "cooldown_bars": 72
+    },
+    "position_management": {
+      "leverage": 2.0,
+      "risk_per_trade_pct": 1.0,
+      "max_concurrent_positions": 1,
+      "one_position_per_symbol": true,
+      "account_daily_loss_limit_pct": 5.0
+    },
+    "costs": {
+      "fee_rate_one_way": 0.0006,
+      "slippage_one_way": 0.0002,
+      "funding_rate_round_trip": 0.0
+    },
+    "universe": {
+      "asset_type": "altcoin_usdt_linear_perpetual",
+      "source": "strategies/sweep_reversal_short/config/universe.json",
+      "exclude_non_crypto": true,
+      "minimum_contiguous_bars": 73
+    },
+    "research": {
+      "split_utc": "2026-04-01T00:00:00+00:00",
+      "survivorship_bias": true,
+      "funding_data_available": false,
+      "comparison_design": "breakout_4h_and_no_breakout_4h_are_paired_control_groups",
+      "selection_policy": "compare_all_fixed_variants_without_selecting_the_best_full_sample_result"
+    }
+  },
+  "data": {
+    "symbols": 304,
+    "bars": 35697069,
+    "start_utc": "2025-04-03T00:00:00Z",
+    "end_utc_last_bar": "2026-10-03T08:00:00Z",
+    "market_data_read_passes": 1,
+    "sources": [
+      {
+        "symbol": "0G",
+        "path": "data/kline/okx/swap/5m/0G_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2749621,
+        "bars": 108259,
+        "signals": 1
+      },
+      {
+        "symbol": "1INCH",
+        "path": "data/kline/okx/swap/5m/1INCH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3834591,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "2Z",
+        "path": "data/kline/okx/swap/5m/2Z_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2544449,
+        "bars": 105347,
+        "signals": 2
+      },
+      {
+        "symbol": "A",
+        "path": "data/kline/okx/swap/5m/A_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3339788,
+        "bars": 141667,
+        "signals": 2
+      },
+      {
+        "symbol": "AAVE",
+        "path": "data/kline/okx/swap/5m/AAVE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4442652,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "ACH",
+        "path": "data/kline/okx/swap/5m/ACH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3622203,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "ACN",
+        "path": "data/kline/okx/swap/5m/ACN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 5679,
+        "bars": 268,
+        "signals": 0
+      },
+      {
+        "symbol": "ACT",
+        "path": "data/kline/okx/swap/5m/ACT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4211072,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "ACU",
+        "path": "data/kline/okx/swap/5m/ACU_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1847197,
+        "bars": 72877,
+        "signals": 3
+      },
+      {
+        "symbol": "ADA",
+        "path": "data/kline/okx/swap/5m/ADA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3971744,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "AEON",
+        "path": "data/kline/okx/swap/5m/AEON_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 526355,
+        "bars": 19543,
+        "signals": 1
+      },
+      {
+        "symbol": "AERO",
+        "path": "data/kline/okx/swap/5m/AERO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3168588,
+        "bars": 131638,
+        "signals": 2
+      },
+      {
+        "symbol": "AEVO",
+        "path": "data/kline/okx/swap/5m/AEVO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4032361,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "AGLD",
+        "path": "data/kline/okx/swap/5m/AGLD_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3778854,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "AI",
+        "path": "data/kline/okx/swap/5m/AI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1055759,
+        "bars": 45169,
+        "signals": 3
+      },
+      {
+        "symbol": "AIXBT",
+        "path": "data/kline/okx/swap/5m/AIXBT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4056419,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "AKE",
+        "path": "data/kline/okx/swap/5m/AKE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 134765,
+        "bars": 4909,
+        "signals": 4
+      },
+      {
+        "symbol": "ALGO",
+        "path": "data/kline/okx/swap/5m/ALGO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3779560,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "ALLO",
+        "path": "data/kline/okx/swap/5m/ALLO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2530366,
+        "bars": 93784,
+        "signals": 3
+      },
+      {
+        "symbol": "ANIME",
+        "path": "data/kline/okx/swap/5m/ANIME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3951785,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "APE",
+        "path": "data/kline/okx/swap/5m/APE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4309585,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "API3",
+        "path": "data/kline/okx/swap/5m/API3_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3854122,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "APR",
+        "path": "data/kline/okx/swap/5m/APR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2491747,
+        "bars": 99097,
+        "signals": 1
+      },
+      {
+        "symbol": "APT",
+        "path": "data/kline/okx/swap/5m/APT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3999678,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "AR",
+        "path": "data/kline/okx/swap/5m/AR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3898206,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "ARB",
+        "path": "data/kline/okx/swap/5m/ARB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4249621,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "ARKM",
+        "path": "data/kline/okx/swap/5m/ARKM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4014536,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "ARX",
+        "path": "data/kline/okx/swap/5m/ARX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 673868,
+        "bars": 29611,
+        "signals": 2
+      },
+      {
+        "symbol": "ASTER",
+        "path": "data/kline/okx/swap/5m/ASTER_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2875156,
+        "bars": 108325,
+        "signals": 0
+      },
+      {
+        "symbol": "AT",
+        "path": "data/kline/okx/swap/5m/AT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2137132,
+        "bars": 97321,
+        "signals": 2
+      },
+      {
+        "symbol": "ATH",
+        "path": "data/kline/okx/swap/5m/ATH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3862549,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "ATOM",
+        "path": "data/kline/okx/swap/5m/ATOM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3543157,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "AUCTION",
+        "path": "data/kline/okx/swap/5m/AUCTION_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3821478,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "AVAX",
+        "path": "data/kline/okx/swap/5m/AVAX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4364145,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "AVNT",
+        "path": "data/kline/okx/swap/5m/AVNT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2759756,
+        "bars": 108199,
+        "signals": 2
+      },
+      {
+        "symbol": "AXS",
+        "path": "data/kline/okx/swap/5m/AXS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4066713,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "AZTEC",
+        "path": "data/kline/okx/swap/5m/AZTEC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1382425,
+        "bars": 67363,
+        "signals": 2
+      },
+      {
+        "symbol": "BABY",
+        "path": "data/kline/okx/swap/5m/BABY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3832703,
+        "bars": 155773,
+        "signals": 6
+      },
+      {
+        "symbol": "BAND",
+        "path": "data/kline/okx/swap/5m/BAND_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3622530,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "BARD",
+        "path": "data/kline/okx/swap/5m/BARD_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2663955,
+        "bars": 109393,
+        "signals": 3
+      },
+      {
+        "symbol": "BASED",
+        "path": "data/kline/okx/swap/5m/BASED_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1486348,
+        "bars": 53827,
+        "signals": 2
+      },
+      {
+        "symbol": "BAT",
+        "path": "data/kline/okx/swap/5m/BAT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3550819,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "BCH",
+        "path": "data/kline/okx/swap/5m/BCH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3818946,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "BEAT",
+        "path": "data/kline/okx/swap/5m/BEAT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2778908,
+        "bars": 93502,
+        "signals": 11
+      },
+      {
+        "symbol": "BERA",
+        "path": "data/kline/okx/swap/5m/BERA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4064283,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "BICO",
+        "path": "data/kline/okx/swap/5m/BICO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4046274,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "BIGTIME",
+        "path": "data/kline/okx/swap/5m/BIGTIME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3826289,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "BILL",
+        "path": "data/kline/okx/swap/5m/BILL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1077432,
+        "bars": 43201,
+        "signals": 0
+      },
+      {
+        "symbol": "BIO",
+        "path": "data/kline/okx/swap/5m/BIO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4324726,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "BLEND",
+        "path": "data/kline/okx/swap/5m/BLEND_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1037823,
+        "bars": 45193,
+        "signals": 0
+      },
+      {
+        "symbol": "BLUR",
+        "path": "data/kline/okx/swap/5m/BLUR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3818932,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "BMNR",
+        "path": "data/kline/okx/swap/5m/BMNR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 796647,
+        "bars": 45709,
+        "signals": 0
+      },
+      {
+        "symbol": "BNB",
+        "path": "data/kline/okx/swap/5m/BNB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3886431,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "BOME",
+        "path": "data/kline/okx/swap/5m/BOME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3890586,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "BONK",
+        "path": "data/kline/okx/swap/5m/BONK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4313600,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "BOT",
+        "path": "data/kline/okx/swap/5m/BOT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 452741,
+        "bars": 26761,
+        "signals": 0
+      },
+      {
+        "symbol": "BRETT",
+        "path": "data/kline/okx/swap/5m/BRETT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3700418,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "BREV",
+        "path": "data/kline/okx/swap/5m/BREV_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1919373,
+        "bars": 79717,
+        "signals": 0
+      },
+      {
+        "symbol": "BSB",
+        "path": "data/kline/okx/swap/5m/BSB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1360577,
+        "bars": 52969,
+        "signals": 7
+      },
+      {
+        "symbol": "BSP",
+        "path": "data/kline/okx/swap/5m/BSP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 405938,
+        "bars": 25621,
+        "signals": 0
+      },
+      {
+        "symbol": "BWET",
+        "path": "data/kline/okx/swap/5m/BWET_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 7537,
+        "bars": 262,
+        "signals": 0
+      },
+      {
+        "symbol": "CAP",
+        "path": "data/kline/okx/swap/5m/CAP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 737346,
+        "bars": 28459,
+        "signals": 2
+      },
+      {
+        "symbol": "CASHCAT",
+        "path": "data/kline/okx/swap/5m/CASHCAT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 218180,
+        "bars": 8695,
+        "signals": 1
+      },
+      {
+        "symbol": "CBRS",
+        "path": "data/kline/okx/swap/5m/CBRS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1036685,
+        "bars": 40633,
+        "signals": 0
+      },
+      {
+        "symbol": "CC",
+        "path": "data/kline/okx/swap/5m/CC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2488263,
+        "bars": 96985,
+        "signals": 0
+      },
+      {
+        "symbol": "CELO",
+        "path": "data/kline/okx/swap/5m/CELO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3933730,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "CFX",
+        "path": "data/kline/okx/swap/5m/CFX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4124995,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "CHIP",
+        "path": "data/kline/okx/swap/5m/CHIP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1178930,
+        "bars": 47449,
+        "signals": 0
+      },
+      {
+        "symbol": "CHZ",
+        "path": "data/kline/okx/swap/5m/CHZ_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3865199,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "CNPY",
+        "path": "data/kline/okx/swap/5m/CNPY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 191793,
+        "bars": 7429,
+        "signals": 2
+      },
+      {
+        "symbol": "COAI",
+        "path": "data/kline/okx/swap/5m/COAI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2634587,
+        "bars": 101587,
+        "signals": 0
+      },
+      {
+        "symbol": "COMP",
+        "path": "data/kline/okx/swap/5m/COMP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3450741,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "CORE",
+        "path": "data/kline/okx/swap/5m/CORE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3986392,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "CP",
+        "path": "data/kline/okx/swap/5m/CP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 210235,
+        "bars": 8837,
+        "signals": 2
+      },
+      {
+        "symbol": "CRO",
+        "path": "data/kline/okx/swap/5m/CRO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3988062,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "CRV",
+        "path": "data/kline/okx/swap/5m/CRV_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4138562,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "CT",
+        "path": "data/kline/okx/swap/5m/CT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 24179,
+        "bars": 829,
+        "signals": 0
+      },
+      {
+        "symbol": "CVX",
+        "path": "data/kline/okx/swap/5m/CVX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3356868,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "CYPH",
+        "path": "data/kline/okx/swap/5m/CYPH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 73272,
+        "bars": 2863,
+        "signals": 0
+      },
+      {
+        "symbol": "DASH",
+        "path": "data/kline/okx/swap/5m/DASH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2431404,
+        "bars": 95389,
+        "signals": 0
+      },
+      {
+        "symbol": "DATA",
+        "path": "data/kline/okx/swap/5m/DATA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 552474,
+        "bars": 26731,
+        "signals": 0
+      },
+      {
+        "symbol": "DGAI",
+        "path": "data/kline/okx/swap/5m/DGAI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 201812,
+        "bars": 8701,
+        "signals": 0
+      },
+      {
+        "symbol": "DOGE",
+        "path": "data/kline/okx/swap/5m/DOGE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4631304,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "DOOD",
+        "path": "data/kline/okx/swap/5m/DOOD_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3342395,
+        "bars": 146545,
+        "signals": 3
+      },
+      {
+        "symbol": "DOS",
+        "path": "data/kline/okx/swap/5m/DOS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 363920,
+        "bars": 15505,
+        "signals": 0
+      },
+      {
+        "symbol": "DOT",
+        "path": "data/kline/okx/swap/5m/DOT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3814951,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "DRAM",
+        "path": "data/kline/okx/swap/5m/DRAM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1004578,
+        "bars": 42613,
+        "signals": 0
+      },
+      {
+        "symbol": "DYDX",
+        "path": "data/kline/okx/swap/5m/DYDX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4224396,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "EDEN",
+        "path": "data/kline/okx/swap/5m/EDEN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2811475,
+        "bars": 105943,
+        "signals": 4
+      },
+      {
+        "symbol": "EDGE",
+        "path": "data/kline/okx/swap/5m/EDGE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1336634,
+        "bars": 53215,
+        "signals": 3
+      },
+      {
+        "symbol": "EGLD",
+        "path": "data/kline/okx/swap/5m/EGLD_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3595229,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "EIGEN",
+        "path": "data/kline/okx/swap/5m/EIGEN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4063799,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "ENA",
+        "path": "data/kline/okx/swap/5m/ENA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2875336,
+        "bars": 109735,
+        "signals": 3
+      },
+      {
+        "symbol": "ENJ",
+        "path": "data/kline/okx/swap/5m/ENJ_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3798235,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "ENS",
+        "path": "data/kline/okx/swap/5m/ENS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4081991,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "ENSO",
+        "path": "data/kline/okx/swap/5m/ENSO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2523976,
+        "bars": 97609,
+        "signals": 0
+      },
+      {
+        "symbol": "ESP",
+        "path": "data/kline/okx/swap/5m/ESP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1646366,
+        "bars": 67585,
+        "signals": 3
+      },
+      {
+        "symbol": "ETC",
+        "path": "data/kline/okx/swap/5m/ETC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3783513,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "ETH",
+        "path": "data/kline/okx/swap/5m/ETH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 5516566,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "ETHFI",
+        "path": "data/kline/okx/swap/5m/ETHFI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4231375,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "ETHW",
+        "path": "data/kline/okx/swap/5m/ETHW_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3695042,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "F",
+        "path": "data/kline/okx/swap/5m/F_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2253722,
+        "bars": 98785,
+        "signals": 4
+      },
+      {
+        "symbol": "FARTCOIN",
+        "path": "data/kline/okx/swap/5m/FARTCOIN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4185152,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "FET",
+        "path": "data/kline/okx/swap/5m/FET_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 183068,
+        "bars": 8119,
+        "signals": 0
+      },
+      {
+        "symbol": "FIL",
+        "path": "data/kline/okx/swap/5m/FIL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4198714,
+        "bars": 157921,
+        "signals": 6
+      },
+      {
+        "symbol": "FLOCK",
+        "path": "data/kline/okx/swap/5m/FLOCK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 157664,
+        "bars": 6025,
+        "signals": 0
+      },
+      {
+        "symbol": "FLOKI",
+        "path": "data/kline/okx/swap/5m/FLOKI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3773647,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "FLOW",
+        "path": "data/kline/okx/swap/5m/FLOW_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3689340,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "FOGO",
+        "path": "data/kline/okx/swap/5m/FOGO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1907200,
+        "bars": 76516,
+        "signals": 1
+      },
+      {
+        "symbol": "FWDI",
+        "path": "data/kline/okx/swap/5m/FWDI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 336140,
+        "bars": 19573,
+        "signals": 0
+      },
+      {
+        "symbol": "GALA",
+        "path": "data/kline/okx/swap/5m/GALA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4007513,
+        "bars": 157921,
+        "signals": 5
+      },
+      {
+        "symbol": "GAS",
+        "path": "data/kline/okx/swap/5m/GAS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3360037,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "GIGGLE",
+        "path": "data/kline/okx/swap/5m/GIGGLE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2514826,
+        "bars": 98797,
+        "signals": 4
+      },
+      {
+        "symbol": "GLM",
+        "path": "data/kline/okx/swap/5m/GLM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3304456,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "GMT",
+        "path": "data/kline/okx/swap/5m/GMT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4103701,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "GMX",
+        "path": "data/kline/okx/swap/5m/GMX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3511850,
+        "bars": 157921,
+        "signals": 7
+      },
+      {
+        "symbol": "GPRO",
+        "path": "data/kline/okx/swap/5m/GPRO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 121625,
+        "bars": 8286,
+        "signals": 0
+      },
+      {
+        "symbol": "GPS",
+        "path": "data/kline/okx/swap/5m/GPS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4164034,
+        "bars": 157921,
+        "signals": 6
+      },
+      {
+        "symbol": "GRAM",
+        "path": "data/kline/okx/swap/5m/GRAM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 638762,
+        "bars": 31075,
+        "signals": 0
+      },
+      {
+        "symbol": "GRASS",
+        "path": "data/kline/okx/swap/5m/GRASS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4103364,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "GRT",
+        "path": "data/kline/okx/swap/5m/GRT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3813719,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "GRVT",
+        "path": "data/kline/okx/swap/5m/GRVT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 526004,
+        "bars": 18637,
+        "signals": 2
+      },
+      {
+        "symbol": "H",
+        "path": "data/kline/okx/swap/5m/H_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3661794,
+        "bars": 131641,
+        "signals": 5
+      },
+      {
+        "symbol": "H100",
+        "path": "data/kline/okx/swap/5m/H100_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 7224,
+        "bars": 271,
+        "signals": 0
+      },
+      {
+        "symbol": "HBAR",
+        "path": "data/kline/okx/swap/5m/HBAR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4271598,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "HMSTR",
+        "path": "data/kline/okx/swap/5m/HMSTR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3917309,
+        "bars": 157921,
+        "signals": 9
+      },
+      {
+        "symbol": "HOME",
+        "path": "data/kline/okx/swap/5m/HOME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3143348,
+        "bars": 137350,
+        "signals": 4
+      },
+      {
+        "symbol": "HUMA",
+        "path": "data/kline/okx/swap/5m/HUMA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3315655,
+        "bars": 142495,
+        "signals": 6
+      },
+      {
+        "symbol": "HYPE",
+        "path": "data/kline/okx/swap/5m/HYPE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4638566,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "ICP",
+        "path": "data/kline/okx/swap/5m/ICP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4154851,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "IMX",
+        "path": "data/kline/okx/swap/5m/IMX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3834133,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "INFQ",
+        "path": "data/kline/okx/swap/5m/INFQ_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 621679,
+        "bars": 37426,
+        "signals": 0
+      },
+      {
+        "symbol": "INIT",
+        "path": "data/kline/okx/swap/5m/INIT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3648013,
+        "bars": 151735,
+        "signals": 1
+      },
+      {
+        "symbol": "INJ",
+        "path": "data/kline/okx/swap/5m/INJ_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4129953,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "IOST",
+        "path": "data/kline/okx/swap/5m/IOST_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3385032,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "IOTA",
+        "path": "data/kline/okx/swap/5m/IOTA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3633004,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "IRYS",
+        "path": "data/kline/okx/swap/5m/IRYS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 752990,
+        "bars": 37114,
+        "signals": 0
+      },
+      {
+        "symbol": "JELLYJELLY",
+        "path": "data/kline/okx/swap/5m/JELLYJELLY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3822522,
+        "bars": 157921,
+        "signals": 5
+      },
+      {
+        "symbol": "JTO",
+        "path": "data/kline/okx/swap/5m/JTO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3877143,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "JUP",
+        "path": "data/kline/okx/swap/5m/JUP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3692390,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "KAITO",
+        "path": "data/kline/okx/swap/5m/KAITO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4217190,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "KAT",
+        "path": "data/kline/okx/swap/5m/KAT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1543561,
+        "bars": 61879,
+        "signals": 3
+      },
+      {
+        "symbol": "KGEN",
+        "path": "data/kline/okx/swap/5m/KGEN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2383816,
+        "bars": 100843,
+        "signals": 0
+      },
+      {
+        "symbol": "KII",
+        "path": "data/kline/okx/swap/5m/KII_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 60104,
+        "bars": 2557,
+        "signals": 0
+      },
+      {
+        "symbol": "KITE",
+        "path": "data/kline/okx/swap/5m/KITE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1595569,
+        "bars": 62505,
+        "signals": 0
+      },
+      {
+        "symbol": "KMNO",
+        "path": "data/kline/okx/swap/5m/KMNO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3211737,
+        "bars": 141463,
+        "signals": 2
+      },
+      {
+        "symbol": "KSM",
+        "path": "data/kline/okx/swap/5m/KSM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3549194,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "LA",
+        "path": "data/kline/okx/swap/5m/LA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3251791,
+        "bars": 137353,
+        "signals": 3
+      },
+      {
+        "symbol": "LAB",
+        "path": "data/kline/okx/swap/5m/LAB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2701750,
+        "bars": 96721,
+        "signals": 8
+      },
+      {
+        "symbol": "LAYER",
+        "path": "data/kline/okx/swap/5m/LAYER_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4067457,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "LDO",
+        "path": "data/kline/okx/swap/5m/LDO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4133106,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "LIGHT",
+        "path": "data/kline/okx/swap/5m/LIGHT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2033308,
+        "bars": 83809,
+        "signals": 10
+      },
+      {
+        "symbol": "LINEA",
+        "path": "data/kline/okx/swap/5m/LINEA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2755454,
+        "bars": 114265,
+        "signals": 4
+      },
+      {
+        "symbol": "LINK",
+        "path": "data/kline/okx/swap/5m/LINK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4351071,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "LIT",
+        "path": "data/kline/okx/swap/5m/LIT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2204980,
+        "bars": 81559,
+        "signals": 0
+      },
+      {
+        "symbol": "LPT",
+        "path": "data/kline/okx/swap/5m/LPT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3770571,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "LQTY",
+        "path": "data/kline/okx/swap/5m/LQTY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3735444,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "LTC",
+        "path": "data/kline/okx/swap/5m/LTC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3934459,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "LUNA",
+        "path": "data/kline/okx/swap/5m/LUNA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3947443,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "MAGIC",
+        "path": "data/kline/okx/swap/5m/MAGIC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4296389,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "MANA",
+        "path": "data/kline/okx/swap/5m/MANA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3680318,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "MASK",
+        "path": "data/kline/okx/swap/5m/MASK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3668310,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "ME",
+        "path": "data/kline/okx/swap/5m/ME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3947949,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "MEGA",
+        "path": "data/kline/okx/swap/5m/MEGA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1127206,
+        "bars": 44881,
+        "signals": 0
+      },
+      {
+        "symbol": "MEME",
+        "path": "data/kline/okx/swap/5m/MEME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4025754,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "MERL",
+        "path": "data/kline/okx/swap/5m/MERL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4416073,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "MET",
+        "path": "data/kline/okx/swap/5m/MET_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2472126,
+        "bars": 103102,
+        "signals": 1
+      },
+      {
+        "symbol": "METIS",
+        "path": "data/kline/okx/swap/5m/METIS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3516921,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "MEW",
+        "path": "data/kline/okx/swap/5m/MEW_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3757574,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "MINA",
+        "path": "data/kline/okx/swap/5m/MINA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3858463,
+        "bars": 157921,
+        "signals": 5
+      },
+      {
+        "symbol": "MMT",
+        "path": "data/kline/okx/swap/5m/MMT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2141768,
+        "bars": 95851,
+        "signals": 14
+      },
+      {
+        "symbol": "MON",
+        "path": "data/kline/okx/swap/5m/MON_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2594587,
+        "bars": 103105,
+        "signals": 5
+      },
+      {
+        "symbol": "MOODENG",
+        "path": "data/kline/okx/swap/5m/MOODENG_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4239866,
+        "bars": 157921,
+        "signals": 6
+      },
+      {
+        "symbol": "MORPHO",
+        "path": "data/kline/okx/swap/5m/MORPHO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4141956,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "MOVE",
+        "path": "data/kline/okx/swap/5m/MOVE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4029694,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "MUBARAK",
+        "path": "data/kline/okx/swap/5m/MUBARAK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3207416,
+        "bars": 140227,
+        "signals": 5
+      },
+      {
+        "symbol": "NEAR",
+        "path": "data/kline/okx/swap/5m/NEAR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3831245,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "NEIRO",
+        "path": "data/kline/okx/swap/5m/NEIRO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4134247,
+        "bars": 157921,
+        "signals": 5
+      },
+      {
+        "symbol": "NEO",
+        "path": "data/kline/okx/swap/5m/NEO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3475827,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "NES",
+        "path": "data/kline/okx/swap/5m/NES_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 632245,
+        "bars": 29023,
+        "signals": 1
+      },
+      {
+        "symbol": "NIGHT",
+        "path": "data/kline/okx/swap/5m/NIGHT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2346173,
+        "bars": 85783,
+        "signals": 0
+      },
+      {
+        "symbol": "NKE",
+        "path": "data/kline/okx/swap/5m/NKE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 6676,
+        "bars": 265,
+        "signals": 0
+      },
+      {
+        "symbol": "NMR",
+        "path": "data/kline/okx/swap/5m/NMR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3935223,
+        "bars": 157921,
+        "signals": 5
+      },
+      {
+        "symbol": "NOT",
+        "path": "data/kline/okx/swap/5m/NOT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4024209,
+        "bars": 157921,
+        "signals": 6
+      },
+      {
+        "symbol": "O",
+        "path": "data/kline/okx/swap/5m/O_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 755958,
+        "bars": 31003,
+        "signals": 5
+      },
+      {
+        "symbol": "OFC",
+        "path": "data/kline/okx/swap/5m/OFC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1258904,
+        "bars": 50941,
+        "signals": 0
+      },
+      {
+        "symbol": "OKB",
+        "path": "data/kline/okx/swap/5m/OKB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2950428,
+        "bars": 113545,
+        "signals": 2
+      },
+      {
+        "symbol": "OL",
+        "path": "data/kline/okx/swap/5m/OL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3777935,
+        "bars": 156458,
+        "signals": 8
+      },
+      {
+        "symbol": "ONDO",
+        "path": "data/kline/okx/swap/5m/ONDO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3937004,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "ONE",
+        "path": "data/kline/okx/swap/5m/ONE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3697916,
+        "bars": 157921,
+        "signals": 6
+      },
+      {
+        "symbol": "ONT",
+        "path": "data/kline/okx/swap/5m/ONT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3677469,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "OP",
+        "path": "data/kline/okx/swap/5m/OP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4173828,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "OPG",
+        "path": "data/kline/okx/swap/5m/OPG_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1124726,
+        "bars": 46933,
+        "signals": 3
+      },
+      {
+        "symbol": "OPN",
+        "path": "data/kline/okx/swap/5m/OPN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1594028,
+        "bars": 63889,
+        "signals": 0
+      },
+      {
+        "symbol": "ORDER",
+        "path": "data/kline/okx/swap/5m/ORDER_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2401771,
+        "bars": 105898,
+        "signals": 2
+      },
+      {
+        "symbol": "ORDI",
+        "path": "data/kline/okx/swap/5m/ORDI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4152929,
+        "bars": 157921,
+        "signals": 5
+      },
+      {
+        "symbol": "PARTI",
+        "path": "data/kline/okx/swap/5m/PARTI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3909132,
+        "bars": 157921,
+        "signals": 6
+      },
+      {
+        "symbol": "PENDLE",
+        "path": "data/kline/okx/swap/5m/PENDLE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2467156,
+        "bars": 109729,
+        "signals": 3
+      },
+      {
+        "symbol": "PENG",
+        "path": "data/kline/okx/swap/5m/PENG_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 385383,
+        "bars": 24463,
+        "signals": 0
+      },
+      {
+        "symbol": "PENGU",
+        "path": "data/kline/okx/swap/5m/PENGU_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4454190,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "PEOPLE",
+        "path": "data/kline/okx/swap/5m/PEOPLE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3907391,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "PEPE",
+        "path": "data/kline/okx/swap/5m/PEPE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4216043,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "PI",
+        "path": "data/kline/okx/swap/5m/PI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3935732,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "PIEVERSE",
+        "path": "data/kline/okx/swap/5m/PIEVERSE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2330874,
+        "bars": 92503,
+        "signals": 4
+      },
+      {
+        "symbol": "PIPPIN",
+        "path": "data/kline/okx/swap/5m/PIPPIN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3134093,
+        "bars": 118382,
+        "signals": 5
+      },
+      {
+        "symbol": "PLUME",
+        "path": "data/kline/okx/swap/5m/PLUME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3838641,
+        "bars": 147751,
+        "signals": 10
+      },
+      {
+        "symbol": "PNUT",
+        "path": "data/kline/okx/swap/5m/PNUT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3951160,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "POL",
+        "path": "data/kline/okx/swap/5m/POL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3753166,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "PONS",
+        "path": "data/kline/okx/swap/5m/PONS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 225104,
+        "bars": 8125,
+        "signals": 0
+      },
+      {
+        "symbol": "POPCAT",
+        "path": "data/kline/okx/swap/5m/POPCAT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3820950,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "PROS",
+        "path": "data/kline/okx/swap/5m/PROS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1117033,
+        "bars": 45433,
+        "signals": 2
+      },
+      {
+        "symbol": "PROVE",
+        "path": "data/kline/okx/swap/5m/PROVE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2282858,
+        "bars": 101047,
+        "signals": 3
+      },
+      {
+        "symbol": "PUMP",
+        "path": "data/kline/okx/swap/5m/PUMP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3291867,
+        "bars": 128335,
+        "signals": 2
+      },
+      {
+        "symbol": "PURR",
+        "path": "data/kline/okx/swap/5m/PURR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 234978,
+        "bars": 12370,
+        "signals": 0
+      },
+      {
+        "symbol": "PYTH",
+        "path": "data/kline/okx/swap/5m/PYTH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3985937,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "QNT",
+        "path": "data/kline/okx/swap/5m/QNT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 691345,
+        "bars": 34531,
+        "signals": 0
+      },
+      {
+        "symbol": "QTUM",
+        "path": "data/kline/okx/swap/5m/QTUM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3498092,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "QUANT",
+        "path": "data/kline/okx/swap/5m/QUANT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 15794,
+        "bars": 577,
+        "signals": 0
+      },
+      {
+        "symbol": "RAM",
+        "path": "data/kline/okx/swap/5m/RAM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 532749,
+        "bars": 26764,
+        "signals": 0
+      },
+      {
+        "symbol": "RAVE",
+        "path": "data/kline/okx/swap/5m/RAVE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2375589,
+        "bars": 84097,
+        "signals": 24
+      },
+      {
+        "symbol": "RAY",
+        "path": "data/kline/okx/swap/5m/RAY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4169052,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "RE",
+        "path": "data/kline/okx/swap/5m/RE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 921369,
+        "bars": 31075,
+        "signals": 3
+      },
+      {
+        "symbol": "RECALL",
+        "path": "data/kline/okx/swap/5m/RECALL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2276401,
+        "bars": 97318,
+        "signals": 0
+      },
+      {
+        "symbol": "RENDER",
+        "path": "data/kline/okx/swap/5m/RENDER_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3580519,
+        "bars": 157921,
+        "signals": 5
+      },
+      {
+        "symbol": "RESOLV",
+        "path": "data/kline/okx/swap/5m/RESOLV_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3495383,
+        "bars": 138163,
+        "signals": 8
+      },
+      {
+        "symbol": "RIVER",
+        "path": "data/kline/okx/swap/5m/RIVER_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2100575,
+        "bars": 76909,
+        "signals": 0
+      },
+      {
+        "symbol": "RLS",
+        "path": "data/kline/okx/swap/5m/RLS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2122051,
+        "bars": 87754,
+        "signals": 4
+      },
+      {
+        "symbol": "ROBO",
+        "path": "data/kline/okx/swap/5m/ROBO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1450817,
+        "bars": 62695,
+        "signals": 1
+      },
+      {
+        "symbol": "RSR",
+        "path": "data/kline/okx/swap/5m/RSR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3767712,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "RVN",
+        "path": "data/kline/okx/swap/5m/RVN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3818981,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "S",
+        "path": "data/kline/okx/swap/5m/S_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3766461,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "SAHARA",
+        "path": "data/kline/okx/swap/5m/SAHARA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3410533,
+        "bars": 133579,
+        "signals": 0
+      },
+      {
+        "symbol": "SAND",
+        "path": "data/kline/okx/swap/5m/SAND_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3736109,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "SAPIEN",
+        "path": "data/kline/okx/swap/5m/SAPIEN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2209045,
+        "bars": 95284,
+        "signals": 3
+      },
+      {
+        "symbol": "SATS",
+        "path": "data/kline/okx/swap/5m/SATS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3956372,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "SECZ",
+        "path": "data/kline/okx/swap/5m/SECZ_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 6906,
+        "bars": 259,
+        "signals": 0
+      },
+      {
+        "symbol": "SEI",
+        "path": "data/kline/okx/swap/5m/SEI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2216175,
+        "bars": 93031,
+        "signals": 0
+      },
+      {
+        "symbol": "SENT",
+        "path": "data/kline/okx/swap/5m/SENT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2068240,
+        "bars": 92941,
+        "signals": 0
+      },
+      {
+        "symbol": "SHELL",
+        "path": "data/kline/okx/swap/5m/SHELL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3599418,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "SHIB",
+        "path": "data/kline/okx/swap/5m/SHIB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4243725,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "SIGN",
+        "path": "data/kline/okx/swap/5m/SIGN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3486333,
+        "bars": 150583,
+        "signals": 12
+      },
+      {
+        "symbol": "SKY",
+        "path": "data/kline/okx/swap/5m/SKY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2604520,
+        "bars": 111415,
+        "signals": 2
+      },
+      {
+        "symbol": "SLX",
+        "path": "data/kline/okx/swap/5m/SLX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 913419,
+        "bars": 35743,
+        "signals": 0
+      },
+      {
+        "symbol": "SNX",
+        "path": "data/kline/okx/swap/5m/SNX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3939640,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "SNXX",
+        "path": "data/kline/okx/swap/5m/SNXX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 543399,
+        "bars": 23281,
+        "signals": 0
+      },
+      {
+        "symbol": "SOL",
+        "path": "data/kline/okx/swap/5m/SOL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4620246,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "SOON",
+        "path": "data/kline/okx/swap/5m/SOON_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3674398,
+        "bars": 143383,
+        "signals": 12
+      },
+      {
+        "symbol": "SOPH",
+        "path": "data/kline/okx/swap/5m/SOPH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3347206,
+        "bars": 141919,
+        "signals": 0
+      },
+      {
+        "symbol": "SPACE",
+        "path": "data/kline/okx/swap/5m/SPACE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1922168,
+        "bars": 72805,
+        "signals": 0
+      },
+      {
+        "symbol": "SPK",
+        "path": "data/kline/okx/swap/5m/SPK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3154486,
+        "bars": 136195,
+        "signals": 5
+      },
+      {
+        "symbol": "SPX",
+        "path": "data/kline/okx/swap/5m/SPX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3262650,
+        "bars": 127621,
+        "signals": 1
+      },
+      {
+        "symbol": "SSV",
+        "path": "data/kline/okx/swap/5m/SSV_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3861253,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "STRC",
+        "path": "data/kline/okx/swap/5m/STRC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 381418,
+        "bars": 27631,
+        "signals": 0
+      },
+      {
+        "symbol": "STRK",
+        "path": "data/kline/okx/swap/5m/STRK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3996999,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "STX",
+        "path": "data/kline/okx/swap/5m/STX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3852803,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "SUI",
+        "path": "data/kline/okx/swap/5m/SUI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4538065,
+        "bars": 157921,
+        "signals": 5
+      },
+      {
+        "symbol": "SUSHI",
+        "path": "data/kline/okx/swap/5m/SUSHI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3843051,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "SYRUP",
+        "path": "data/kline/okx/swap/5m/SYRUP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2898059,
+        "bars": 131635,
+        "signals": 1
+      },
+      {
+        "symbol": "TAO",
+        "path": "data/kline/okx/swap/5m/TAO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3778476,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "THETA",
+        "path": "data/kline/okx/swap/5m/THETA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3764484,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "TIA",
+        "path": "data/kline/okx/swap/5m/TIA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3875339,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "TRB",
+        "path": "data/kline/okx/swap/5m/TRB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3496229,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "TRIA",
+        "path": "data/kline/okx/swap/5m/TRIA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1742503,
+        "bars": 69127,
+        "signals": 4
+      },
+      {
+        "symbol": "TRUMP",
+        "path": "data/kline/okx/swap/5m/TRUMP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4135041,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "TRUST",
+        "path": "data/kline/okx/swap/5m/TRUST_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2160481,
+        "bars": 95575,
+        "signals": 3
+      },
+      {
+        "symbol": "TRUTH",
+        "path": "data/kline/okx/swap/5m/TRUTH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2270481,
+        "bars": 88951,
+        "signals": 0
+      },
+      {
+        "symbol": "TRX",
+        "path": "data/kline/okx/swap/5m/TRX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4154414,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "TURBO",
+        "path": "data/kline/okx/swap/5m/TURBO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3942426,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "UB",
+        "path": "data/kline/okx/swap/5m/UB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1252210,
+        "bars": 45439,
+        "signals": 1
+      },
+      {
+        "symbol": "UMA",
+        "path": "data/kline/okx/swap/5m/UMA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3709042,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "UNI",
+        "path": "data/kline/okx/swap/5m/UNI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4005327,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "UP",
+        "path": "data/kline/okx/swap/5m/UP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1138335,
+        "bars": 51229,
+        "signals": 3
+      },
+      {
+        "symbol": "USAR",
+        "path": "data/kline/okx/swap/5m/USAR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 786700,
+        "bars": 45721,
+        "signals": 0
+      },
+      {
+        "symbol": "USELESS",
+        "path": "data/kline/okx/swap/5m/USELESS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3329354,
+        "bars": 125257,
+        "signals": 5
+      },
+      {
+        "symbol": "VANA",
+        "path": "data/kline/okx/swap/5m/VANA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3597039,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "VIRTUAL",
+        "path": "data/kline/okx/swap/5m/VIRTUAL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4289623,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "VVV",
+        "path": "data/kline/okx/swap/5m/VVV_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 721416,
+        "bars": 26521,
+        "signals": 0
+      },
+      {
+        "symbol": "W",
+        "path": "data/kline/okx/swap/5m/W_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4278396,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "WAL",
+        "path": "data/kline/okx/swap/5m/WAL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3247103,
+        "bars": 147757,
+        "signals": 6
+      },
+      {
+        "symbol": "WCT",
+        "path": "data/kline/okx/swap/5m/WCT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3730225,
+        "bars": 154327,
+        "signals": 6
+      },
+      {
+        "symbol": "WET",
+        "path": "data/kline/okx/swap/5m/WET_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2132533,
+        "bars": 85729,
+        "signals": 2
+      },
+      {
+        "symbol": "WIF",
+        "path": "data/kline/okx/swap/5m/WIF_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4132288,
+        "bars": 157921,
+        "signals": 2
+      },
+      {
+        "symbol": "WLD",
+        "path": "data/kline/okx/swap/5m/WLD_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4359927,
+        "bars": 157921,
+        "signals": 4
+      },
+      {
+        "symbol": "WLFI",
+        "path": "data/kline/okx/swap/5m/WLFI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2891247,
+        "bars": 116869,
+        "signals": 2
+      },
+      {
+        "symbol": "WOO",
+        "path": "data/kline/okx/swap/5m/WOO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3670756,
+        "bars": 157921,
+        "signals": 5
+      },
+      {
+        "symbol": "XDP",
+        "path": "data/kline/okx/swap/5m/XDP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 34875,
+        "bars": 1369,
+        "signals": 0
+      },
+      {
+        "symbol": "XLM",
+        "path": "data/kline/okx/swap/5m/XLM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4345230,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "XPL",
+        "path": "data/kline/okx/swap/5m/XPL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3103432,
+        "bars": 115453,
+        "signals": 2
+      },
+      {
+        "symbol": "XRP",
+        "path": "data/kline/okx/swap/5m/XRP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4500111,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "XTZ",
+        "path": "data/kline/okx/swap/5m/XTZ_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3804864,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "YB",
+        "path": "data/kline/okx/swap/5m/YB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2636125,
+        "bars": 102541,
+        "signals": 1
+      },
+      {
+        "symbol": "YFI",
+        "path": "data/kline/okx/swap/5m/YFI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3674695,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "YGG",
+        "path": "data/kline/okx/swap/5m/YGG_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3951272,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "ZAMA",
+        "path": "data/kline/okx/swap/5m/ZAMA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1962110,
+        "bars": 76819,
+        "signals": 2
+      },
+      {
+        "symbol": "ZBT",
+        "path": "data/kline/okx/swap/5m/ZBT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2716223,
+        "bars": 101047,
+        "signals": 0
+      },
+      {
+        "symbol": "ZEC",
+        "path": "data/kline/okx/swap/5m/ZEC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2960335,
+        "bars": 95386,
+        "signals": 0
+      },
+      {
+        "symbol": "ZEN",
+        "path": "data/kline/okx/swap/5m/ZEN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2370187,
+        "bars": 96217,
+        "signals": 0
+      },
+      {
+        "symbol": "ZETA",
+        "path": "data/kline/okx/swap/5m/ZETA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3595487,
+        "bars": 157921,
+        "signals": 1
+      },
+      {
+        "symbol": "ZIL",
+        "path": "data/kline/okx/swap/5m/ZIL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3581473,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "ZK",
+        "path": "data/kline/okx/swap/5m/ZK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3960093,
+        "bars": 157921,
+        "signals": 3
+      },
+      {
+        "symbol": "ZKP",
+        "path": "data/kline/okx/swap/5m/ZKP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1863178,
+        "bars": 77404,
+        "signals": 0
+      },
+      {
+        "symbol": "ZORA",
+        "path": "data/kline/okx/swap/5m/ZORA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2565065,
+        "bars": 103063,
+        "signals": 2
+      },
+      {
+        "symbol": "ZRO",
+        "path": "data/kline/okx/swap/5m/ZRO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3700162,
+        "bars": 157921,
+        "signals": 0
+      },
+      {
+        "symbol": "ZRX",
+        "path": "data/kline/okx/swap/5m/ZRX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3499893,
+        "bars": 157921,
+        "signals": 0
+      }
+    ]
+  },
+  "signal_counts": {
+    "gain_gt_20pct_breakout_4h": {
+      "events": 218,
+      "symbols": 113,
+      "before_split_events": 133,
+      "after_split_events": 85
+    },
+    "gain_gt_20pct_no_breakout_4h": {
+      "events": 251,
+      "symbols": 147,
+      "before_split_events": 228,
+      "after_split_events": 23
+    },
+    "gain_gt_30pct_breakout_4h": {
+      "events": 77,
+      "symbols": 61,
+      "before_split_events": 56,
+      "after_split_events": 21
+    },
+    "gain_gt_30pct_no_breakout_4h": {
+      "events": 114,
+      "symbols": 90,
+      "before_split_events": 107,
+      "after_split_events": 7
+    }
+  },
+  "variants": {
+    "gain_gt_20pct_breakout_4h|next_5m_open": {
+      "signals": 218,
+      "signal_symbols": 113,
+      "orders_filled": 164,
+      "fill_rate": 0.7522935779816514,
+      "rejected": {
+        "stop_distance": 54
+      },
+      "raw_trade_metrics": {
+        "trades": 164,
+        "wins": 77,
+        "win_rate": 0.4695121951219512,
+        "total_r": -21.22371251124535,
+        "avg_net_r": -0.12941288116613014,
+        "profit_factor": 0.7597375245034048,
+        "max_drawdown_r": 23.02207268271418,
+        "symbols": 96,
+        "avg_adverse_return_pct": -4.94615577194317,
+        "median_fill_wait_bars": 0.0,
+        "exit_reasons": {
+          "stop": 85,
+          "target": 62,
+          "timeout": 17
+        }
+      },
+      "portfolio_metrics": {
+        "trades": 145,
+        "wins": 68,
+        "win_rate": 0.4689655172413793,
+        "total_r": -19.067279983891606,
+        "avg_net_r": -0.13149848264752836,
+        "profit_factor": 0.7556410618531806,
+        "max_drawdown_r": 19.88458893786879,
+        "symbols": 93,
+        "avg_adverse_return_pct": -4.910094574841806,
+        "median_fill_wait_bars": 0,
+        "exit_reasons": {
+          "timeout": 16,
+          "stop": 75,
+          "target": 54
+        }
+      },
+      "portfolio_account": {
+        "initial_equity_usdt": 10000.0,
+        "final_equity_usdt": 8208.307711189815,
+        "account_return_pct": -17.91692288810185,
+        "max_realized_drawdown_pct": 18.53434062628805,
+        "conservative_adverse_drawdown_pct": 19.385901884036716,
+        "admission_rejected": {
+          "global_concurrency": 3,
+          "symbol_cooldown": 16
+        }
+      },
+      "portfolio_phases": {
+        "before_split": {
+          "trades": 85,
+          "wins": 39,
+          "win_rate": 0.4588235294117647,
+          "total_r": -13.73357170252154,
+          "avg_net_r": -0.16157143179437097,
+          "profit_factor": 0.7068229100592884,
+          "max_drawdown_r": 16.981982207082737,
+          "symbols": 62,
+          "avg_adverse_return_pct": -4.621239196354524,
+          "median_fill_wait_bars": 0,
+          "exit_reasons": {
+            "timeout": 11,
+            "stop": 45,
+            "target": 29
+          }
+        },
+        "after_split": {
+          "trades": 60,
+          "wins": 29,
+          "win_rate": 0.48333333333333334,
+          "total_r": -5.333708281370078,
+          "avg_net_r": -0.08889513802283464,
+          "profit_factor": 0.82897028877742,
+          "max_drawdown_r": 6.906111272877501,
+          "symbols": 44,
+          "avg_adverse_return_pct": -5.319306361032123,
+          "median_fill_wait_bars": 0.0,
+          "exit_reasons": {
+            "target": 25,
+            "stop": 30,
+            "timeout": 5
+          }
+        }
+      }
+    },
+    "gain_gt_20pct_breakout_4h|limit_recent_72_body_top": {
+      "signals": 218,
+      "signal_symbols": 113,
+      "orders_filled": 161,
+      "fill_rate": 0.7385321100917431,
+      "rejected": {
+        "stop_distance": 50,
+        "limit_unfilled": 7
+      },
+      "raw_trade_metrics": {
+        "trades": 161,
+        "wins": 73,
+        "win_rate": 0.453416149068323,
+        "total_r": -25.267793293381132,
+        "avg_net_r": -0.15694281548683936,
+        "profit_factor": 0.7172696315347162,
+        "max_drawdown_r": 27.102588206687503,
+        "symbols": 96,
+        "avg_adverse_return_pct": -5.043604872837995,
+        "median_fill_wait_bars": 0,
+        "exit_reasons": {
+          "stop": 86,
+          "target": 59,
+          "timeout": 16
+        }
+      },
+      "portfolio_metrics": {
+        "trades": 142,
+        "wins": 65,
+        "win_rate": 0.45774647887323944,
+        "total_r": -21.084266240081107,
+        "avg_net_r": -0.14848074816958529,
+        "profit_factor": 0.7298003066042387,
+        "max_drawdown_r": 21.93857069222471,
+        "symbols": 94,
+        "avg_adverse_return_pct": -4.9483554964067125,
+        "median_fill_wait_bars": 0.0,
+        "exit_reasons": {
+          "timeout": 15,
+          "stop": 75,
+          "target": 52
+        }
+      },
+      "portfolio_account": {
+        "initial_equity_usdt": 10000.0,
+        "final_equity_usdt": 8045.058895165686,
+        "account_return_pct": -19.549411048343135,
+        "max_realized_drawdown_pct": 20.1839257449968,
+        "conservative_adverse_drawdown_pct": 21.018243874914067,
+        "admission_rejected": {
+          "global_concurrency": 2,
+          "symbol_cooldown": 17
+        }
+      },
+      "portfolio_phases": {
+        "before_split": {
+          "trades": 85,
+          "wins": 38,
+          "win_rate": 0.4470588235294118,
+          "total_r": -15.697506810788584,
+          "avg_net_r": -0.18467655071515987,
+          "profit_factor": 0.6720043768633124,
+          "max_drawdown_r": 18.957871691837347,
+          "symbols": 62,
+          "avg_adverse_return_pct": -4.702565896682444,
+          "median_fill_wait_bars": 0,
+          "exit_reasons": {
+            "timeout": 11,
+            "stop": 46,
+            "target": 28
+          }
+        },
+        "after_split": {
+          "trades": 57,
+          "wins": 27,
+          "win_rate": 0.47368421052631576,
+          "total_r": -5.38675942929252,
+          "avg_net_r": -0.09450455139109687,
+          "profit_factor": 0.8214724730052134,
+          "max_drawdown_r": 9.005686759163556,
+          "symbols": 44,
+          "avg_adverse_return_pct": -5.314883846872728,
+          "median_fill_wait_bars": 0,
+          "exit_reasons": {
+            "target": 24,
+            "stop": 29,
+            "timeout": 4
+          }
+        }
+      }
+    },
+    "gain_gt_20pct_no_breakout_4h|next_5m_open": {
+      "signals": 251,
+      "signal_symbols": 147,
+      "orders_filled": 206,
+      "fill_rate": 0.8207171314741036,
+      "rejected": {
+        "stop_distance": 45
+      },
+      "raw_trade_metrics": {
+        "trades": 206,
+        "wins": 32,
+        "win_rate": 0.1553398058252427,
+        "total_r": -145.45157407558017,
+        "avg_net_r": -0.7060756023086422,
+        "profit_factor": 0.17778480919137965,
+        "max_drawdown_r": 145.45157407558017,
+        "symbols": 139,
+        "avg_adverse_return_pct": -8.82936539535939,
+        "median_fill_wait_bars": 0.0,
+        "exit_reasons": {
+          "stop": 174,
+          "target": 32
+        }
+      },
+      "portfolio_metrics": {
+        "trades": 24,
+        "wins": 5,
+        "win_rate": 0.20833333333333334,
+        "total_r": -14.423648627842384,
+        "avg_net_r": -0.6009853594934326,
+        "profit_factor": 0.2545714277122002,
+        "max_drawdown_r": 14.423648627842384,
+        "symbols": 20,
+        "avg_adverse_return_pct": -8.53169855514469,
+        "median_fill_wait_bars": 0.0,
+        "exit_reasons": {
+          "stop": 19,
+          "target": 5
+        }
+      },
+      "portfolio_account": {
+        "initial_equity_usdt": 10000.0,
+        "final_equity_usdt": 8646.161621891488,
+        "account_return_pct": -13.538383781085116,
+        "max_realized_drawdown_pct": 13.538383781085116,
+        "conservative_adverse_drawdown_pct": 14.433102819777632,
+        "admission_rejected": {
+          "global_concurrency": 177,
+          "symbol_cooldown": 5
+        }
+      },
+      "portfolio_phases": {
+        "before_split": {
+          "trades": 13,
+          "wins": 3,
+          "win_rate": 0.23076923076923078,
+          "total_r": -7.235333748331711,
+          "avg_net_r": -0.5565641344870547,
+          "profit_factor": 0.2892811186148335,
+          "max_drawdown_r": 7.235333748331711,
+          "symbols": 11,
+          "avg_adverse_return_pct": -7.988552595891581,
+          "median_fill_wait_bars": 0,
+          "exit_reasons": {
+            "stop": 10,
+            "target": 3
+          }
+        },
+        "after_split": {
+          "trades": 11,
+          "wins": 2,
+          "win_rate": 0.18181818181818182,
+          "total_r": -7.188314879510671,
+          "avg_net_r": -0.6534831708646064,
+          "profit_factor": 0.21603410509291607,
+          "max_drawdown_r": 8.178429970314987,
+          "symbols": 10,
+          "avg_adverse_return_pct": -9.173598325171094,
+          "median_fill_wait_bars": 0,
+          "exit_reasons": {
+            "target": 2,
+            "stop": 9
+          }
+        }
+      }
+    },
+    "gain_gt_20pct_no_breakout_4h|limit_recent_72_body_top": {
+      "signals": 251,
+      "signal_symbols": 147,
+      "orders_filled": 17,
+      "fill_rate": 0.06772908366533864,
+      "rejected": {
+        "limit_unfilled": 233,
+        "stop_distance": 1
+      },
+      "raw_trade_metrics": {
+        "trades": 17,
+        "wins": 10,
+        "win_rate": 0.5882352941176471,
+        "total_r": 1.435456360269575,
+        "avg_net_r": 0.08443860942762205,
+        "profit_factor": 1.1948361809453383,
+        "max_drawdown_r": 2.141107591180206,
+        "symbols": 11,
+        "avg_adverse_return_pct": -3.2599945677112565,
+        "median_fill_wait_bars": 5,
+        "exit_reasons": {
+          "stop": 7,
+          "timeout": 1,
+          "target": 9
+        }
+      },
+      "portfolio_metrics": {
+        "trades": 11,
+        "wins": 4,
+        "win_rate": 0.36363636363636365,
+        "total_r": -4.391773917288066,
+        "avg_net_r": -0.39925217429891496,
+        "profit_factor": 0.4038993582089378,
+        "max_drawdown_r": 4.391773917288066,
+        "symbols": 10,
+        "avg_adverse_return_pct": -3.8164325501526015,
+        "median_fill_wait_bars": 5,
+        "exit_reasons": {
+          "stop": 7,
+          "target": 3,
+          "timeout": 1
+        }
+      },
+      "portfolio_account": {
+        "initial_equity_usdt": 10000.0,
+        "final_equity_usdt": 9565.261054556002,
+        "account_return_pct": -4.347389454439976,
+        "max_realized_drawdown_pct": 4.347389454439976,
+        "conservative_adverse_drawdown_pct": 5.380296452990696,
+        "admission_rejected": {
+          "global_concurrency": 3,
+          "symbol_cooldown": 3
+        }
+      },
+      "portfolio_phases": {
+        "before_split": {
+          "trades": 8,
+          "wins": 3,
+          "win_rate": 0.375,
+          "total_r": -3.2475049240043594,
+          "avg_net_r": -0.4059381155005449,
+          "profit_factor": 0.38320246388775137,
+          "max_drawdown_r": 4.223165256007014,
+          "symbols": 7,
+          "avg_adverse_return_pct": -4.396291889551783,
+          "median_fill_wait_bars": 5.0,
+          "exit_reasons": {
+            "stop": 5,
+            "target": 2,
+            "timeout": 1
+          }
+        },
+        "after_split": {
+          "trades": 3,
+          "wins": 1,
+          "win_rate": 0.3333333333333333,
+          "total_r": -1.1442689932837058,
+          "avg_net_r": -0.3814229977612353,
+          "profit_factor": 0.4557313131435089,
+          "max_drawdown_r": 1.1442689932837058,
+          "symbols": 3,
+          "avg_adverse_return_pct": -2.270140978421452,
+          "median_fill_wait_bars": 5,
+          "exit_reasons": {
+            "stop": 2,
+            "target": 1
+          }
+        }
+      }
+    },
+    "gain_gt_30pct_breakout_4h|next_5m_open": {
+      "signals": 77,
+      "signal_symbols": 61,
+      "orders_filled": 47,
+      "fill_rate": 0.6103896103896104,
+      "rejected": {
+        "stop_distance": 30
+      },
+      "raw_trade_metrics": {
+        "trades": 47,
+        "wins": 22,
+        "win_rate": 0.46808510638297873,
+        "total_r": -4.914216322512919,
+        "avg_net_r": -0.10455779409601954,
+        "profit_factor": 0.8090471215639453,
+        "max_drawdown_r": 7.972711809082858,
+        "symbols": 41,
+        "avg_adverse_return_pct": -4.741003682411894,
+        "median_fill_wait_bars": 0,
+        "exit_reasons": {
+          "stop": 25,
+          "target": 21,
+          "timeout": 1
+        }
+      },
+      "portfolio_metrics": {
+        "trades": 45,
+        "wins": 21,
+        "win_rate": 0.4666666666666667,
+        "total_r": -4.871961954187272,
+        "avg_net_r": -0.10826582120416159,
+        "profit_factor": 0.8028053799357722,
+        "max_drawdown_r": 7.930457440757211,
+        "symbols": 41,
+        "avg_adverse_return_pct": -4.793384884649691,
+        "median_fill_wait_bars": 0,
+        "exit_reasons": {
+          "stop": 24,
+          "target": 20,
+          "timeout": 1
+        }
+      },
+      "portfolio_account": {
+        "initial_equity_usdt": 10000.0,
+        "final_equity_usdt": 9503.267946306802,
+        "account_return_pct": -4.967320536931985,
+        "max_realized_drawdown_pct": 7.770118089066969,
+        "conservative_adverse_drawdown_pct": 8.73352215175639,
+        "admission_rejected": {
+          "symbol_cooldown": 2
+        }
+      },
+      "portfolio_phases": {
+        "before_split": {
+          "trades": 31,
+          "wins": 12,
+          "win_rate": 0.3870967741935484,
+          "total_r": -7.930457440757211,
+          "avg_net_r": -0.25582120776636164,
+          "profit_factor": 0.5952685779914443,
+          "max_drawdown_r": 7.930457440757211,
+          "symbols": 29,
+          "avg_adverse_return_pct": -4.764368103567345,
+          "median_fill_wait_bars": 0,
+          "exit_reasons": {
+            "stop": 19,
+            "target": 12
+          }
+        },
+        "after_split": {
+          "trades": 14,
+          "wins": 9,
+          "win_rate": 0.6428571428571429,
+          "total_r": 3.0584954865699405,
+          "avg_net_r": 0.21846396332642426,
+          "profit_factor": 1.5982980654057972,
+          "max_drawdown_r": 3.075222940114509,
+          "symbols": 14,
+          "avg_adverse_return_pct": -4.857636328474886,
+          "median_fill_wait_bars": 0.0,
+          "exit_reasons": {
+            "target": 8,
+            "stop": 5,
+            "timeout": 1
+          }
+        }
+      }
+    },
+    "gain_gt_30pct_breakout_4h|limit_recent_72_body_top": {
+      "signals": 77,
+      "signal_symbols": 61,
+      "orders_filled": 47,
+      "fill_rate": 0.6103896103896104,
+      "rejected": {
+        "stop_distance": 29,
+        "limit_unfilled": 1
+      },
+      "raw_trade_metrics": {
+        "trades": 47,
+        "wins": 21,
+        "win_rate": 0.44680851063829785,
+        "total_r": -6.915684936882865,
+        "avg_net_r": -0.14714223269963542,
+        "profit_factor": 0.7415633459144377,
+        "max_drawdown_r": 9.973876334433283,
+        "symbols": 40,
+        "avg_adverse_return_pct": -4.857927398498795,
+        "median_fill_wait_bars": 0,
+        "exit_reasons": {
+          "stop": 26,
+          "timeout": 1,
+          "target": 20
+        }
+      },
+      "portfolio_metrics": {
+        "trades": 44,
+        "wins": 20,
+        "win_rate": 0.45454545454545453,
+        "total_r": -5.842427759792628,
+        "avg_net_r": -0.13278244908619605,
+        "profit_factor": 0.763462748726641,
+        "max_drawdown_r": 8.900619157343044,
+        "symbols": 40,
+        "avg_adverse_return_pct": -4.918726102444941,
+        "median_fill_wait_bars": 0.0,
+        "exit_reasons": {
+          "stop": 24,
+          "target": 19,
+          "timeout": 1
+        }
+      },
+      "portfolio_account": {
+        "initial_equity_usdt": 10000.0,
+        "final_equity_usdt": 9411.940715355031,
+        "account_return_pct": -5.880592846449694,
+        "max_realized_drawdown_pct": 8.656180214294306,
+        "conservative_adverse_drawdown_pct": 9.61032875335568,
+        "admission_rejected": {
+          "symbol_cooldown": 3
+        }
+      },
+      "portfolio_phases": {
+        "before_split": {
+          "trades": 30,
+          "wins": 11,
+          "win_rate": 0.36666666666666664,
+          "total_r": -8.900619157343044,
+          "avg_net_r": -0.29668730524476816,
+          "profit_factor": 0.545604589610384,
+          "max_drawdown_r": 8.900619157343044,
+          "symbols": 28,
+          "avg_adverse_return_pct": -4.952857164464156,
+          "median_fill_wait_bars": 0.0,
+          "exit_reasons": {
+            "stop": 19,
+            "target": 11
+          }
+        },
+        "after_split": {
+          "trades": 14,
+          "wins": 9,
+          "win_rate": 0.6428571428571429,
+          "total_r": 3.0581913975504182,
+          "avg_net_r": 0.2184422426821727,
+          "profit_factor": 1.5982385799911905,
+          "max_drawdown_r": 3.075222940114509,
+          "symbols": 14,
+          "avg_adverse_return_pct": -4.845588112403766,
+          "median_fill_wait_bars": 0.0,
+          "exit_reasons": {
+            "target": 8,
+            "stop": 5,
+            "timeout": 1
+          }
+        }
+      }
+    },
+    "gain_gt_30pct_no_breakout_4h|next_5m_open": {
+      "signals": 114,
+      "signal_symbols": 90,
+      "orders_filled": 88,
+      "fill_rate": 0.7719298245614035,
+      "rejected": {
+        "stop_distance": 26
+      },
+      "raw_trade_metrics": {
+        "trades": 88,
+        "wins": 15,
+        "win_rate": 0.17045454545454544,
+        "total_r": -59.36183196825861,
+        "avg_net_r": -0.6745662723665753,
+        "profit_factor": 0.1993376031249443,
+        "max_drawdown_r": 60.34250292578686,
+        "symbols": 76,
+        "avg_adverse_return_pct": -9.393816960947737,
+        "median_fill_wait_bars": 0.0,
+        "exit_reasons": {
+          "stop": 73,
+          "target": 15
+        }
+      },
+      "portfolio_metrics": {
+        "trades": 10,
+        "wins": 3,
+        "win_rate": 0.3,
+        "total_r": -4.151060735383442,
+        "avg_net_r": -0.4151060735383442,
+        "profit_factor": 0.4164149848057277,
+        "max_drawdown_r": 5.131731692911688,
+        "symbols": 9,
+        "avg_adverse_return_pct": -8.054007057440165,
+        "median_fill_wait_bars": 0.0,
+        "exit_reasons": {
+          "target": 3,
+          "stop": 7
+        }
+      },
+      "portfolio_account": {
+        "initial_equity_usdt": 10000.0,
+        "final_equity_usdt": 9588.508467779262,
+        "account_return_pct": -4.11491532220738,
+        "max_realized_drawdown_pct": 5.046100636307715,
+        "conservative_adverse_drawdown_pct": 6.028699219055489,
+        "admission_rejected": {
+          "global_concurrency": 78
+        }
+      },
+      "portfolio_phases": {
+        "before_split": {
+          "trades": 8,
+          "wins": 3,
+          "win_rate": 0.375,
+          "total_r": -2.1165342799970084,
+          "avg_net_r": -0.26456678499962605,
+          "profit_factor": 0.5832370483868358,
+          "max_drawdown_r": 3.097205237525255,
+          "symbols": 7,
+          "avg_adverse_return_pct": -7.4424808780757,
+          "median_fill_wait_bars": 0.0,
+          "exit_reasons": {
+            "target": 3,
+            "stop": 5
+          }
+        },
+        "after_split": {
+          "trades": 2,
+          "wins": 0,
+          "win_rate": 0.0,
+          "total_r": -2.0345264553864344,
+          "avg_net_r": -1.0172632276932172,
+          "profit_factor": 0.0,
+          "max_drawdown_r": 2.0345264553864344,
+          "symbols": 2,
+          "avg_adverse_return_pct": -10.50011177489803,
+          "median_fill_wait_bars": 0.0,
+          "exit_reasons": {
+            "stop": 2
+          }
+        }
+      }
+    },
+    "gain_gt_30pct_no_breakout_4h|limit_recent_72_body_top": {
+      "signals": 114,
+      "signal_symbols": 90,
+      "orders_filled": 8,
+      "fill_rate": 0.07017543859649122,
+      "rejected": {
+        "limit_unfilled": 106
+      },
+      "raw_trade_metrics": {
+        "trades": 8,
+        "wins": 5,
+        "win_rate": 0.625,
+        "total_r": 0.829110564941214,
+        "avg_net_r": 0.10363882061765178,
+        "profit_factor": 1.2618767187752638,
+        "max_drawdown_r": 2.1903735514932547,
+        "symbols": 6,
+        "avg_adverse_return_pct": -3.8728775962413198,
+        "median_fill_wait_bars": 8.0,
+        "exit_reasons": {
+          "timeout": 1,
+          "stop": 3,
+          "target": 4
+        }
+      },
+      "portfolio_metrics": {
+        "trades": 7,
+        "wins": 4,
+        "win_rate": 0.5714285714285714,
+        "total_r": -0.15656315642617225,
+        "avg_net_r": -0.022366165203738877,
+        "profit_factor": 0.9505491216495459,
+        "max_drawdown_r": 2.1903735514932543,
+        "symbols": 6,
+        "avg_adverse_return_pct": -4.034978102530652,
+        "median_fill_wait_bars": 5,
+        "exit_reasons": {
+          "target": 3,
+          "timeout": 1,
+          "stop": 3
+        }
+      },
+      "portfolio_account": {
+        "initial_equity_usdt": 10000.0,
+        "final_equity_usdt": 9981.258146327693,
+        "account_return_pct": -0.18741853672307185,
+        "max_realized_drawdown_pct": 2.1876468549871797,
+        "conservative_adverse_drawdown_pct": 3.2438758855589556,
+        "admission_rejected": {
+          "global_concurrency": 1
+        }
+      },
+      "portfolio_phases": {
+        "before_split": {
+          "trades": 5,
+          "wins": 4,
+          "win_rate": 0.8,
+          "total_r": 1.9458340986733458,
+          "avg_net_r": 0.3891668197346692,
+          "profit_factor": 2.8294162185886877,
+          "max_drawdown_r": 1.0636366283963905,
+          "symbols": 4,
+          "avg_adverse_return_pct": -4.335814240104428,
+          "median_fill_wait_bars": 14,
+          "exit_reasons": {
+            "target": 3,
+            "timeout": 1,
+            "stop": 1
+          }
+        },
+        "after_split": {
+          "trades": 2,
+          "wins": 0,
+          "win_rate": 0.0,
+          "total_r": -2.1023972550995182,
+          "avg_net_r": -1.0511986275497591,
+          "profit_factor": 0.0,
+          "max_drawdown_r": 2.1023972550995182,
+          "symbols": 2,
+          "avg_adverse_return_pct": -3.2828877585962117,
+          "median_fill_wait_bars": 2.5,
+          "exit_reasons": {
+            "stop": 2
+          }
+        }
+      }
+    }
+  },
+  "runtime_seconds": 154.307162959,
+  "limitations": [
+    "当前存续合约造成幸存者偏差。",
+    "限价触价使用 OHLC 理想成交，没有排队、部分成交或盘口深度模型。",
+    "历史资金费率不可用，按 0 处理；也没有模拟强平。",
+    "止损、止盈和仓位预算是固定研究基线，不能把最佳组合视为样本外结论。"
+  ]
+}

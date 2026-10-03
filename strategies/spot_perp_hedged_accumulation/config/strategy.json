@@ -1,0 +1,96 @@
+{
+  "version": "0.3.0",
+  "strategy_id": "spot_perp_hedged_accumulation",
+  "display_name": "现货永续对冲囤币",
+  "lifecycle": "candidate",
+  "source_of_truth": "strategies/spot_perp_hedged_accumulation/STRATEGY.md",
+  "runtime_integration": {
+    "status": "not_implemented",
+    "implementation_required_after_explicit_instruction": true
+  },
+  "market": {
+    "spot_symbol_template": "{BASE}-USDT",
+    "perpetual_symbol_template": "{BASE}-USDT-SWAP",
+    "quote_currency": "USDT",
+    "source_bar_minutes": 5,
+    "signal_timeframe_minutes": 60,
+    "confirmed_bar_only": true,
+    "execution": "next_bar_open"
+  },
+  "universe": {
+    "mode": "fixed_whitelist_single_symbol",
+    "symbols": [
+      "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "TON", "AVAX",
+      "LINK", "DOT", "LTC", "BCH", "ETC", "UNI", "ATOM", "NEAR", "APT", "SUI"
+    ],
+    "max_symbols_per_instance": 1,
+    "allow_rotation": false,
+    "requires_spot_and_usdt_swap": true
+  },
+  "signal": {
+    "ema_fast": 20,
+    "ema_slow": 60,
+    "ema_slope_bars": 12,
+    "rsi_period": 14,
+    "atr_period": 14,
+    "pivot_left": 2,
+    "pivot_right": 2,
+    "divergence_min_separation_bars": 5,
+    "divergence_max_separation_bars": 40,
+    "divergence_price_lower_low_atr": 0.5,
+    "divergence_rsi_higher_low_points": 5.0,
+    "pullback_atr": 0.35,
+    "cooldown_bars": 12
+  },
+  "rebalance": {
+    "mode": "fixed_short_spot_grid",
+    "threshold_pct": 0.04,
+    "buy_reserve_fraction": 0.25,
+    "sell_tactical_fraction": 1.0,
+    "max_tactical_spot_fraction_of_core": 0.10,
+    "equity_metric": "allocated_position_equity",
+    "position_equity_deviation_trigger_pct": 0.20,
+    "max_position_equity_deviation_pct": 0.20,
+    "soft_rebalance_equity_deviation_pct": 0.20,
+    "notional_deviation_report_only": true,
+    "max_notional_deviation_pct": 0.20,
+    "soft_rebalance_deviation_pct": 0.10,
+    "max_actions_per_campaign": 12,
+    "max_actions_per_confirmed_bar": 1,
+    "down_move_action": "buy_tactical_spot_from_reserve",
+    "up_move_action": "sell_tactical_spot_to_reserve",
+    "core_hedge_policy": "core_spot_equals_short_base_qty",
+    "short_adjustment_policy": "frozen_except_emergency_exit",
+    "do_not_replay_skipped_grid_steps": true
+  },
+  "portfolio": {
+    "active_capital_fraction": 0.80,
+    "initial_spot_notional_fraction": 0.5,
+    "initial_perpetual_notional_fraction": 0.5,
+    "initial_hedge_ratio": 1.0,
+    "margin_mode": "cross",
+    "leverage": 2.0,
+    "research_max_hold_bars": 720,
+    "runtime_exit": "manual_or_explicitly_approved_risk_policy"
+  },
+  "reserve": {
+    "initial_cash_fraction": 0.20,
+    "minimum_cash_fraction_of_initial_capital": 0.10,
+    "exit_on_floor_with_unhedged_spot": true
+  },
+  "costs": {
+    "fee_rate_one_way": 0.0006,
+    "slippage_one_way": 0.0002,
+    "funding_modelled": false,
+    "basis_modelled": false,
+    "spot_order_book_modelled": false
+  },
+  "research": {
+    "data_source": "data/kline/okx/swap/5m",
+    "time_split": [0.6, 0.2, 0.2],
+    "benchmarks": ["spot_buy_and_hold", "static_1_to_1_hedge", "unfiltered_fixed_grid"],
+    "required_sensitivity_thresholds": [0.03, 0.04, 0.08],
+    "required_buy_reserve_fractions": [0.10, 0.25, 0.50],
+    "promotion_max_drawdown_pct": 20.0
+  }
+}

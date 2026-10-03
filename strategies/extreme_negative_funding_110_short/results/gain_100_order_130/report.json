@@ -1,0 +1,3093 @@
+{
+  "strategy": "extreme_negative_funding_110_short",
+  "config": {
+    "strategy": "extreme_negative_funding_110_short",
+    "version": "0.1.0",
+    "name_zh": "极限负资金费率 110% 逼空做空",
+    "name_en": "Extreme Negative Funding 110% Short",
+    "source_of_truth": "strategies/extreme_negative_funding_110_short/STRATEGY.md",
+    "status": "research_candidate",
+    "runtime_integration": "not_integrated",
+    "market": "OKX_USDT_LINEAR_PERPETUAL",
+    "input_timeframe_minutes": 5,
+    "candle_timestamp": "bar_open_time",
+    "bar_requirements": {
+      "confirmed_only": true,
+      "timestamp_alignment_minutes": 5,
+      "utc_day_open_required": true,
+      "no_timestamp_gaps": true
+    },
+    "signal": {
+      "utc_day_gain_gt": 1.0,
+      "trigger_gain_pct": 1.0,
+      "day_high_field": "running_high",
+      "day_open_field": "first_confirmed_bar_open",
+      "trigger_once_per_utc_day": true,
+      "funding_asof": "trigger_bar_close",
+      "funding_max_age_minutes": 480
+    },
+    "funding": {
+      "required": true,
+      "snapshot_fields": [
+        "symbol",
+        "timestamp_ms",
+        "funding_rate",
+        "symbol_max_negative_rate"
+      ],
+      "comparison": "funding_rate_less_than_or_equal_to_symbol_max_negative_rate",
+      "missing_policy": "reject_signal_and_report_unavailable",
+      "no_inference_from_price_or_other_symbols": true
+    },
+    "entry": {
+      "order_type": "sell_limit",
+      "limit_price": "utc_day_open_times_limit_price_factor",
+      "limit_price_factor": 2.3,
+      "activation": "first_contiguous_bar_after_trigger",
+      "valid_until": "utc_day_end",
+      "open_at_or_above_limit": "fill_at_open",
+      "high_touches_limit": "fill_at_limit",
+      "intrabar_fill_exit_eligibility": "next_bar",
+      "unfilled_policy": "cancel_at_utc_day_end_or_data_gap"
+    },
+    "risk": {
+      "leverage": 1.0,
+      "initial_stop_above_entry_pct": 0.2,
+      "tp1_favorable_move_pct": 0.2,
+      "tp1_close_fraction": 0.5,
+      "tp1_stop": "entry_breakeven_on_next_bar",
+      "tp2_additional_favorable_move_pct_from_entry": 0.2,
+      "tp2_price": "entry_times_0.60",
+      "same_bar_priority": "stop_before_targets",
+      "data_gap_policy": "exit_at_last_contiguous_close"
+    },
+    "costs": {
+      "fee_rate_one_way": 0.0006,
+      "slippage_one_way": 0.0002,
+      "funding_pnl_model": "not_applied_filter_only"
+    },
+    "universe": {
+      "asset_type": "altcoin_usdt_linear_perpetual",
+      "source": "strategies/sweep_reversal_short/config/universe.json",
+      "allowed_symbols_field": "altcoins",
+      "exclude_non_crypto": true,
+      "minimum_contiguous_bars": 2
+    },
+    "research": {
+      "split_utc": "2026-04-01T00:00:00+00:00",
+      "funding_data_available": false,
+      "validation_command": "python3 strategies/extreme_negative_funding_110_short/src/backtest.py --scan",
+      "selection_policy": "do_not_merge_or_select_from_five_minute_surge_waterfall_short"
+    }
+  },
+  "validation_mode": "price_only_ignore_funding",
+  "funding": {
+    "status": "ignored",
+    "mode": "bypassed_for_validation",
+    "input": null,
+    "invalid_rows": 0,
+    "message": "Funding gate intentionally bypassed for price-only validation."
+  },
+  "data": {
+    "directory": "/Users/bill/Desktop/Codex/交易软件/data/kline/okx/swap/5m",
+    "symbols": 295,
+    "sources": [
+      {
+        "symbol": "0G",
+        "file": "data/kline/okx/swap/5m/0G_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 108390,
+        "quality": {
+          "confirmed_rows": 108390,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "1INCH",
+        "file": "data/kline/okx/swap/5m/1INCH_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "2Z",
+        "file": "data/kline/okx/swap/5m/2Z_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 105478,
+        "quality": {
+          "confirmed_rows": 105478,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "A",
+        "file": "data/kline/okx/swap/5m/A_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 141798,
+        "quality": {
+          "confirmed_rows": 141798,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AAVE",
+        "file": "data/kline/okx/swap/5m/AAVE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ACH",
+        "file": "data/kline/okx/swap/5m/ACH_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ACT",
+        "file": "data/kline/okx/swap/5m/ACT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "ACU",
+        "file": "data/kline/okx/swap/5m/ACU_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 73008,
+        "quality": {
+          "confirmed_rows": 73008,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ADA",
+        "file": "data/kline/okx/swap/5m/ADA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AEON",
+        "file": "data/kline/okx/swap/5m/AEON_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 19674,
+        "quality": {
+          "confirmed_rows": 19674,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AERO",
+        "file": "data/kline/okx/swap/5m/AERO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 131769,
+        "quality": {
+          "confirmed_rows": 131769,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AEVO",
+        "file": "data/kline/okx/swap/5m/AEVO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AGLD",
+        "file": "data/kline/okx/swap/5m/AGLD_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AI",
+        "file": "data/kline/okx/swap/5m/AI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 45300,
+        "quality": {
+          "confirmed_rows": 45300,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AIXBT",
+        "file": "data/kline/okx/swap/5m/AIXBT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AKE",
+        "file": "data/kline/okx/swap/5m/AKE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 5040,
+        "quality": {
+          "confirmed_rows": 5040,
+          "timestamp_gaps": 0
+        },
+        "signals": 2
+      },
+      {
+        "symbol": "ALGO",
+        "file": "data/kline/okx/swap/5m/ALGO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ALLO",
+        "file": "data/kline/okx/swap/5m/ALLO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 93915,
+        "quality": {
+          "confirmed_rows": 93915,
+          "timestamp_gaps": 0
+        },
+        "signals": 2
+      },
+      {
+        "symbol": "ANIME",
+        "file": "data/kline/okx/swap/5m/ANIME_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "APE",
+        "file": "data/kline/okx/swap/5m/APE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "API3",
+        "file": "data/kline/okx/swap/5m/API3_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "APR",
+        "file": "data/kline/okx/swap/5m/APR_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 99228,
+        "quality": {
+          "confirmed_rows": 99228,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "APT",
+        "file": "data/kline/okx/swap/5m/APT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AR",
+        "file": "data/kline/okx/swap/5m/AR_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ARB",
+        "file": "data/kline/okx/swap/5m/ARB_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ARKM",
+        "file": "data/kline/okx/swap/5m/ARKM_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ARX",
+        "file": "data/kline/okx/swap/5m/ARX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 29742,
+        "quality": {
+          "confirmed_rows": 29742,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ASTER",
+        "file": "data/kline/okx/swap/5m/ASTER_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 108456,
+        "quality": {
+          "confirmed_rows": 108456,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AT",
+        "file": "data/kline/okx/swap/5m/AT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 97452,
+        "quality": {
+          "confirmed_rows": 97452,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ATH",
+        "file": "data/kline/okx/swap/5m/ATH_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ATOM",
+        "file": "data/kline/okx/swap/5m/ATOM_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AUCTION",
+        "file": "data/kline/okx/swap/5m/AUCTION_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AVAX",
+        "file": "data/kline/okx/swap/5m/AVAX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AVNT",
+        "file": "data/kline/okx/swap/5m/AVNT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 108330,
+        "quality": {
+          "confirmed_rows": 108330,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AXS",
+        "file": "data/kline/okx/swap/5m/AXS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "AZTEC",
+        "file": "data/kline/okx/swap/5m/AZTEC_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 67494,
+        "quality": {
+          "confirmed_rows": 67494,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BABY",
+        "file": "data/kline/okx/swap/5m/BABY_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 155904,
+        "quality": {
+          "confirmed_rows": 155904,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BAND",
+        "file": "data/kline/okx/swap/5m/BAND_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BARD",
+        "file": "data/kline/okx/swap/5m/BARD_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 109524,
+        "quality": {
+          "confirmed_rows": 109524,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BASED",
+        "file": "data/kline/okx/swap/5m/BASED_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 53958,
+        "quality": {
+          "confirmed_rows": 53958,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "BAT",
+        "file": "data/kline/okx/swap/5m/BAT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BCH",
+        "file": "data/kline/okx/swap/5m/BCH_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BEAT",
+        "file": "data/kline/okx/swap/5m/BEAT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 93633,
+        "quality": {
+          "confirmed_rows": 93633,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "BERA",
+        "file": "data/kline/okx/swap/5m/BERA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "BICO",
+        "file": "data/kline/okx/swap/5m/BICO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BIGTIME",
+        "file": "data/kline/okx/swap/5m/BIGTIME_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BILL",
+        "file": "data/kline/okx/swap/5m/BILL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 43332,
+        "quality": {
+          "confirmed_rows": 43332,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BIO",
+        "file": "data/kline/okx/swap/5m/BIO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BLEND",
+        "file": "data/kline/okx/swap/5m/BLEND_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 45324,
+        "quality": {
+          "confirmed_rows": 45324,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BLUR",
+        "file": "data/kline/okx/swap/5m/BLUR_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BMNR",
+        "file": "data/kline/okx/swap/5m/BMNR_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 45840,
+        "quality": {
+          "confirmed_rows": 45840,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BNB",
+        "file": "data/kline/okx/swap/5m/BNB_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BOME",
+        "file": "data/kline/okx/swap/5m/BOME_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BONK",
+        "file": "data/kline/okx/swap/5m/BONK_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BOT",
+        "file": "data/kline/okx/swap/5m/BOT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 26892,
+        "quality": {
+          "confirmed_rows": 26892,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BRETT",
+        "file": "data/kline/okx/swap/5m/BRETT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BREV",
+        "file": "data/kline/okx/swap/5m/BREV_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 79848,
+        "quality": {
+          "confirmed_rows": 79848,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "BSB",
+        "file": "data/kline/okx/swap/5m/BSB_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 53100,
+        "quality": {
+          "confirmed_rows": 53100,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "BSP",
+        "file": "data/kline/okx/swap/5m/BSP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 25752,
+        "quality": {
+          "confirmed_rows": 25752,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CAP",
+        "file": "data/kline/okx/swap/5m/CAP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 28590,
+        "quality": {
+          "confirmed_rows": 28590,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CASHCAT",
+        "file": "data/kline/okx/swap/5m/CASHCAT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 8826,
+        "quality": {
+          "confirmed_rows": 8826,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CBRS",
+        "file": "data/kline/okx/swap/5m/CBRS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 40764,
+        "quality": {
+          "confirmed_rows": 40764,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CC",
+        "file": "data/kline/okx/swap/5m/CC_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 97116,
+        "quality": {
+          "confirmed_rows": 97116,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CELO",
+        "file": "data/kline/okx/swap/5m/CELO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CFX",
+        "file": "data/kline/okx/swap/5m/CFX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "CHIP",
+        "file": "data/kline/okx/swap/5m/CHIP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 47580,
+        "quality": {
+          "confirmed_rows": 47580,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CHZ",
+        "file": "data/kline/okx/swap/5m/CHZ_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CNPY",
+        "file": "data/kline/okx/swap/5m/CNPY_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 7560,
+        "quality": {
+          "confirmed_rows": 7560,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "COAI",
+        "file": "data/kline/okx/swap/5m/COAI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 101718,
+        "quality": {
+          "confirmed_rows": 101718,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "COMP",
+        "file": "data/kline/okx/swap/5m/COMP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CORE",
+        "file": "data/kline/okx/swap/5m/CORE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CP",
+        "file": "data/kline/okx/swap/5m/CP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 8968,
+        "quality": {
+          "confirmed_rows": 8968,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CRO",
+        "file": "data/kline/okx/swap/5m/CRO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CRV",
+        "file": "data/kline/okx/swap/5m/CRV_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CVX",
+        "file": "data/kline/okx/swap/5m/CVX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "CYPH",
+        "file": "data/kline/okx/swap/5m/CYPH_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 2994,
+        "quality": {
+          "confirmed_rows": 2994,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "DASH",
+        "file": "data/kline/okx/swap/5m/DASH_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 95520,
+        "quality": {
+          "confirmed_rows": 95520,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "DATA",
+        "file": "data/kline/okx/swap/5m/DATA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 26862,
+        "quality": {
+          "confirmed_rows": 26862,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "DGAI",
+        "file": "data/kline/okx/swap/5m/DGAI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 8832,
+        "quality": {
+          "confirmed_rows": 8832,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "DOGE",
+        "file": "data/kline/okx/swap/5m/DOGE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "DOOD",
+        "file": "data/kline/okx/swap/5m/DOOD_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 146676,
+        "quality": {
+          "confirmed_rows": 146676,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "DOS",
+        "file": "data/kline/okx/swap/5m/DOS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 15636,
+        "quality": {
+          "confirmed_rows": 15636,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "DOT",
+        "file": "data/kline/okx/swap/5m/DOT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "DRAM",
+        "file": "data/kline/okx/swap/5m/DRAM_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 42744,
+        "quality": {
+          "confirmed_rows": 42744,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "DYDX",
+        "file": "data/kline/okx/swap/5m/DYDX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "EDEN",
+        "file": "data/kline/okx/swap/5m/EDEN_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 106074,
+        "quality": {
+          "confirmed_rows": 106074,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "EDGE",
+        "file": "data/kline/okx/swap/5m/EDGE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 53346,
+        "quality": {
+          "confirmed_rows": 53346,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "EGLD",
+        "file": "data/kline/okx/swap/5m/EGLD_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "EIGEN",
+        "file": "data/kline/okx/swap/5m/EIGEN_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ENA",
+        "file": "data/kline/okx/swap/5m/ENA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 109866,
+        "quality": {
+          "confirmed_rows": 109866,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ENJ",
+        "file": "data/kline/okx/swap/5m/ENJ_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ENS",
+        "file": "data/kline/okx/swap/5m/ENS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ENSO",
+        "file": "data/kline/okx/swap/5m/ENSO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 97740,
+        "quality": {
+          "confirmed_rows": 97740,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "ESP",
+        "file": "data/kline/okx/swap/5m/ESP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 67716,
+        "quality": {
+          "confirmed_rows": 67716,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ETC",
+        "file": "data/kline/okx/swap/5m/ETC_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ETH",
+        "file": "data/kline/okx/swap/5m/ETH_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ETHFI",
+        "file": "data/kline/okx/swap/5m/ETHFI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ETHW",
+        "file": "data/kline/okx/swap/5m/ETHW_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "F",
+        "file": "data/kline/okx/swap/5m/F_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 98916,
+        "quality": {
+          "confirmed_rows": 98916,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "FARTCOIN",
+        "file": "data/kline/okx/swap/5m/FARTCOIN_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "FET",
+        "file": "data/kline/okx/swap/5m/FET_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 8250,
+        "quality": {
+          "confirmed_rows": 8250,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "FIL",
+        "file": "data/kline/okx/swap/5m/FIL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "FLOCK",
+        "file": "data/kline/okx/swap/5m/FLOCK_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 6156,
+        "quality": {
+          "confirmed_rows": 6156,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "FLOKI",
+        "file": "data/kline/okx/swap/5m/FLOKI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "FLOW",
+        "file": "data/kline/okx/swap/5m/FLOW_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "FOGO",
+        "file": "data/kline/okx/swap/5m/FOGO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 76647,
+        "quality": {
+          "confirmed_rows": 76647,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "FWDI",
+        "file": "data/kline/okx/swap/5m/FWDI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 19704,
+        "quality": {
+          "confirmed_rows": 19704,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "GALA",
+        "file": "data/kline/okx/swap/5m/GALA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "GAS",
+        "file": "data/kline/okx/swap/5m/GAS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "GIGGLE",
+        "file": "data/kline/okx/swap/5m/GIGGLE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 98928,
+        "quality": {
+          "confirmed_rows": 98928,
+          "timestamp_gaps": 0
+        },
+        "signals": 2
+      },
+      {
+        "symbol": "GLM",
+        "file": "data/kline/okx/swap/5m/GLM_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "GMT",
+        "file": "data/kline/okx/swap/5m/GMT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "GMX",
+        "file": "data/kline/okx/swap/5m/GMX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "GPRO",
+        "file": "data/kline/okx/swap/5m/GPRO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 8417,
+        "quality": {
+          "confirmed_rows": 8417,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "GPS",
+        "file": "data/kline/okx/swap/5m/GPS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "GRAM",
+        "file": "data/kline/okx/swap/5m/GRAM_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 31206,
+        "quality": {
+          "confirmed_rows": 31206,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "GRASS",
+        "file": "data/kline/okx/swap/5m/GRASS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "GRT",
+        "file": "data/kline/okx/swap/5m/GRT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "GRVT",
+        "file": "data/kline/okx/swap/5m/GRVT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 18768,
+        "quality": {
+          "confirmed_rows": 18768,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "H",
+        "file": "data/kline/okx/swap/5m/H_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 131772,
+        "quality": {
+          "confirmed_rows": 131772,
+          "timestamp_gaps": 0
+        },
+        "signals": 4
+      },
+      {
+        "symbol": "HBAR",
+        "file": "data/kline/okx/swap/5m/HBAR_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "HMSTR",
+        "file": "data/kline/okx/swap/5m/HMSTR_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "HOME",
+        "file": "data/kline/okx/swap/5m/HOME_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 137481,
+        "quality": {
+          "confirmed_rows": 137481,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "HUMA",
+        "file": "data/kline/okx/swap/5m/HUMA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 142626,
+        "quality": {
+          "confirmed_rows": 142626,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "HYPE",
+        "file": "data/kline/okx/swap/5m/HYPE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ICP",
+        "file": "data/kline/okx/swap/5m/ICP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "IMX",
+        "file": "data/kline/okx/swap/5m/IMX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "INFQ",
+        "file": "data/kline/okx/swap/5m/INFQ_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 37557,
+        "quality": {
+          "confirmed_rows": 37557,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "INIT",
+        "file": "data/kline/okx/swap/5m/INIT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 151866,
+        "quality": {
+          "confirmed_rows": 151866,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "INJ",
+        "file": "data/kline/okx/swap/5m/INJ_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "IOST",
+        "file": "data/kline/okx/swap/5m/IOST_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "IOTA",
+        "file": "data/kline/okx/swap/5m/IOTA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "IRYS",
+        "file": "data/kline/okx/swap/5m/IRYS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 37245,
+        "quality": {
+          "confirmed_rows": 37245,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "JELLYJELLY",
+        "file": "data/kline/okx/swap/5m/JELLYJELLY_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 6
+      },
+      {
+        "symbol": "JTO",
+        "file": "data/kline/okx/swap/5m/JTO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "JUP",
+        "file": "data/kline/okx/swap/5m/JUP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "KAITO",
+        "file": "data/kline/okx/swap/5m/KAITO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "KAT",
+        "file": "data/kline/okx/swap/5m/KAT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 62010,
+        "quality": {
+          "confirmed_rows": 62010,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "KGEN",
+        "file": "data/kline/okx/swap/5m/KGEN_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 100974,
+        "quality": {
+          "confirmed_rows": 100974,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "KITE",
+        "file": "data/kline/okx/swap/5m/KITE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 62636,
+        "quality": {
+          "confirmed_rows": 62636,
+          "timestamp_gaps": 1
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "KMNO",
+        "file": "data/kline/okx/swap/5m/KMNO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 141594,
+        "quality": {
+          "confirmed_rows": 141594,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "KSM",
+        "file": "data/kline/okx/swap/5m/KSM_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "LA",
+        "file": "data/kline/okx/swap/5m/LA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 137484,
+        "quality": {
+          "confirmed_rows": 137484,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "LAB",
+        "file": "data/kline/okx/swap/5m/LAB_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 96852,
+        "quality": {
+          "confirmed_rows": 96852,
+          "timestamp_gaps": 0
+        },
+        "signals": 2
+      },
+      {
+        "symbol": "LAYER",
+        "file": "data/kline/okx/swap/5m/LAYER_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "LDO",
+        "file": "data/kline/okx/swap/5m/LDO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "LIGHT",
+        "file": "data/kline/okx/swap/5m/LIGHT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 83940,
+        "quality": {
+          "confirmed_rows": 83940,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "LINEA",
+        "file": "data/kline/okx/swap/5m/LINEA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 114396,
+        "quality": {
+          "confirmed_rows": 114396,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "LINK",
+        "file": "data/kline/okx/swap/5m/LINK_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "LIT",
+        "file": "data/kline/okx/swap/5m/LIT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 81690,
+        "quality": {
+          "confirmed_rows": 81690,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "LPT",
+        "file": "data/kline/okx/swap/5m/LPT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "LQTY",
+        "file": "data/kline/okx/swap/5m/LQTY_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "LTC",
+        "file": "data/kline/okx/swap/5m/LTC_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "LUNA",
+        "file": "data/kline/okx/swap/5m/LUNA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MAGIC",
+        "file": "data/kline/okx/swap/5m/MAGIC_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MANA",
+        "file": "data/kline/okx/swap/5m/MANA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MASK",
+        "file": "data/kline/okx/swap/5m/MASK_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ME",
+        "file": "data/kline/okx/swap/5m/ME_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MEGA",
+        "file": "data/kline/okx/swap/5m/MEGA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 45012,
+        "quality": {
+          "confirmed_rows": 45012,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MEME",
+        "file": "data/kline/okx/swap/5m/MEME_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MERL",
+        "file": "data/kline/okx/swap/5m/MERL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "MET",
+        "file": "data/kline/okx/swap/5m/MET_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 103233,
+        "quality": {
+          "confirmed_rows": 103233,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "METIS",
+        "file": "data/kline/okx/swap/5m/METIS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MEW",
+        "file": "data/kline/okx/swap/5m/MEW_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MINA",
+        "file": "data/kline/okx/swap/5m/MINA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MMT",
+        "file": "data/kline/okx/swap/5m/MMT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 95982,
+        "quality": {
+          "confirmed_rows": 95982,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MON",
+        "file": "data/kline/okx/swap/5m/MON_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 103237,
+        "quality": {
+          "confirmed_rows": 103237,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MOODENG",
+        "file": "data/kline/okx/swap/5m/MOODENG_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 3
+      },
+      {
+        "symbol": "MORPHO",
+        "file": "data/kline/okx/swap/5m/MORPHO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158052,
+        "quality": {
+          "confirmed_rows": 158052,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MOVE",
+        "file": "data/kline/okx/swap/5m/MOVE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "MUBARAK",
+        "file": "data/kline/okx/swap/5m/MUBARAK_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 140359,
+        "quality": {
+          "confirmed_rows": 140359,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "NEAR",
+        "file": "data/kline/okx/swap/5m/NEAR_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "NEIRO",
+        "file": "data/kline/okx/swap/5m/NEIRO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "NEO",
+        "file": "data/kline/okx/swap/5m/NEO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "NES",
+        "file": "data/kline/okx/swap/5m/NES_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 29155,
+        "quality": {
+          "confirmed_rows": 29155,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "NIGHT",
+        "file": "data/kline/okx/swap/5m/NIGHT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 85915,
+        "quality": {
+          "confirmed_rows": 85915,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "NMR",
+        "file": "data/kline/okx/swap/5m/NMR_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "NOT",
+        "file": "data/kline/okx/swap/5m/NOT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "O",
+        "file": "data/kline/okx/swap/5m/O_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 31135,
+        "quality": {
+          "confirmed_rows": 31135,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "OFC",
+        "file": "data/kline/okx/swap/5m/OFC_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 51073,
+        "quality": {
+          "confirmed_rows": 51073,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "OKB",
+        "file": "data/kline/okx/swap/5m/OKB_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 113677,
+        "quality": {
+          "confirmed_rows": 113677,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "OL",
+        "file": "data/kline/okx/swap/5m/OL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 156590,
+        "quality": {
+          "confirmed_rows": 156590,
+          "timestamp_gaps": 1
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ONDO",
+        "file": "data/kline/okx/swap/5m/ONDO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ONE",
+        "file": "data/kline/okx/swap/5m/ONE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 2
+      },
+      {
+        "symbol": "ONT",
+        "file": "data/kline/okx/swap/5m/ONT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "OP",
+        "file": "data/kline/okx/swap/5m/OP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "OPG",
+        "file": "data/kline/okx/swap/5m/OPG_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 47065,
+        "quality": {
+          "confirmed_rows": 47065,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "OPN",
+        "file": "data/kline/okx/swap/5m/OPN_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 64021,
+        "quality": {
+          "confirmed_rows": 64021,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "ORDER",
+        "file": "data/kline/okx/swap/5m/ORDER_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 106030,
+        "quality": {
+          "confirmed_rows": 106030,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ORDI",
+        "file": "data/kline/okx/swap/5m/ORDI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "PARTI",
+        "file": "data/kline/okx/swap/5m/PARTI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PENDLE",
+        "file": "data/kline/okx/swap/5m/PENDLE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 109861,
+        "quality": {
+          "confirmed_rows": 109861,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PENG",
+        "file": "data/kline/okx/swap/5m/PENG_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 24595,
+        "quality": {
+          "confirmed_rows": 24595,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PENGU",
+        "file": "data/kline/okx/swap/5m/PENGU_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PEOPLE",
+        "file": "data/kline/okx/swap/5m/PEOPLE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PEPE",
+        "file": "data/kline/okx/swap/5m/PEPE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PI",
+        "file": "data/kline/okx/swap/5m/PI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PIEVERSE",
+        "file": "data/kline/okx/swap/5m/PIEVERSE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 92635,
+        "quality": {
+          "confirmed_rows": 92635,
+          "timestamp_gaps": 0
+        },
+        "signals": 2
+      },
+      {
+        "symbol": "PIPPIN",
+        "file": "data/kline/okx/swap/5m/PIPPIN_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 118514,
+        "quality": {
+          "confirmed_rows": 118514,
+          "timestamp_gaps": 1
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PLUME",
+        "file": "data/kline/okx/swap/5m/PLUME_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 147883,
+        "quality": {
+          "confirmed_rows": 147883,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PNUT",
+        "file": "data/kline/okx/swap/5m/PNUT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "POL",
+        "file": "data/kline/okx/swap/5m/POL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PONS",
+        "file": "data/kline/okx/swap/5m/PONS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 8257,
+        "quality": {
+          "confirmed_rows": 8257,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "POPCAT",
+        "file": "data/kline/okx/swap/5m/POPCAT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PROS",
+        "file": "data/kline/okx/swap/5m/PROS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 45565,
+        "quality": {
+          "confirmed_rows": 45565,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PROVE",
+        "file": "data/kline/okx/swap/5m/PROVE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 101179,
+        "quality": {
+          "confirmed_rows": 101179,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PUMP",
+        "file": "data/kline/okx/swap/5m/PUMP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 128467,
+        "quality": {
+          "confirmed_rows": 128467,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PURR",
+        "file": "data/kline/okx/swap/5m/PURR_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 12502,
+        "quality": {
+          "confirmed_rows": 12502,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "PYTH",
+        "file": "data/kline/okx/swap/5m/PYTH_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "QNT",
+        "file": "data/kline/okx/swap/5m/QNT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 34663,
+        "quality": {
+          "confirmed_rows": 34663,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "QTUM",
+        "file": "data/kline/okx/swap/5m/QTUM_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "RAM",
+        "file": "data/kline/okx/swap/5m/RAM_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 26896,
+        "quality": {
+          "confirmed_rows": 26896,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "RAVE",
+        "file": "data/kline/okx/swap/5m/RAVE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 84229,
+        "quality": {
+          "confirmed_rows": 84229,
+          "timestamp_gaps": 0
+        },
+        "signals": 7
+      },
+      {
+        "symbol": "RAY",
+        "file": "data/kline/okx/swap/5m/RAY_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "RE",
+        "file": "data/kline/okx/swap/5m/RE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 31207,
+        "quality": {
+          "confirmed_rows": 31207,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "RECALL",
+        "file": "data/kline/okx/swap/5m/RECALL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 97450,
+        "quality": {
+          "confirmed_rows": 97450,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "RENDER",
+        "file": "data/kline/okx/swap/5m/RENDER_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "RESOLV",
+        "file": "data/kline/okx/swap/5m/RESOLV_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 138295,
+        "quality": {
+          "confirmed_rows": 138295,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "RIVER",
+        "file": "data/kline/okx/swap/5m/RIVER_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 77041,
+        "quality": {
+          "confirmed_rows": 77041,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "RLS",
+        "file": "data/kline/okx/swap/5m/RLS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 87886,
+        "quality": {
+          "confirmed_rows": 87886,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "ROBO",
+        "file": "data/kline/okx/swap/5m/ROBO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 62827,
+        "quality": {
+          "confirmed_rows": 62827,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "RSR",
+        "file": "data/kline/okx/swap/5m/RSR_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "RVN",
+        "file": "data/kline/okx/swap/5m/RVN_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "S",
+        "file": "data/kline/okx/swap/5m/S_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SAHARA",
+        "file": "data/kline/okx/swap/5m/SAHARA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 133711,
+        "quality": {
+          "confirmed_rows": 133711,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SAND",
+        "file": "data/kline/okx/swap/5m/SAND_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SAPIEN",
+        "file": "data/kline/okx/swap/5m/SAPIEN_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 95416,
+        "quality": {
+          "confirmed_rows": 95416,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SATS",
+        "file": "data/kline/okx/swap/5m/SATS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SEI",
+        "file": "data/kline/okx/swap/5m/SEI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 93163,
+        "quality": {
+          "confirmed_rows": 93163,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SENT",
+        "file": "data/kline/okx/swap/5m/SENT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 93073,
+        "quality": {
+          "confirmed_rows": 93073,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SHELL",
+        "file": "data/kline/okx/swap/5m/SHELL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SHIB",
+        "file": "data/kline/okx/swap/5m/SHIB_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SIGN",
+        "file": "data/kline/okx/swap/5m/SIGN_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 150715,
+        "quality": {
+          "confirmed_rows": 150715,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SKY",
+        "file": "data/kline/okx/swap/5m/SKY_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 111547,
+        "quality": {
+          "confirmed_rows": 111547,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SLX",
+        "file": "data/kline/okx/swap/5m/SLX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 35875,
+        "quality": {
+          "confirmed_rows": 35875,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SNX",
+        "file": "data/kline/okx/swap/5m/SNX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SNXX",
+        "file": "data/kline/okx/swap/5m/SNXX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 23413,
+        "quality": {
+          "confirmed_rows": 23413,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SOL",
+        "file": "data/kline/okx/swap/5m/SOL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SOON",
+        "file": "data/kline/okx/swap/5m/SOON_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 143515,
+        "quality": {
+          "confirmed_rows": 143515,
+          "timestamp_gaps": 0
+        },
+        "signals": 4
+      },
+      {
+        "symbol": "SOPH",
+        "file": "data/kline/okx/swap/5m/SOPH_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 142051,
+        "quality": {
+          "confirmed_rows": 142051,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "SPACE",
+        "file": "data/kline/okx/swap/5m/SPACE_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 72937,
+        "quality": {
+          "confirmed_rows": 72937,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "SPK",
+        "file": "data/kline/okx/swap/5m/SPK_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 136327,
+        "quality": {
+          "confirmed_rows": 136327,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "SPX",
+        "file": "data/kline/okx/swap/5m/SPX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 127753,
+        "quality": {
+          "confirmed_rows": 127753,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SSV",
+        "file": "data/kline/okx/swap/5m/SSV_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "STRC",
+        "file": "data/kline/okx/swap/5m/STRC_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 27763,
+        "quality": {
+          "confirmed_rows": 27763,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "STRK",
+        "file": "data/kline/okx/swap/5m/STRK_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "STX",
+        "file": "data/kline/okx/swap/5m/STX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SUI",
+        "file": "data/kline/okx/swap/5m/SUI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SUSHI",
+        "file": "data/kline/okx/swap/5m/SUSHI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "SYRUP",
+        "file": "data/kline/okx/swap/5m/SYRUP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 131767,
+        "quality": {
+          "confirmed_rows": 131767,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "TAO",
+        "file": "data/kline/okx/swap/5m/TAO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "THETA",
+        "file": "data/kline/okx/swap/5m/THETA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "TIA",
+        "file": "data/kline/okx/swap/5m/TIA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "TRB",
+        "file": "data/kline/okx/swap/5m/TRB_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "TRIA",
+        "file": "data/kline/okx/swap/5m/TRIA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 69259,
+        "quality": {
+          "confirmed_rows": 69259,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "TRUMP",
+        "file": "data/kline/okx/swap/5m/TRUMP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "TRUST",
+        "file": "data/kline/okx/swap/5m/TRUST_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 95707,
+        "quality": {
+          "confirmed_rows": 95707,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "TRUTH",
+        "file": "data/kline/okx/swap/5m/TRUTH_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 89083,
+        "quality": {
+          "confirmed_rows": 89083,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "TRX",
+        "file": "data/kline/okx/swap/5m/TRX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "TURBO",
+        "file": "data/kline/okx/swap/5m/TURBO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "UB",
+        "file": "data/kline/okx/swap/5m/UB_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 45571,
+        "quality": {
+          "confirmed_rows": 45571,
+          "timestamp_gaps": 0
+        },
+        "signals": 1
+      },
+      {
+        "symbol": "UMA",
+        "file": "data/kline/okx/swap/5m/UMA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "UNI",
+        "file": "data/kline/okx/swap/5m/UNI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "UP",
+        "file": "data/kline/okx/swap/5m/UP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 51361,
+        "quality": {
+          "confirmed_rows": 51361,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "USAR",
+        "file": "data/kline/okx/swap/5m/USAR_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 45853,
+        "quality": {
+          "confirmed_rows": 45853,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "USELESS",
+        "file": "data/kline/okx/swap/5m/USELESS_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 125389,
+        "quality": {
+          "confirmed_rows": 125389,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "VANA",
+        "file": "data/kline/okx/swap/5m/VANA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "VIRTUAL",
+        "file": "data/kline/okx/swap/5m/VIRTUAL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "VVV",
+        "file": "data/kline/okx/swap/5m/VVV_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 26653,
+        "quality": {
+          "confirmed_rows": 26653,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "W",
+        "file": "data/kline/okx/swap/5m/W_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "WAL",
+        "file": "data/kline/okx/swap/5m/WAL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 147889,
+        "quality": {
+          "confirmed_rows": 147889,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "WCT",
+        "file": "data/kline/okx/swap/5m/WCT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 154459,
+        "quality": {
+          "confirmed_rows": 154459,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "WET",
+        "file": "data/kline/okx/swap/5m/WET_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 85861,
+        "quality": {
+          "confirmed_rows": 85861,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "WIF",
+        "file": "data/kline/okx/swap/5m/WIF_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "WLD",
+        "file": "data/kline/okx/swap/5m/WLD_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "WLFI",
+        "file": "data/kline/okx/swap/5m/WLFI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 117001,
+        "quality": {
+          "confirmed_rows": 117001,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "WOO",
+        "file": "data/kline/okx/swap/5m/WOO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "XLM",
+        "file": "data/kline/okx/swap/5m/XLM_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "XPL",
+        "file": "data/kline/okx/swap/5m/XPL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 115585,
+        "quality": {
+          "confirmed_rows": 115585,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "XRP",
+        "file": "data/kline/okx/swap/5m/XRP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "XTZ",
+        "file": "data/kline/okx/swap/5m/XTZ_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "YB",
+        "file": "data/kline/okx/swap/5m/YB_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 102673,
+        "quality": {
+          "confirmed_rows": 102673,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "YFI",
+        "file": "data/kline/okx/swap/5m/YFI_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "YGG",
+        "file": "data/kline/okx/swap/5m/YGG_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ZAMA",
+        "file": "data/kline/okx/swap/5m/ZAMA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 76951,
+        "quality": {
+          "confirmed_rows": 76951,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ZBT",
+        "file": "data/kline/okx/swap/5m/ZBT_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 101179,
+        "quality": {
+          "confirmed_rows": 101179,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ZEC",
+        "file": "data/kline/okx/swap/5m/ZEC_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 95518,
+        "quality": {
+          "confirmed_rows": 95518,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ZEN",
+        "file": "data/kline/okx/swap/5m/ZEN_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 96349,
+        "quality": {
+          "confirmed_rows": 96349,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ZETA",
+        "file": "data/kline/okx/swap/5m/ZETA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ZIL",
+        "file": "data/kline/okx/swap/5m/ZIL_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ZK",
+        "file": "data/kline/okx/swap/5m/ZK_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ZKP",
+        "file": "data/kline/okx/swap/5m/ZKP_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 77536,
+        "quality": {
+          "confirmed_rows": 77536,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ZORA",
+        "file": "data/kline/okx/swap/5m/ZORA_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 103195,
+        "quality": {
+          "confirmed_rows": 103195,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ZRO",
+        "file": "data/kline/okx/swap/5m/ZRO_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      },
+      {
+        "symbol": "ZRX",
+        "file": "data/kline/okx/swap/5m/ZRX_USDT_SWAP_5m_20250403T000000Z_20261003T190316Z.jsonl.gz",
+        "bars": 158053,
+        "quality": {
+          "confirmed_rows": 158053,
+          "timestamp_gaps": 0
+        },
+        "signals": 0
+      }
+    ]
+  },
+  "counts": {
+    "utc_days_seen": 124183,
+    "bars_above_80pct": 6009,
+    "price_trigger_candidates": 68,
+    "funding_bypassed_signals": 68,
+    "trade_rejected_limit_unfilled": 33
+  },
+  "results": {
+    "signals": 68,
+    "trades": 35,
+    "return_basis": "net_return_per_trade_relative_to_entry_notional",
+    "overlapping_positions_serialized": false,
+    "wins": 18,
+    "losses": 17,
+    "win_rate": 0.5142857142857142,
+    "total_net_return": 0.42879656565056523,
+    "compound_return": -0.14503281534830414,
+    "average_net_return": 0.012251330447159007,
+    "profit_factor": 1.1569596544923586,
+    "max_drawdown": 0.67946607355867,
+    "exit_reasons": {
+      "utc_day_end": 15,
+      "stop": 12,
+      "breakeven_stop": 4,
+      "target_2": 4
+    },
+    "success_rate_definition": "win_rate: net_return > 0"
+  },
+  "limitations": [
+    "Funding is an entry filter only; funding PnL is not applied.",
+    "OHLC cannot establish intrabar order; stop is checked before targets.",
+    "No queue, partial fill beyond the defined 50% exit, liquidation, or portfolio contention model.",
+    "This variant interprets 40% take profit as a cumulative 40% favorable move, with the established 20% partial exit and breakeven stop."
+  ],
+  "study": "price_only_gain_gt_100_limit_130_short",
+  "variant": {
+    "day_gain_gate": ">100%",
+    "limit_price_factor": 2.3,
+    "limit_price_description": "130% above UTC-day open",
+    "leverage": 1.0,
+    "initial_stop_above_entry_pct": 0.2,
+    "tp1_favorable_move_pct": 0.2,
+    "tp1_close_fraction": 0.5,
+    "tp2_cumulative_favorable_move_pct": 0.4,
+    "tp2_price": "0.60 x effective entry",
+    "entry_activation": "next contiguous 5m bar"
+  }
+}

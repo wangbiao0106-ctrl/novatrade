@@ -1,4 +1,4 @@
-# 个人做单偏好多分支回顾实验
+# 交易偏好分支
 
 版本：0.1.0（研究候选，不接入运行时）  
 稳定标识：`personal_style_strategy_variants`
