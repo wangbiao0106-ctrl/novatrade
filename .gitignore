@@ -4,6 +4,7 @@
 .venv/
 __pycache__/
 *.py[cod]
+.cache/
 data/kline/okx/swap/
 strategies/sweep_reversal_short/results/
 dist/

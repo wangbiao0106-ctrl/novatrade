@@ -29,8 +29,8 @@ spec/                               稳定的工程规范和接口约定
 ## `data/kline/` 规则
 
 - 只放 OKX 等交易所的虚拟币 K 线原始数据，以及描述这些数据的 `manifest.json` 等采集元数据。
-- 目录按 `交易所/市场/周期` 分层；当前 OKX USDT 永续使用 `data/kline/okx/swap/{5m,15m,1h}`。
-- 文件名必须包含标的和周期。原始导出使用 `SYMBOL_USDT_SWAP_5m_<start>_<end>.jsonl.gz`；回测缓存使用现有的 `SYMBOL_USDT_SWAP_<tf>_<start>_<end>.json` 格式。
+- 原始目录按 `交易所/市场/周期` 分层；当前 OKX USDT 永续原始数据使用 `data/kline/okx/swap/5m/`。15m、30m、1h、4h 等派生 Parquet 缓存由 `scripts/build_kline_cache.py` 写入仓库根目录 `.cache/kline/okx/swap/`，不属于 `data/kline/`。
+- 原始文件名必须包含标的和周期，使用 `SYMBOL_USDT_SWAP_5m_<start>_<end>.jsonl.gz`；可重建缓存的文件名和 manifest 由缓存脚本管理。
 - 报告、CSV 成交记录、参数网格、标的名单、NPZ 派生数组和策略缓存不属于行情数据，必须写入对应策略的 `results/`。
 - 需要新的周期或市场时，只能在相同层级新增目录，不能恢复 `data/backtest`、`data/market_export` 等按用途混放的目录。
 

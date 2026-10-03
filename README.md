@@ -48,6 +48,17 @@ Swift 应用不会直接打开配置文件，也不会持久化或展示密钥�
 - UI 默认不提供下单按钮；实盘 HTTP 接口需要先手动启用交易，再经过 profile、订单参数和风控检查。
 - OKX 永续订单的 `quantity` 始终表示合约张数（`sz`），下单前读取 `ctVal/ctMult/lotSz/minSz/tickSz`；策略按真实报价名义价值换算并向下取整，规格缺失或不符合时拒绝下单。
 
+## 多周期行情缓存
+
+策略训练建议先将 5 分钟原始行情转换为可复用的 Parquet 缓存。脚本会在一次读取每个 5m 文件的过程中，同时生成 15m、30m、1h 和 4h；源 manifest 未变化时会直接跳过，无需重复解压。
+
+```bash
+python3 -m pip install -r scripts/requirements-market-cache.txt
+python3 scripts/build_kline_cache.py
+```
+
+缓存位于 `.cache/kline/okx/swap/`，属于可重建产物，不提交到仓库。原始数据仍保留在 `data/kline/okx/swap/5m/`。
+
 ## 山寨币高位做空回测
 
 HLSR 回测只保留当前配置和可重建的输入，输出统一写入对应策略的 `results/` 目录。
