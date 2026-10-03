@@ -443,7 +443,7 @@ def main() -> int:
         ROOT / "strategies" / name for name in (
             "sweep_reversal_short", "intraday_pump_retest_short",
             "extreme_wick_short", "double_pump_exhaustion_short",
-            "ema_3line_pullback",
+            "ema_3line_pullback", "liquid_crypto_trend_long",
         )
     ]
     for strategy_dir in strategy_dirs:

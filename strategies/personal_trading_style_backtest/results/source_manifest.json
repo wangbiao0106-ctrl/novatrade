@@ -1,0 +1,10 @@
+{
+  "source_file": "NTM5NTczNjI=_欧易统一交易账单_2026-07-22~2026-08-22~UTC+8~6530099a043ba19e63533fd8723d7833.zip",
+  "source_sha256": "14704034159ada4131ab4623a97e530b4782913f05c150e6e43b2f6cbe050b26",
+  "csv_member": "NTM5NTczNjI=~2026-07-22~2026-08-22~UTC+8~6530099a043ba19e63533fd8723d7833_UnifiedBillHistory/560139958070448105/欧易统一交易账单_2026-07-22~2026-08-22~UTC+8~6530099a043ba19e63533fd8723d7833.csv",
+  "account_metadata": "用户ID:<redacted>,﻿账户类型:Main,﻿时区:UTC+8\r",
+  "row_count": 64000,
+  "first_timestamp": "2026-07-22 00:00:04",
+  "last_timestamp": "2026-08-22 23:04:28",
+  "timezone": "UTC+8"
+}

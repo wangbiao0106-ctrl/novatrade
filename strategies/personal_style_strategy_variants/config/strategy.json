@@ -1,0 +1,40 @@
+{
+  "strategy_id": "personal_style_strategy_variants",
+  "version": "0.1.0",
+  "status": "research_candidate",
+  "source_of_truth": "strategies/personal_style_strategy_variants/STRATEGY.md",
+  "name_zh": "个人做单偏好多分支回顾实验",
+  "market": "OKX_USDT_LINEAR_PERPETUAL",
+  "data": {
+    "manifest": "data/kline/okx/swap/5m/manifest.json",
+    "timeframe_minutes": 5,
+    "selection": "one latest manifest file per contract",
+    "quote_volume_threshold_24h_usdt": 10000000,
+    "exclude_from_universe": "sweep_reversal_short/config/universe.json exclude list"
+  },
+  "execution": {
+    "entry": "next confirmed 5m candle open",
+    "max_concurrent_positions": 1,
+    "cooldown_bars_same_symbol": 12,
+    "max_hold_bars_default": 72,
+    "fee_one_way": 0.0005,
+    "slippage_one_way": 0.0005,
+    "stress_fee_one_way": 0.001,
+    "stress_slippage_one_way": 0.001,
+    "same_bar_priority": "stop before target",
+    "averaging_or_margin_top_up": false
+  },
+  "walk_forward": {
+    "train_fraction": 0.6,
+    "validation_fraction": 0.2,
+    "test_fraction": 0.2,
+    "split_basis": "chronological signal timestamp"
+  },
+  "variants": [
+    {"id": "A_exhaustion_short", "direction": "short", "description": "24h冲高、近高位、15m衰竭确认后做空"},
+    {"id": "B_double_sweep_short", "direction": "short", "description": "24h前高假突破后二次扫顶回落做空"},
+    {"id": "C_pump_retest_short", "direction": "short", "description": "回落后再拉升、缩量、接近前高做空"},
+    {"id": "D_breakout_pullback_long", "direction": "long", "description": "强势回撤后重新突破、放量确认做多"},
+    {"id": "E_extreme_reversion_short", "direction": "short", "description": "短线极端正收益、波动 z-score 后快速均值回归做空"}
+  ]
+}

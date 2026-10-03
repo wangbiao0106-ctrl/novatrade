@@ -2,7 +2,7 @@
   "strategy": "intraday_pump_retest_short",
   "version": "0.1.0",
   "status": "research_only",
-  "config_sha256": "c6a60de1a92c36a8371d80ad5dd0626212898a48a9e222d1b2a2218c8b6d89cd",
+  "config_sha256": "aa7c9368414e2e6f1751de73efce77c8d01d8ec1d26d3ea5d0fced00dc6401ff",
   "parameters": {
     "strategy": "intraday_pump_retest_short",
     "version": "0.1.0",
@@ -44,11 +44,13 @@
     "position_management": {
       "leverage": 2.0,
       "initial_equity": 10000.0,
-      "risk_per_trade_pct": 0.5,
+      "risk_per_trade_pct": 1.0,
       "max_concurrent_positions": 1,
       "one_position_per_symbol": true,
-      "sizing": "notional = min(equity * leverage, equity * risk_pct / stop_distance_pct)",
-      "daily_realized_loss_limit_pct": 5.0
+      "sizing": "notional = min(pool_available_capital, account_equity * risk_per_trade_pct / 100 / stop_distance_pct)",
+      "daily_realized_loss_limit_pct": 5.0,
+      "risk_per_trade_basis": "account_equity_at_authorization",
+      "max_open_risk_percent": 1.0
     },
     "costs": {
       "fee_rate_one_way": 0.0006,
@@ -79,3114 +81,3002 @@
           0.1
         ]
       }
+    },
+    "universe": {
+      "asset_type": "altcoin_usdt_linear_perpetual",
+      "excluded_symbols": [
+        "BTC",
+        "ETH",
+        "SOL",
+        "BNB",
+        "XRP",
+        "DOGE",
+        "ADA",
+        "TRX",
+        "USDT",
+        "USDC",
+        "DAI"
+      ],
+      "requirements": [
+        "continuous_confirmed_signal_candles",
+        "quote_volume_available",
+        "sufficient_orderbook_depth"
+      ],
+      "production_scope": null,
+      "mainstream_and_non_crypto_excluded": true
     }
   },
   "data": {
     "symbols": 295,
-    "complete_15m_bars": 4770913,
-    "start_utc": "2026-03-31T07:00:00+00:00",
-    "end_utc": "2026-09-30T19:00:00+00:00",
-    "load_seconds": 55.332117000000004,
+    "complete_15m_bars": 11896703,
+    "start_utc": "2025-04-03T00:00:00+00:00",
+    "end_utc": "2026-10-03T08:00:00+00:00",
+    "load_seconds": 144.528505125,
     "market_data_read_passes": 1,
     "quality": {
-      "complete_day_bars": 4751511,
-      "cached_pumps": 21,
-      "observation_bars_above_anchor": 4521,
-      "observation_bars_gt60": 4521,
-      "pump_bars_after_anchor": 21,
-      "pump_bars_after_gt60": 21
+      "complete_day_bars": 11889153,
+      "observation_bars_above_anchor": 9753,
+      "observation_bars_gt60": 9753,
+      "cached_pumps": 36,
+      "pump_bars_after_anchor": 36,
+      "pump_bars_after_gt60": 36
     },
     "source_files": [
       {
         "symbol": "0G",
-        "file": "data/kline/okx/swap/5m/0G_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1239347,
+        "file": "data/kline/okx/swap/5m/0G_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2749621,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 108259,
+          "complete_15m_bars": 36086
         }
       },
       {
         "symbol": "1INCH",
-        "file": "data/kline/okx/swap/5m/1INCH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1335504,
+        "file": "data/kline/okx/swap/5m/1INCH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3834591,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "2Z",
-        "file": "data/kline/okx/swap/5m/2Z_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1312068,
+        "file": "data/kline/okx/swap/5m/2Z_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2544449,
         "quality": {
-          "unconfirmed_rows": 1,
-          "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 105347,
+          "complete_15m_bars": 35115
         }
       },
       {
         "symbol": "A",
-        "file": "data/kline/okx/swap/5m/A_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1278061,
+        "file": "data/kline/okx/swap/5m/A_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3339788,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 141667,
+          "complete_15m_bars": 47222
         }
       },
       {
         "symbol": "AAVE",
-        "file": "data/kline/okx/swap/5m/AAVE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1421358,
+        "file": "data/kline/okx/swap/5m/AAVE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4442652,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ACH",
-        "file": "data/kline/okx/swap/5m/ACH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1236103,
+        "file": "data/kline/okx/swap/5m/ACH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3622203,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ACT",
-        "file": "data/kline/okx/swap/5m/ACT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1423496,
+        "file": "data/kline/okx/swap/5m/ACT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4211072,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ACU",
-        "file": "data/kline/okx/swap/5m/ACU_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1299935,
+        "file": "data/kline/okx/swap/5m/ACU_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1847197,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 72877,
+          "complete_15m_bars": 24292
         }
       },
       {
         "symbol": "ADA",
-        "file": "data/kline/okx/swap/5m/ADA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1244122,
+        "file": "data/kline/okx/swap/5m/ADA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3971744,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "AEON",
-        "file": "data/kline/okx/swap/5m/AEON_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 508584,
+        "file": "data/kline/okx/swap/5m/AEON_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 526355,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 18810,
-          "complete_15m_bars": 6270
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 19543,
+          "complete_15m_bars": 6514
         }
       },
       {
         "symbol": "AERO",
-        "file": "data/kline/okx/swap/5m/AERO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1234385,
+        "file": "data/kline/okx/swap/5m/AERO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3168588,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 131638,
+          "complete_15m_bars": 43879
         }
       },
       {
         "symbol": "AEVO",
-        "file": "data/kline/okx/swap/5m/AEVO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1234541,
+        "file": "data/kline/okx/swap/5m/AEVO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4032361,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "AGLD",
-        "file": "data/kline/okx/swap/5m/AGLD_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1183614,
+        "file": "data/kline/okx/swap/5m/AGLD_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3778854,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "AI",
-        "file": "data/kline/okx/swap/5m/AI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1040518,
+        "file": "data/kline/okx/swap/5m/AI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1055759,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 44436,
-          "complete_15m_bars": 14812
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 45169,
+          "complete_15m_bars": 15056
         }
       },
       {
         "symbol": "AIXBT",
-        "file": "data/kline/okx/swap/5m/AIXBT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1244639,
+        "file": "data/kline/okx/swap/5m/AIXBT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4056419,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "AKE",
-        "file": "data/kline/okx/swap/5m/AKE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 116070,
+        "file": "data/kline/okx/swap/5m/AKE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 134765,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 4176,
-          "complete_15m_bars": 1392
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 4909,
+          "complete_15m_bars": 1636
         }
       },
       {
         "symbol": "ALGO",
-        "file": "data/kline/okx/swap/5m/ALGO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1388610,
+        "file": "data/kline/okx/swap/5m/ALGO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3779560,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ALLO",
-        "file": "data/kline/okx/swap/5m/ALLO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1500422,
+        "file": "data/kline/okx/swap/5m/ALLO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2530366,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 93784,
+          "complete_15m_bars": 31261
         }
       },
       {
         "symbol": "ANIME",
-        "file": "data/kline/okx/swap/5m/ANIME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1275252,
+        "file": "data/kline/okx/swap/5m/ANIME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3951785,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "APE",
-        "file": "data/kline/okx/swap/5m/APE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1545093,
+        "file": "data/kline/okx/swap/5m/APE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4309585,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "API3",
-        "file": "data/kline/okx/swap/5m/API3_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1190049,
+        "file": "data/kline/okx/swap/5m/API3_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3854122,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "APR",
-        "file": "data/kline/okx/swap/5m/APR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1219757,
+        "file": "data/kline/okx/swap/5m/APR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2491747,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 99097,
+          "complete_15m_bars": 33032
         }
       },
       {
         "symbol": "APT",
-        "file": "data/kline/okx/swap/5m/APT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1384298,
+        "file": "data/kline/okx/swap/5m/APT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3999678,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "AR",
-        "file": "data/kline/okx/swap/5m/AR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1226450,
+        "file": "data/kline/okx/swap/5m/AR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3898206,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ARB",
-        "file": "data/kline/okx/swap/5m/ARB_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1509269,
+        "file": "data/kline/okx/swap/5m/ARB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4249621,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ARKM",
-        "file": "data/kline/okx/swap/5m/ARKM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1423834,
+        "file": "data/kline/okx/swap/5m/ARKM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4014536,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ARX",
-        "file": "data/kline/okx/swap/5m/ARX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 656157,
+        "file": "data/kline/okx/swap/5m/ARX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 673868,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 28878,
-          "complete_15m_bars": 9626
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 29611,
+          "complete_15m_bars": 9870
         }
       },
       {
         "symbol": "ASTER",
-        "file": "data/kline/okx/swap/5m/ASTER_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1313875,
+        "file": "data/kline/okx/swap/5m/ASTER_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2875156,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 108325,
+          "complete_15m_bars": 36108
         }
       },
       {
         "symbol": "AT",
-        "file": "data/kline/okx/swap/5m/AT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1034800,
+        "file": "data/kline/okx/swap/5m/AT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2137132,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 97321,
+          "complete_15m_bars": 32440
         }
       },
       {
         "symbol": "ATH",
-        "file": "data/kline/okx/swap/5m/ATH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1306012,
+        "file": "data/kline/okx/swap/5m/ATH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3862549,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ATOM",
-        "file": "data/kline/okx/swap/5m/ATOM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1108822,
+        "file": "data/kline/okx/swap/5m/ATOM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3543157,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "AUCTION",
-        "file": "data/kline/okx/swap/5m/AUCTION_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1148554,
+        "file": "data/kline/okx/swap/5m/AUCTION_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3821478,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "AVAX",
-        "file": "data/kline/okx/swap/5m/AVAX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1390048,
+        "file": "data/kline/okx/swap/5m/AVAX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4364145,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "AVNT",
-        "file": "data/kline/okx/swap/5m/AVNT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1321370,
+        "file": "data/kline/okx/swap/5m/AVNT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2759756,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 108199,
+          "complete_15m_bars": 36066
         }
       },
       {
         "symbol": "AXS",
-        "file": "data/kline/okx/swap/5m/AXS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1439297,
+        "file": "data/kline/okx/swap/5m/AXS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4066713,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "AZTEC",
-        "file": "data/kline/okx/swap/5m/AZTEC_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1035149,
+        "file": "data/kline/okx/swap/5m/AZTEC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1382425,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 67363,
+          "complete_15m_bars": 22454
         }
       },
       {
         "symbol": "BABY",
-        "file": "data/kline/okx/swap/5m/BABY_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1244598,
+        "file": "data/kline/okx/swap/5m/BABY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3832703,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 155773,
+          "complete_15m_bars": 51924
         }
       },
       {
         "symbol": "BAND",
-        "file": "data/kline/okx/swap/5m/BAND_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1099871,
+        "file": "data/kline/okx/swap/5m/BAND_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3622530,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BARD",
-        "file": "data/kline/okx/swap/5m/BARD_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1176775,
+        "file": "data/kline/okx/swap/5m/BARD_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2663955,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 109393,
+          "complete_15m_bars": 36464
         }
       },
       {
         "symbol": "BASED",
-        "file": "data/kline/okx/swap/5m/BASED_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1461581,
+        "file": "data/kline/okx/swap/5m/BASED_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1486348,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 53827,
+          "complete_15m_bars": 17942
         }
       },
       {
         "symbol": "BAT",
-        "file": "data/kline/okx/swap/5m/BAT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1292516,
+        "file": "data/kline/okx/swap/5m/BAT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3550819,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BCH",
-        "file": "data/kline/okx/swap/5m/BCH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1210268,
+        "file": "data/kline/okx/swap/5m/BCH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3818946,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BEAT",
-        "file": "data/kline/okx/swap/5m/BEAT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1516605,
+        "file": "data/kline/okx/swap/5m/BEAT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2778908,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 93502,
+          "complete_15m_bars": 31167
         }
       },
       {
         "symbol": "BERA",
-        "file": "data/kline/okx/swap/5m/BERA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1332618,
+        "file": "data/kline/okx/swap/5m/BERA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4064283,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BICO",
-        "file": "data/kline/okx/swap/5m/BICO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1339493,
+        "file": "data/kline/okx/swap/5m/BICO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4046274,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BIGTIME",
-        "file": "data/kline/okx/swap/5m/BIGTIME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1255214,
+        "file": "data/kline/okx/swap/5m/BIGTIME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3826289,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BILL",
-        "file": "data/kline/okx/swap/5m/BILL_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1061968,
+        "file": "data/kline/okx/swap/5m/BILL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1077432,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 42468,
-          "complete_15m_bars": 14156
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 43201,
+          "complete_15m_bars": 14400
         }
       },
       {
         "symbol": "BIO",
-        "file": "data/kline/okx/swap/5m/BIO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1381156,
+        "file": "data/kline/okx/swap/5m/BIO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4324726,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BLEND",
-        "file": "data/kline/okx/swap/5m/BLEND_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1023587,
+        "file": "data/kline/okx/swap/5m/BLEND_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1037823,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 44460,
-          "complete_15m_bars": 14820
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 45193,
+          "complete_15m_bars": 15064
         }
       },
       {
         "symbol": "BLUR",
-        "file": "data/kline/okx/swap/5m/BLUR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1226118,
+        "file": "data/kline/okx/swap/5m/BLUR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3818932,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BMNR",
-        "file": "data/kline/okx/swap/5m/BMNR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 776826,
+        "file": "data/kline/okx/swap/5m/BMNR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 796647,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 44976,
-          "complete_15m_bars": 14992
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 45709,
+          "complete_15m_bars": 15236
         }
       },
       {
         "symbol": "BNB",
-        "file": "data/kline/okx/swap/5m/BNB_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1254859,
+        "file": "data/kline/okx/swap/5m/BNB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3886431,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BOME",
-        "file": "data/kline/okx/swap/5m/BOME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1360470,
+        "file": "data/kline/okx/swap/5m/BOME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3890586,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BONK",
-        "file": "data/kline/okx/swap/5m/BONK_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1339082,
+        "file": "data/kline/okx/swap/5m/BONK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4313600,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BOT",
-        "file": "data/kline/okx/swap/5m/BOT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 438353,
+        "file": "data/kline/okx/swap/5m/BOT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 452741,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 26028,
-          "complete_15m_bars": 8676
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 26761,
+          "complete_15m_bars": 8920
         }
       },
       {
         "symbol": "BRETT",
-        "file": "data/kline/okx/swap/5m/BRETT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1211166,
+        "file": "data/kline/okx/swap/5m/BRETT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3700418,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "BREV",
-        "file": "data/kline/okx/swap/5m/BREV_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1262232,
+        "file": "data/kline/okx/swap/5m/BREV_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1919373,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 79717,
+          "complete_15m_bars": 26572
         }
       },
       {
         "symbol": "BSB",
-        "file": "data/kline/okx/swap/5m/BSB_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1341950,
+        "file": "data/kline/okx/swap/5m/BSB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1360577,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 52236,
-          "complete_15m_bars": 17412
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 52969,
+          "complete_15m_bars": 17656
         }
       },
       {
         "symbol": "BSP",
-        "file": "data/kline/okx/swap/5m/BSP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 394187,
+        "file": "data/kline/okx/swap/5m/BSP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 405938,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 24888,
-          "complete_15m_bars": 8296
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 25621,
+          "complete_15m_bars": 8540
         }
       },
       {
         "symbol": "CAP",
-        "file": "data/kline/okx/swap/5m/CAP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 716475,
+        "file": "data/kline/okx/swap/5m/CAP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 737346,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 27726,
-          "complete_15m_bars": 9242
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 28459,
+          "complete_15m_bars": 9486
         }
       },
       {
         "symbol": "CASHCAT",
-        "file": "data/kline/okx/swap/5m/CASHCAT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 200861,
+        "file": "data/kline/okx/swap/5m/CASHCAT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 218180,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 7962,
-          "complete_15m_bars": 2654
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 8695,
+          "complete_15m_bars": 2898
         }
       },
       {
         "symbol": "CBRS",
-        "file": "data/kline/okx/swap/5m/CBRS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1017215,
+        "file": "data/kline/okx/swap/5m/CBRS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1036685,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 39900,
-          "complete_15m_bars": 13300
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 40633,
+          "complete_15m_bars": 13544
         }
       },
       {
         "symbol": "CC",
-        "file": "data/kline/okx/swap/5m/CC_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1284368,
+        "file": "data/kline/okx/swap/5m/CC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2488263,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 96985,
+          "complete_15m_bars": 32328
         }
       },
       {
         "symbol": "CELO",
-        "file": "data/kline/okx/swap/5m/CELO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1355785,
+        "file": "data/kline/okx/swap/5m/CELO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3933730,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "CFX",
-        "file": "data/kline/okx/swap/5m/CFX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1308243,
+        "file": "data/kline/okx/swap/5m/CFX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4124995,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "CHIP",
-        "file": "data/kline/okx/swap/5m/CHIP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1160888,
+        "file": "data/kline/okx/swap/5m/CHIP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1178930,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 46716,
-          "complete_15m_bars": 15572
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 47449,
+          "complete_15m_bars": 15816
         }
       },
       {
         "symbol": "CHZ",
-        "file": "data/kline/okx/swap/5m/CHZ_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1269401,
+        "file": "data/kline/okx/swap/5m/CHZ_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3865199,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "CNPY",
-        "file": "data/kline/okx/swap/5m/CNPY_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 174298,
+        "file": "data/kline/okx/swap/5m/CNPY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 191793,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 6696,
-          "complete_15m_bars": 2232
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 7429,
+          "complete_15m_bars": 2476
         }
       },
       {
         "symbol": "COAI",
-        "file": "data/kline/okx/swap/5m/COAI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1334327,
+        "file": "data/kline/okx/swap/5m/COAI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2634587,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 101587,
+          "complete_15m_bars": 33862
         }
       },
       {
         "symbol": "COMP",
-        "file": "data/kline/okx/swap/5m/COMP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1073592,
+        "file": "data/kline/okx/swap/5m/COMP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3450741,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "CORE",
-        "file": "data/kline/okx/swap/5m/CORE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1361421,
+        "file": "data/kline/okx/swap/5m/CORE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3986392,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "CP",
-        "file": "data/kline/okx/swap/5m/CP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 194698,
+        "file": "data/kline/okx/swap/5m/CP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 210235,
         "quality": {
-          "unconfirmed_rows": 1,
-          "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 8104,
-          "complete_15m_bars": 2701
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 8837,
+          "complete_15m_bars": 2945
         }
       },
       {
         "symbol": "CRO",
-        "file": "data/kline/okx/swap/5m/CRO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1244732,
+        "file": "data/kline/okx/swap/5m/CRO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3988062,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "CRV",
-        "file": "data/kline/okx/swap/5m/CRV_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1293014,
+        "file": "data/kline/okx/swap/5m/CRV_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4138562,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "CVX",
-        "file": "data/kline/okx/swap/5m/CVX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1018682,
+        "file": "data/kline/okx/swap/5m/CVX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3356868,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "CYPH",
-        "file": "data/kline/okx/swap/5m/CYPH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 54856,
+        "file": "data/kline/okx/swap/5m/CYPH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 73272,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 2130,
-          "complete_15m_bars": 710
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 2863,
+          "complete_15m_bars": 954
         }
       },
       {
         "symbol": "DASH",
-        "file": "data/kline/okx/swap/5m/DASH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1320738,
+        "file": "data/kline/okx/swap/5m/DASH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2431404,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 95389,
+          "complete_15m_bars": 31796
         }
       },
       {
         "symbol": "DATA",
-        "file": "data/kline/okx/swap/5m/DATA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 536095,
+        "file": "data/kline/okx/swap/5m/DATA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 552474,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 25998,
-          "complete_15m_bars": 8666
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 26731,
+          "complete_15m_bars": 8910
         }
       },
       {
         "symbol": "DGAI",
-        "file": "data/kline/okx/swap/5m/DGAI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 184611,
+        "file": "data/kline/okx/swap/5m/DGAI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 201812,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 7968,
-          "complete_15m_bars": 2656
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 8701,
+          "complete_15m_bars": 2900
         }
       },
       {
         "symbol": "DOGE",
-        "file": "data/kline/okx/swap/5m/DOGE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1477840,
+        "file": "data/kline/okx/swap/5m/DOGE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4631304,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "DOOD",
-        "file": "data/kline/okx/swap/5m/DOOD_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1087800,
+        "file": "data/kline/okx/swap/5m/DOOD_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3342395,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 146545,
+          "complete_15m_bars": 48848
         }
       },
       {
         "symbol": "DOS",
-        "file": "data/kline/okx/swap/5m/DOS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 348951,
+        "file": "data/kline/okx/swap/5m/DOS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 363920,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 14772,
-          "complete_15m_bars": 4924
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 15505,
+          "complete_15m_bars": 5168
         }
       },
       {
         "symbol": "DOT",
-        "file": "data/kline/okx/swap/5m/DOT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1301106,
+        "file": "data/kline/okx/swap/5m/DOT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3814951,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "DRAM",
-        "file": "data/kline/okx/swap/5m/DRAM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 987993,
+        "file": "data/kline/okx/swap/5m/DRAM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1004578,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 41880,
-          "complete_15m_bars": 13960
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 42613,
+          "complete_15m_bars": 14204
         }
       },
       {
         "symbol": "DYDX",
-        "file": "data/kline/okx/swap/5m/DYDX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1488828,
+        "file": "data/kline/okx/swap/5m/DYDX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4224396,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "EDEN",
-        "file": "data/kline/okx/swap/5m/EDEN_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1415685,
+        "file": "data/kline/okx/swap/5m/EDEN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2811475,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 105943,
+          "complete_15m_bars": 35314
         }
       },
       {
         "symbol": "EDGE",
-        "file": "data/kline/okx/swap/5m/EDGE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1319562,
+        "file": "data/kline/okx/swap/5m/EDGE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1336634,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 52482,
-          "complete_15m_bars": 17494
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 53215,
+          "complete_15m_bars": 17738
         }
       },
       {
         "symbol": "EGLD",
-        "file": "data/kline/okx/swap/5m/EGLD_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1241424,
+        "file": "data/kline/okx/swap/5m/EGLD_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3595229,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "EIGEN",
-        "file": "data/kline/okx/swap/5m/EIGEN_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1266435,
+        "file": "data/kline/okx/swap/5m/EIGEN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4063799,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ENA",
-        "file": "data/kline/okx/swap/5m/ENA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1469687,
+        "file": "data/kline/okx/swap/5m/ENA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2875336,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 109735,
+          "complete_15m_bars": 36578
         }
       },
       {
         "symbol": "ENJ",
-        "file": "data/kline/okx/swap/5m/ENJ_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1246061,
+        "file": "data/kline/okx/swap/5m/ENJ_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3798235,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ENS",
-        "file": "data/kline/okx/swap/5m/ENS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1275480,
+        "file": "data/kline/okx/swap/5m/ENS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4081991,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ENSO",
-        "file": "data/kline/okx/swap/5m/ENSO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1351734,
+        "file": "data/kline/okx/swap/5m/ENSO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2523976,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 97609,
+          "complete_15m_bars": 32536
         }
       },
       {
         "symbol": "ESP",
-        "file": "data/kline/okx/swap/5m/ESP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1257413,
+        "file": "data/kline/okx/swap/5m/ESP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1646366,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 67585,
+          "complete_15m_bars": 22528
         }
       },
       {
         "symbol": "ETC",
-        "file": "data/kline/okx/swap/5m/ETC_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1352022,
+        "file": "data/kline/okx/swap/5m/ETC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3783513,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ETH",
-        "file": "data/kline/okx/swap/5m/ETH_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1809555,
+        "file": "data/kline/okx/swap/5m/ETH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 5516566,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ETHFI",
-        "file": "data/kline/okx/swap/5m/ETHFI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1344602,
+        "file": "data/kline/okx/swap/5m/ETHFI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4231375,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ETHW",
-        "file": "data/kline/okx/swap/5m/ETHW_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1220785,
+        "file": "data/kline/okx/swap/5m/ETHW_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3695042,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "F",
-        "file": "data/kline/okx/swap/5m/F_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1152705,
+        "file": "data/kline/okx/swap/5m/F_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2253722,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 98785,
+          "complete_15m_bars": 32928
         }
       },
       {
         "symbol": "FARTCOIN",
-        "file": "data/kline/okx/swap/5m/FARTCOIN_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1269750,
+        "file": "data/kline/okx/swap/5m/FARTCOIN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4185152,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "FET",
-        "file": "data/kline/okx/swap/5m/FET_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 165766,
+        "file": "data/kline/okx/swap/5m/FET_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 183068,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 7386,
-          "complete_15m_bars": 2462
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 8119,
+          "complete_15m_bars": 2706
         }
       },
       {
         "symbol": "FIL",
-        "file": "data/kline/okx/swap/5m/FIL_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1505555,
+        "file": "data/kline/okx/swap/5m/FIL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4198714,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "FLOCK",
-        "file": "data/kline/okx/swap/5m/FLOCK_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 139581,
+        "file": "data/kline/okx/swap/5m/FLOCK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 157664,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 5292,
-          "complete_15m_bars": 1764
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 6025,
+          "complete_15m_bars": 2008
         }
       },
       {
         "symbol": "FLOKI",
-        "file": "data/kline/okx/swap/5m/FLOKI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1141110,
+        "file": "data/kline/okx/swap/5m/FLOKI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3773647,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "FLOW",
-        "file": "data/kline/okx/swap/5m/FLOW_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1213503,
+        "file": "data/kline/okx/swap/5m/FLOW_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3689340,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "FOGO",
-        "file": "data/kline/okx/swap/5m/FOGO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1298338,
+        "file": "data/kline/okx/swap/5m/FOGO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1907200,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 76516,
+          "complete_15m_bars": 25505
         }
       },
       {
         "symbol": "FWDI",
-        "file": "data/kline/okx/swap/5m/FWDI_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 323074,
+        "file": "data/kline/okx/swap/5m/FWDI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 336140,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 18840,
-          "complete_15m_bars": 6280
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 19573,
+          "complete_15m_bars": 6524
         }
       },
       {
         "symbol": "GALA",
-        "file": "data/kline/okx/swap/5m/GALA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1340362,
+        "file": "data/kline/okx/swap/5m/GALA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4007513,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "GAS",
-        "file": "data/kline/okx/swap/5m/GAS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1120100,
+        "file": "data/kline/okx/swap/5m/GAS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3360037,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "GIGGLE",
-        "file": "data/kline/okx/swap/5m/GIGGLE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1303150,
+        "file": "data/kline/okx/swap/5m/GIGGLE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2514826,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 98797,
+          "complete_15m_bars": 32932
         }
       },
       {
         "symbol": "GLM",
-        "file": "data/kline/okx/swap/5m/GLM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1087965,
+        "file": "data/kline/okx/swap/5m/GLM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3304456,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "GMT",
-        "file": "data/kline/okx/swap/5m/GMT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1440710,
+        "file": "data/kline/okx/swap/5m/GMT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4103701,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "GMX",
-        "file": "data/kline/okx/swap/5m/GMX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1205757,
+        "file": "data/kline/okx/swap/5m/GMX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3511850,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "GPRO",
-        "file": "data/kline/okx/swap/5m/GPRO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 110457,
+        "file": "data/kline/okx/swap/5m/GPRO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 121625,
         "quality": {
-          "unconfirmed_rows": 1,
-          "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 7553,
-          "complete_15m_bars": 2517
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 8286,
+          "complete_15m_bars": 2761
         }
       },
       {
         "symbol": "GPS",
-        "file": "data/kline/okx/swap/5m/GPS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1416548,
+        "file": "data/kline/okx/swap/5m/GPS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4164034,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "GRAM",
-        "file": "data/kline/okx/swap/5m/GRAM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 622479,
+        "file": "data/kline/okx/swap/5m/GRAM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 638762,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 30342,
-          "complete_15m_bars": 10114
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 31075,
+          "complete_15m_bars": 10358
         }
       },
       {
         "symbol": "GRASS",
-        "file": "data/kline/okx/swap/5m/GRASS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1348227,
+        "file": "data/kline/okx/swap/5m/GRASS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4103364,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "GRT",
-        "file": "data/kline/okx/swap/5m/GRT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1162324,
+        "file": "data/kline/okx/swap/5m/GRT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3813719,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "GRVT",
-        "file": "data/kline/okx/swap/5m/GRVT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 506397,
+        "file": "data/kline/okx/swap/5m/GRVT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 526004,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 17904,
-          "complete_15m_bars": 5968
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 18637,
+          "complete_15m_bars": 6212
         }
       },
       {
         "symbol": "H",
-        "file": "data/kline/okx/swap/5m/H_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1485691,
+        "file": "data/kline/okx/swap/5m/H_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3661794,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 131641,
+          "complete_15m_bars": 43880
         }
       },
       {
         "symbol": "HBAR",
-        "file": "data/kline/okx/swap/5m/HBAR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1346402,
+        "file": "data/kline/okx/swap/5m/HBAR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4271598,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "HMSTR",
-        "file": "data/kline/okx/swap/5m/HMSTR_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1301471,
+        "file": "data/kline/okx/swap/5m/HMSTR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3917309,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "HOME",
-        "file": "data/kline/okx/swap/5m/HOME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1261119,
+        "file": "data/kline/okx/swap/5m/HOME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3143348,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 137350,
+          "complete_15m_bars": 45783
         }
       },
       {
         "symbol": "HUMA",
-        "file": "data/kline/okx/swap/5m/HUMA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1174158,
+        "file": "data/kline/okx/swap/5m/HUMA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3315655,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 142495,
+          "complete_15m_bars": 47498
         }
       },
       {
         "symbol": "HYPE",
-        "file": "data/kline/okx/swap/5m/HYPE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1512877,
+        "file": "data/kline/okx/swap/5m/HYPE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4638566,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ICP",
-        "file": "data/kline/okx/swap/5m/ICP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1339235,
+        "file": "data/kline/okx/swap/5m/ICP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4154851,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "IMX",
-        "file": "data/kline/okx/swap/5m/IMX_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1180569,
+        "file": "data/kline/okx/swap/5m/IMX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3834133,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "INFQ",
-        "file": "data/kline/okx/swap/5m/INFQ_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 609373,
+        "file": "data/kline/okx/swap/5m/INFQ_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 621679,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 36693,
-          "complete_15m_bars": 12231
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 37426,
+          "complete_15m_bars": 12475
         }
       },
       {
         "symbol": "INIT",
-        "file": "data/kline/okx/swap/5m/INIT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1237538,
+        "file": "data/kline/okx/swap/5m/INIT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3648013,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 151735,
+          "complete_15m_bars": 50578
         }
       },
       {
         "symbol": "INJ",
-        "file": "data/kline/okx/swap/5m/INJ_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1352565,
+        "file": "data/kline/okx/swap/5m/INJ_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4129953,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "IOST",
-        "file": "data/kline/okx/swap/5m/IOST_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1137548,
+        "file": "data/kline/okx/swap/5m/IOST_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3385032,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "IOTA",
-        "file": "data/kline/okx/swap/5m/IOTA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1270781,
+        "file": "data/kline/okx/swap/5m/IOTA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3633004,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "IRYS",
-        "file": "data/kline/okx/swap/5m/IRYS_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 737606,
+        "file": "data/kline/okx/swap/5m/IRYS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 752990,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 36381,
-          "complete_15m_bars": 12127
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 37114,
+          "complete_15m_bars": 12371
         }
       },
       {
         "symbol": "JELLYJELLY",
-        "file": "data/kline/okx/swap/5m/JELLYJELLY_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1178540,
+        "file": "data/kline/okx/swap/5m/JELLYJELLY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3822522,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "JTO",
-        "file": "data/kline/okx/swap/5m/JTO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1392748,
+        "file": "data/kline/okx/swap/5m/JTO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3877143,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "JUP",
-        "file": "data/kline/okx/swap/5m/JUP_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1179516,
+        "file": "data/kline/okx/swap/5m/JUP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3692390,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "KAITO",
-        "file": "data/kline/okx/swap/5m/KAITO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1365152,
+        "file": "data/kline/okx/swap/5m/KAITO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4217190,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "KAT",
-        "file": "data/kline/okx/swap/5m/KAT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1323272,
+        "file": "data/kline/okx/swap/5m/KAT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1543561,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 61879,
+          "complete_15m_bars": 20626
         }
       },
       {
         "symbol": "KGEN",
-        "file": "data/kline/okx/swap/5m/KGEN_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1082397,
+        "file": "data/kline/okx/swap/5m/KGEN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2383816,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 100843,
+          "complete_15m_bars": 33614
         }
       },
       {
         "symbol": "KITE",
-        "file": "data/kline/okx/swap/5m/KITE_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1244204,
+        "file": "data/kline/okx/swap/5m/KITE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1595569,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 50304,
-          "complete_15m_bars": 16768
+          "incomplete_15m_buckets": 2,
+          "confirmed_5m_rows": 62505,
+          "complete_15m_bars": 20834
         }
       },
       {
         "symbol": "KMNO",
-        "file": "data/kline/okx/swap/5m/KMNO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1091564,
+        "file": "data/kline/okx/swap/5m/KMNO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3211737,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 141463,
+          "complete_15m_bars": 47154
         }
       },
       {
         "symbol": "KSM",
-        "file": "data/kline/okx/swap/5m/KSM_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1210682,
+        "file": "data/kline/okx/swap/5m/KSM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3549194,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "LA",
-        "file": "data/kline/okx/swap/5m/LA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1249925,
+        "file": "data/kline/okx/swap/5m/LA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3251791,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 137353,
+          "complete_15m_bars": 45784
         }
       },
       {
         "symbol": "LAB",
-        "file": "data/kline/okx/swap/5m/LAB_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1508441,
+        "file": "data/kline/okx/swap/5m/LAB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2701750,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 96721,
+          "complete_15m_bars": 32240
         }
       },
       {
         "symbol": "LAYER",
-        "file": "data/kline/okx/swap/5m/LAYER_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1359517,
+        "file": "data/kline/okx/swap/5m/LAYER_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4067457,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "LDO",
-        "file": "data/kline/okx/swap/5m/LDO_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1309034,
+        "file": "data/kline/okx/swap/5m/LDO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4133106,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "LIGHT",
-        "file": "data/kline/okx/swap/5m/LIGHT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1222560,
+        "file": "data/kline/okx/swap/5m/LIGHT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2033308,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 83809,
+          "complete_15m_bars": 27936
         }
       },
       {
         "symbol": "LINEA",
-        "file": "data/kline/okx/swap/5m/LINEA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1232375,
+        "file": "data/kline/okx/swap/5m/LINEA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2755454,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 114265,
+          "complete_15m_bars": 38088
         }
       },
       {
         "symbol": "LINK",
-        "file": "data/kline/okx/swap/5m/LINK_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1409314,
+        "file": "data/kline/okx/swap/5m/LINK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4351071,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "LIT",
-        "file": "data/kline/okx/swap/5m/LIT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1509527,
+        "file": "data/kline/okx/swap/5m/LIT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2204980,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 81559,
+          "complete_15m_bars": 27186
         }
       },
       {
         "symbol": "LPT",
-        "file": "data/kline/okx/swap/5m/LPT_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1133452,
+        "file": "data/kline/okx/swap/5m/LPT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3770571,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "LQTY",
-        "file": "data/kline/okx/swap/5m/LQTY_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1113043,
+        "file": "data/kline/okx/swap/5m/LQTY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3735444,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "LTC",
-        "file": "data/kline/okx/swap/5m/LTC_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1235508,
+        "file": "data/kline/okx/swap/5m/LTC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3934459,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "LUNA",
-        "file": "data/kline/okx/swap/5m/LUNA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1338591,
+        "file": "data/kline/okx/swap/5m/LUNA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3947443,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MAGIC",
-        "file": "data/kline/okx/swap/5m/MAGIC_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1321427,
+        "file": "data/kline/okx/swap/5m/MAGIC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4296389,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MANA",
-        "file": "data/kline/okx/swap/5m/MANA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1295372,
+        "file": "data/kline/okx/swap/5m/MANA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3680318,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MASK",
-        "file": "data/kline/okx/swap/5m/MASK_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1226861,
+        "file": "data/kline/okx/swap/5m/MASK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3668310,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ME",
-        "file": "data/kline/okx/swap/5m/ME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1368501,
+        "file": "data/kline/okx/swap/5m/ME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3947949,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MEGA",
-        "file": "data/kline/okx/swap/5m/MEGA_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1106879,
+        "file": "data/kline/okx/swap/5m/MEGA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1127206,
         "quality": {
-          "unconfirmed_rows": 1,
-          "confirmed_5m_rows": 44148,
-          "complete_15m_bars": 14716
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 44881,
+          "complete_15m_bars": 14960
         }
       },
       {
         "symbol": "MEME",
-        "file": "data/kline/okx/swap/5m/MEME_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1367107,
+        "file": "data/kline/okx/swap/5m/MEME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4025754,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MERL",
-        "file": "data/kline/okx/swap/5m/MERL_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1349110,
+        "file": "data/kline/okx/swap/5m/MERL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4416073,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MET",
-        "file": "data/kline/okx/swap/5m/MET_USDT_SWAP_5m_20260331T065300Z_20260930T190216Z.jsonl.gz",
-        "bytes": 1221476,
+        "file": "data/kline/okx/swap/5m/MET_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2472126,
         "quality": {
-          "unconfirmed_rows": 1,
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 52849,
-          "complete_15m_bars": 17616
+          "confirmed_5m_rows": 103102,
+          "complete_15m_bars": 34367
         }
       },
       {
         "symbol": "METIS",
-        "file": "data/kline/okx/swap/5m/METIS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1148739,
+        "file": "data/kline/okx/swap/5m/METIS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3516921,
         "quality": {
-          "unconfirmed_rows": 1,
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52199,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MEW",
-        "file": "data/kline/okx/swap/5m/MEW_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1227665,
+        "file": "data/kline/okx/swap/5m/MEW_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3757574,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MINA",
-        "file": "data/kline/okx/swap/5m/MINA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1321205,
+        "file": "data/kline/okx/swap/5m/MINA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3858463,
         "quality": {
-          "unconfirmed_rows": 1,
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52199,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MMT",
-        "file": "data/kline/okx/swap/5m/MMT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1138956,
+        "file": "data/kline/okx/swap/5m/MMT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2141768,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 95851,
+          "complete_15m_bars": 31950
         }
       },
       {
         "symbol": "MON",
-        "file": "data/kline/okx/swap/5m/MON_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1282190,
+        "file": "data/kline/okx/swap/5m/MON_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2594587,
         "quality": {
-          "unconfirmed_rows": 1,
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52199,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 103105,
+          "complete_15m_bars": 34368
         }
       },
       {
         "symbol": "MOODENG",
-        "file": "data/kline/okx/swap/5m/MOODENG_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1297097,
+        "file": "data/kline/okx/swap/5m/MOODENG_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4239866,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MORPHO",
-        "file": "data/kline/okx/swap/5m/MORPHO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1311120,
+        "file": "data/kline/okx/swap/5m/MORPHO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4141956,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MOVE",
-        "file": "data/kline/okx/swap/5m/MOVE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1233968,
+        "file": "data/kline/okx/swap/5m/MOVE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4029694,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "MUBARAK",
-        "file": "data/kline/okx/swap/5m/MUBARAK_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1209647,
+        "file": "data/kline/okx/swap/5m/MUBARAK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3207416,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 140227,
+          "complete_15m_bars": 46742
         }
       },
       {
         "symbol": "NEAR",
-        "file": "data/kline/okx/swap/5m/NEAR_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1259016,
+        "file": "data/kline/okx/swap/5m/NEAR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3831245,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "NEIRO",
-        "file": "data/kline/okx/swap/5m/NEIRO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1410492,
+        "file": "data/kline/okx/swap/5m/NEIRO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4134247,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "NEO",
-        "file": "data/kline/okx/swap/5m/NEO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1023907,
+        "file": "data/kline/okx/swap/5m/NEO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3475827,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "NES",
-        "file": "data/kline/okx/swap/5m/NES_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 607667,
+        "file": "data/kline/okx/swap/5m/NES_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 632245,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 27641,
-          "complete_15m_bars": 9213
+          "confirmed_5m_rows": 29023,
+          "complete_15m_bars": 9674
         }
       },
       {
         "symbol": "NIGHT",
-        "file": "data/kline/okx/swap/5m/NIGHT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1349853,
+        "file": "data/kline/okx/swap/5m/NIGHT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2346173,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 85783,
+          "complete_15m_bars": 28594
         }
       },
       {
         "symbol": "NMR",
-        "file": "data/kline/okx/swap/5m/NMR_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1219225,
+        "file": "data/kline/okx/swap/5m/NMR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3935223,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "NOT",
-        "file": "data/kline/okx/swap/5m/NOT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1348987,
+        "file": "data/kline/okx/swap/5m/NOT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4024209,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "O",
-        "file": "data/kline/okx/swap/5m/O_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 723801,
+        "file": "data/kline/okx/swap/5m/O_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 755958,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 29621,
-          "complete_15m_bars": 9873
+          "confirmed_5m_rows": 31003,
+          "complete_15m_bars": 10334
         }
       },
       {
         "symbol": "OFC",
-        "file": "data/kline/okx/swap/5m/OFC_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1226230,
+        "file": "data/kline/okx/swap/5m/OFC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1258904,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 49559,
-          "complete_15m_bars": 16519
+          "confirmed_5m_rows": 50941,
+          "complete_15m_bars": 16980
         }
       },
       {
         "symbol": "OKB",
-        "file": "data/kline/okx/swap/5m/OKB_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1312560,
+        "file": "data/kline/okx/swap/5m/OKB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2950428,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 113545,
+          "complete_15m_bars": 37848
         }
       },
       {
         "symbol": "OL",
-        "file": "data/kline/okx/swap/5m/OL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1225084,
+        "file": "data/kline/okx/swap/5m/OL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3777935,
         "quality": {
           "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "confirmed_5m_rows": 156458,
+          "complete_15m_bars": 52152
         }
       },
       {
         "symbol": "ONDO",
-        "file": "data/kline/okx/swap/5m/ONDO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1277862,
+        "file": "data/kline/okx/swap/5m/ONDO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3937004,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ONE",
-        "file": "data/kline/okx/swap/5m/ONE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1180661,
+        "file": "data/kline/okx/swap/5m/ONE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3697916,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ONT",
-        "file": "data/kline/okx/swap/5m/ONT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1281517,
+        "file": "data/kline/okx/swap/5m/ONT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3677469,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "OP",
-        "file": "data/kline/okx/swap/5m/OP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1369672,
+        "file": "data/kline/okx/swap/5m/OP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4173828,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "OPG",
-        "file": "data/kline/okx/swap/5m/OPG_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1090534,
+        "file": "data/kline/okx/swap/5m/OPG_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1124726,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 45551,
-          "complete_15m_bars": 15183
+          "confirmed_5m_rows": 46933,
+          "complete_15m_bars": 15644
         }
       },
       {
         "symbol": "OPN",
-        "file": "data/kline/okx/swap/5m/OPN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1293318,
+        "file": "data/kline/okx/swap/5m/OPN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1594028,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 63889,
+          "complete_15m_bars": 21296
         }
       },
       {
         "symbol": "ORDER",
-        "file": "data/kline/okx/swap/5m/ORDER_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1155341,
+        "file": "data/kline/okx/swap/5m/ORDER_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2401771,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 105898,
+          "complete_15m_bars": 35299
         }
       },
       {
         "symbol": "ORDI",
-        "file": "data/kline/okx/swap/5m/ORDI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1339209,
+        "file": "data/kline/okx/swap/5m/ORDI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4152929,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "PARTI",
-        "file": "data/kline/okx/swap/5m/PARTI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1277701,
+        "file": "data/kline/okx/swap/5m/PARTI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3909132,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "PENDLE",
-        "file": "data/kline/okx/swap/5m/PENDLE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1123878,
+        "file": "data/kline/okx/swap/5m/PENDLE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2467156,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 109729,
+          "complete_15m_bars": 36576
         }
       },
       {
         "symbol": "PENG",
-        "file": "data/kline/okx/swap/5m/PENG_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 363400,
+        "file": "data/kline/okx/swap/5m/PENG_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 385383,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 23081,
-          "complete_15m_bars": 7693
+          "confirmed_5m_rows": 24463,
+          "complete_15m_bars": 8154
         }
       },
       {
         "symbol": "PENGU",
-        "file": "data/kline/okx/swap/5m/PENGU_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1407523,
+        "file": "data/kline/okx/swap/5m/PENGU_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4454190,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "PEOPLE",
-        "file": "data/kline/okx/swap/5m/PEOPLE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1347943,
+        "file": "data/kline/okx/swap/5m/PEOPLE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3907391,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "PEPE",
-        "file": "data/kline/okx/swap/5m/PEPE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1314557,
+        "file": "data/kline/okx/swap/5m/PEPE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4216043,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "PI",
-        "file": "data/kline/okx/swap/5m/PI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1271738,
+        "file": "data/kline/okx/swap/5m/PI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3935732,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "PIEVERSE",
-        "file": "data/kline/okx/swap/5m/PIEVERSE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1298072,
+        "file": "data/kline/okx/swap/5m/PIEVERSE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2330874,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 92503,
+          "complete_15m_bars": 30834
         }
       },
       {
         "symbol": "PIPPIN",
-        "file": "data/kline/okx/swap/5m/PIPPIN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1280182,
+        "file": "data/kline/okx/swap/5m/PIPPIN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3134093,
         "quality": {
           "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "confirmed_5m_rows": 118382,
+          "complete_15m_bars": 39460
         }
       },
       {
         "symbol": "PLUME",
-        "file": "data/kline/okx/swap/5m/PLUME_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1445988,
+        "file": "data/kline/okx/swap/5m/PLUME_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3838641,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 147751,
+          "complete_15m_bars": 49250
         }
       },
       {
         "symbol": "PNUT",
-        "file": "data/kline/okx/swap/5m/PNUT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1308109,
+        "file": "data/kline/okx/swap/5m/PNUT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3951160,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "POL",
-        "file": "data/kline/okx/swap/5m/POL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1327420,
+        "file": "data/kline/okx/swap/5m/POL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3753166,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "PONS",
-        "file": "data/kline/okx/swap/5m/PONS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 188324,
+        "file": "data/kline/okx/swap/5m/PONS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 225104,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 6743,
-          "complete_15m_bars": 2247
+          "confirmed_5m_rows": 8125,
+          "complete_15m_bars": 2708
         }
       },
       {
         "symbol": "POPCAT",
-        "file": "data/kline/okx/swap/5m/POPCAT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1256378,
+        "file": "data/kline/okx/swap/5m/POPCAT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3820950,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "PROS",
-        "file": "data/kline/okx/swap/5m/PROS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1081648,
+        "file": "data/kline/okx/swap/5m/PROS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1117033,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 44051,
-          "complete_15m_bars": 14683
+          "confirmed_5m_rows": 45433,
+          "complete_15m_bars": 15144
         }
       },
       {
         "symbol": "PROVE",
-        "file": "data/kline/okx/swap/5m/PROVE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1113524,
+        "file": "data/kline/okx/swap/5m/PROVE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2282858,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 101047,
+          "complete_15m_bars": 33682
         }
       },
       {
         "symbol": "PUMP",
-        "file": "data/kline/okx/swap/5m/PUMP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1285492,
+        "file": "data/kline/okx/swap/5m/PUMP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3291867,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 128335,
+          "complete_15m_bars": 42778
         }
       },
       {
         "symbol": "PURR",
-        "file": "data/kline/okx/swap/5m/PURR_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 209482,
+        "file": "data/kline/okx/swap/5m/PURR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 234978,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 10988,
-          "complete_15m_bars": 3662
+          "confirmed_5m_rows": 12370,
+          "complete_15m_bars": 4123
         }
       },
       {
         "symbol": "PYTH",
-        "file": "data/kline/okx/swap/5m/PYTH_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1302934,
+        "file": "data/kline/okx/swap/5m/PYTH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3985937,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "QNT",
-        "file": "data/kline/okx/swap/5m/QNT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 661907,
+        "file": "data/kline/okx/swap/5m/QNT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 691345,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 33149,
-          "complete_15m_bars": 11049
+          "confirmed_5m_rows": 34531,
+          "complete_15m_bars": 11510
         }
       },
       {
         "symbol": "QTUM",
-        "file": "data/kline/okx/swap/5m/QTUM_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1210223,
+        "file": "data/kline/okx/swap/5m/QTUM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3498092,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "RAM",
-        "file": "data/kline/okx/swap/5m/RAM_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 505042,
+        "file": "data/kline/okx/swap/5m/RAM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 532749,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 25382,
-          "complete_15m_bars": 8460
+          "confirmed_5m_rows": 26764,
+          "complete_15m_bars": 8921
         }
       },
       {
         "symbol": "RAVE",
-        "file": "data/kline/okx/swap/5m/RAVE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1452304,
+        "file": "data/kline/okx/swap/5m/RAVE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2375589,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 84097,
+          "complete_15m_bars": 28032
         }
       },
       {
         "symbol": "RAY",
-        "file": "data/kline/okx/swap/5m/RAY_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1292121,
+        "file": "data/kline/okx/swap/5m/RAY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4169052,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "RE",
-        "file": "data/kline/okx/swap/5m/RE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 882550,
+        "file": "data/kline/okx/swap/5m/RE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 921369,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 29693,
-          "complete_15m_bars": 9897
+          "confirmed_5m_rows": 31075,
+          "complete_15m_bars": 10358
         }
       },
       {
         "symbol": "RECALL",
-        "file": "data/kline/okx/swap/5m/RECALL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1208067,
+        "file": "data/kline/okx/swap/5m/RECALL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2276401,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 97318,
+          "complete_15m_bars": 32439
         }
       },
       {
         "symbol": "RENDER",
-        "file": "data/kline/okx/swap/5m/RENDER_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1116512,
+        "file": "data/kline/okx/swap/5m/RENDER_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3580519,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "RESOLV",
-        "file": "data/kline/okx/swap/5m/RESOLV_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1261798,
+        "file": "data/kline/okx/swap/5m/RESOLV_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3495383,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 138163,
+          "complete_15m_bars": 46054
         }
       },
       {
         "symbol": "RIVER",
-        "file": "data/kline/okx/swap/5m/RIVER_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1338590,
+        "file": "data/kline/okx/swap/5m/RIVER_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2100575,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 76909,
+          "complete_15m_bars": 25636
         }
       },
       {
         "symbol": "RLS",
-        "file": "data/kline/okx/swap/5m/RLS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1225845,
+        "file": "data/kline/okx/swap/5m/RLS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2122051,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 87754,
+          "complete_15m_bars": 29251
         }
       },
       {
         "symbol": "ROBO",
-        "file": "data/kline/okx/swap/5m/ROBO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1181807,
+        "file": "data/kline/okx/swap/5m/ROBO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1450817,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 62695,
+          "complete_15m_bars": 20898
         }
       },
       {
         "symbol": "RSR",
-        "file": "data/kline/okx/swap/5m/RSR_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1114634,
+        "file": "data/kline/okx/swap/5m/RSR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3767712,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "RVN",
-        "file": "data/kline/okx/swap/5m/RVN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1256675,
+        "file": "data/kline/okx/swap/5m/RVN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3818981,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "S",
-        "file": "data/kline/okx/swap/5m/S_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1228059,
+        "file": "data/kline/okx/swap/5m/S_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3766461,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "SAHARA",
-        "file": "data/kline/okx/swap/5m/SAHARA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1322015,
+        "file": "data/kline/okx/swap/5m/SAHARA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3410533,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 133579,
+          "complete_15m_bars": 44526
         }
       },
       {
         "symbol": "SAND",
-        "file": "data/kline/okx/swap/5m/SAND_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1290264,
+        "file": "data/kline/okx/swap/5m/SAND_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3736109,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "SAPIEN",
-        "file": "data/kline/okx/swap/5m/SAPIEN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1223756,
+        "file": "data/kline/okx/swap/5m/SAPIEN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2209045,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 95284,
+          "complete_15m_bars": 31761
         }
       },
       {
         "symbol": "SATS",
-        "file": "data/kline/okx/swap/5m/SATS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1275552,
+        "file": "data/kline/okx/swap/5m/SATS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3956372,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "SEI",
-        "file": "data/kline/okx/swap/5m/SEI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1290733,
+        "file": "data/kline/okx/swap/5m/SEI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2216175,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 93031,
+          "complete_15m_bars": 31010
         }
       },
       {
         "symbol": "SENT",
-        "file": "data/kline/okx/swap/5m/SENT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1110412,
+        "file": "data/kline/okx/swap/5m/SENT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2068240,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 92941,
+          "complete_15m_bars": 30980
         }
       },
       {
         "symbol": "SHELL",
-        "file": "data/kline/okx/swap/5m/SHELL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1147984,
+        "file": "data/kline/okx/swap/5m/SHELL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3599418,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "SHIB",
-        "file": "data/kline/okx/swap/5m/SHIB_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1335579,
+        "file": "data/kline/okx/swap/5m/SHIB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4243725,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "SIGN",
-        "file": "data/kline/okx/swap/5m/SIGN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1185323,
+        "file": "data/kline/okx/swap/5m/SIGN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3486333,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 150583,
+          "complete_15m_bars": 50194
         }
       },
       {
         "symbol": "SKY",
-        "file": "data/kline/okx/swap/5m/SKY_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1191170,
+        "file": "data/kline/okx/swap/5m/SKY_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2604520,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 111415,
+          "complete_15m_bars": 37138
         }
       },
       {
         "symbol": "SLX",
-        "file": "data/kline/okx/swap/5m/SLX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 878212,
+        "file": "data/kline/okx/swap/5m/SLX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 913419,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 34361,
-          "complete_15m_bars": 11453
+          "confirmed_5m_rows": 35743,
+          "complete_15m_bars": 11914
         }
       },
       {
         "symbol": "SNX",
-        "file": "data/kline/okx/swap/5m/SNX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1190897,
+        "file": "data/kline/okx/swap/5m/SNX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3939640,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "SNXX",
-        "file": "data/kline/okx/swap/5m/SNXX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 511583,
+        "file": "data/kline/okx/swap/5m/SNXX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 543399,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 21899,
-          "complete_15m_bars": 7299
+          "confirmed_5m_rows": 23281,
+          "complete_15m_bars": 7760
         }
       },
       {
         "symbol": "SOL",
-        "file": "data/kline/okx/swap/5m/SOL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1463425,
+        "file": "data/kline/okx/swap/5m/SOL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4620246,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "SOON",
-        "file": "data/kline/okx/swap/5m/SOON_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1204635,
+        "file": "data/kline/okx/swap/5m/SOON_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3674398,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 143383,
+          "complete_15m_bars": 47794
         }
       },
       {
         "symbol": "SOPH",
-        "file": "data/kline/okx/swap/5m/SOPH_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1248192,
+        "file": "data/kline/okx/swap/5m/SOPH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3347206,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 141919,
+          "complete_15m_bars": 47306
         }
       },
       {
         "symbol": "SPACE",
-        "file": "data/kline/okx/swap/5m/SPACE_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1341978,
+        "file": "data/kline/okx/swap/5m/SPACE_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1922168,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 72805,
+          "complete_15m_bars": 24268
         }
       },
       {
         "symbol": "SPK",
-        "file": "data/kline/okx/swap/5m/SPK_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1122569,
+        "file": "data/kline/okx/swap/5m/SPK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3154486,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 136195,
+          "complete_15m_bars": 45398
         }
       },
       {
         "symbol": "SPX",
-        "file": "data/kline/okx/swap/5m/SPX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1266350,
+        "file": "data/kline/okx/swap/5m/SPX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3262650,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 127621,
+          "complete_15m_bars": 42540
         }
       },
       {
         "symbol": "SSV",
-        "file": "data/kline/okx/swap/5m/SSV_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1156661,
+        "file": "data/kline/okx/swap/5m/SSV_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3861253,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "STRC",
-        "file": "data/kline/okx/swap/5m/STRC_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 358351,
+        "file": "data/kline/okx/swap/5m/STRC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 381418,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 26249,
-          "complete_15m_bars": 8749
+          "confirmed_5m_rows": 27631,
+          "complete_15m_bars": 9210
         }
       },
       {
         "symbol": "STRK",
-        "file": "data/kline/okx/swap/5m/STRK_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1354885,
+        "file": "data/kline/okx/swap/5m/STRK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3996999,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "STX",
-        "file": "data/kline/okx/swap/5m/STX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1185856,
+        "file": "data/kline/okx/swap/5m/STX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3852803,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "SUI",
-        "file": "data/kline/okx/swap/5m/SUI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1424030,
+        "file": "data/kline/okx/swap/5m/SUI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4538065,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "SUSHI",
-        "file": "data/kline/okx/swap/5m/SUSHI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1171629,
+        "file": "data/kline/okx/swap/5m/SUSHI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3843051,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "SYRUP",
-        "file": "data/kline/okx/swap/5m/SYRUP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1052553,
+        "file": "data/kline/okx/swap/5m/SYRUP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2898059,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 131635,
+          "complete_15m_bars": 43878
         }
       },
       {
         "symbol": "TAO",
-        "file": "data/kline/okx/swap/5m/TAO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1219634,
+        "file": "data/kline/okx/swap/5m/TAO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3778476,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "THETA",
-        "file": "data/kline/okx/swap/5m/THETA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1136281,
+        "file": "data/kline/okx/swap/5m/THETA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3764484,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "TIA",
-        "file": "data/kline/okx/swap/5m/TIA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1304537,
+        "file": "data/kline/okx/swap/5m/TIA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3875339,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "TRB",
-        "file": "data/kline/okx/swap/5m/TRB_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1073682,
+        "file": "data/kline/okx/swap/5m/TRB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3496229,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "TRIA",
-        "file": "data/kline/okx/swap/5m/TRIA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1305085,
+        "file": "data/kline/okx/swap/5m/TRIA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1742503,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 69127,
+          "complete_15m_bars": 23042
         }
       },
       {
         "symbol": "TRUMP",
-        "file": "data/kline/okx/swap/5m/TRUMP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1289136,
+        "file": "data/kline/okx/swap/5m/TRUMP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4135041,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "TRUST",
-        "file": "data/kline/okx/swap/5m/TRUST_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1171337,
+        "file": "data/kline/okx/swap/5m/TRUST_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2160481,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 95575,
+          "complete_15m_bars": 31858
         }
       },
       {
         "symbol": "TRUTH",
-        "file": "data/kline/okx/swap/5m/TRUTH_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1275740,
+        "file": "data/kline/okx/swap/5m/TRUTH_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2270481,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 88951,
+          "complete_15m_bars": 29650
         }
       },
       {
         "symbol": "TRX",
-        "file": "data/kline/okx/swap/5m/TRX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1268039,
+        "file": "data/kline/okx/swap/5m/TRX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4154414,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "TURBO",
-        "file": "data/kline/okx/swap/5m/TURBO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1348636,
+        "file": "data/kline/okx/swap/5m/TURBO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3942426,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "UB",
-        "file": "data/kline/okx/swap/5m/UB_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1216731,
+        "file": "data/kline/okx/swap/5m/UB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1252210,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 44057,
-          "complete_15m_bars": 14685
+          "confirmed_5m_rows": 45439,
+          "complete_15m_bars": 15146
         }
       },
       {
         "symbol": "UMA",
-        "file": "data/kline/okx/swap/5m/UMA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1223919,
+        "file": "data/kline/okx/swap/5m/UMA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3709042,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "UNI",
-        "file": "data/kline/okx/swap/5m/UNI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1278646,
+        "file": "data/kline/okx/swap/5m/UNI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4005327,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "UP",
-        "file": "data/kline/okx/swap/5m/UP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1104849,
+        "file": "data/kline/okx/swap/5m/UP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1138335,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 49847,
-          "complete_15m_bars": 16615
+          "confirmed_5m_rows": 51229,
+          "complete_15m_bars": 17076
         }
       },
       {
         "symbol": "USAR",
-        "file": "data/kline/okx/swap/5m/USAR_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 757869,
+        "file": "data/kline/okx/swap/5m/USAR_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 786700,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 44339,
-          "complete_15m_bars": 14779
+          "confirmed_5m_rows": 45721,
+          "complete_15m_bars": 15240
         }
       },
       {
         "symbol": "USELESS",
-        "file": "data/kline/okx/swap/5m/USELESS_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1420008,
+        "file": "data/kline/okx/swap/5m/USELESS_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3329354,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 125257,
+          "complete_15m_bars": 41752
         }
       },
       {
         "symbol": "VANA",
-        "file": "data/kline/okx/swap/5m/VANA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1118772,
+        "file": "data/kline/okx/swap/5m/VANA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3597039,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "VIRTUAL",
-        "file": "data/kline/okx/swap/5m/VIRTUAL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1351788,
+        "file": "data/kline/okx/swap/5m/VIRTUAL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4289623,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "VVV",
-        "file": "data/kline/okx/swap/5m/VVV_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 682295,
+        "file": "data/kline/okx/swap/5m/VVV_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 721416,
         "quality": {
           "incomplete_15m_buckets": 1,
-          "confirmed_5m_rows": 25139,
-          "complete_15m_bars": 8379
+          "confirmed_5m_rows": 26521,
+          "complete_15m_bars": 8840
         }
       },
       {
         "symbol": "W",
-        "file": "data/kline/okx/swap/5m/W_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1390633,
+        "file": "data/kline/okx/swap/5m/W_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4278396,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "WAL",
-        "file": "data/kline/okx/swap/5m/WAL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1167162,
+        "file": "data/kline/okx/swap/5m/WAL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3247103,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 147757,
+          "complete_15m_bars": 49252
         }
       },
       {
         "symbol": "WCT",
-        "file": "data/kline/okx/swap/5m/WCT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1241634,
+        "file": "data/kline/okx/swap/5m/WCT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3730225,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 154327,
+          "complete_15m_bars": 51442
         }
       },
       {
         "symbol": "WET",
-        "file": "data/kline/okx/swap/5m/WET_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1281455,
+        "file": "data/kline/okx/swap/5m/WET_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2132533,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 85729,
+          "complete_15m_bars": 28576
         }
       },
       {
         "symbol": "WIF",
-        "file": "data/kline/okx/swap/5m/WIF_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1243175,
+        "file": "data/kline/okx/swap/5m/WIF_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4132288,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "WLD",
-        "file": "data/kline/okx/swap/5m/WLD_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1408200,
+        "file": "data/kline/okx/swap/5m/WLD_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4359927,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "WLFI",
-        "file": "data/kline/okx/swap/5m/WLFI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1335511,
+        "file": "data/kline/okx/swap/5m/WLFI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2891247,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 116869,
+          "complete_15m_bars": 38956
         }
       },
       {
         "symbol": "WOO",
-        "file": "data/kline/okx/swap/5m/WOO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1064879,
+        "file": "data/kline/okx/swap/5m/WOO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3670756,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "XLM",
-        "file": "data/kline/okx/swap/5m/XLM_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1360991,
+        "file": "data/kline/okx/swap/5m/XLM_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4345230,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "XPL",
-        "file": "data/kline/okx/swap/5m/XPL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1429633,
+        "file": "data/kline/okx/swap/5m/XPL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3103432,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 115453,
+          "complete_15m_bars": 38484
         }
       },
       {
         "symbol": "XRP",
-        "file": "data/kline/okx/swap/5m/XRP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1361247,
+        "file": "data/kline/okx/swap/5m/XRP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 4500111,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "XTZ",
-        "file": "data/kline/okx/swap/5m/XTZ_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1158908,
+        "file": "data/kline/okx/swap/5m/XTZ_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3804864,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "YB",
-        "file": "data/kline/okx/swap/5m/YB_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1380790,
+        "file": "data/kline/okx/swap/5m/YB_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2636125,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 102541,
+          "complete_15m_bars": 34180
         }
       },
       {
         "symbol": "YFI",
-        "file": "data/kline/okx/swap/5m/YFI_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1120214,
+        "file": "data/kline/okx/swap/5m/YFI_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3674695,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "YGG",
-        "file": "data/kline/okx/swap/5m/YGG_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1294366,
+        "file": "data/kline/okx/swap/5m/YGG_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3951272,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ZAMA",
-        "file": "data/kline/okx/swap/5m/ZAMA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1325616,
+        "file": "data/kline/okx/swap/5m/ZAMA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1962110,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 76819,
+          "complete_15m_bars": 25606
         }
       },
       {
         "symbol": "ZBT",
-        "file": "data/kline/okx/swap/5m/ZBT_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1461828,
+        "file": "data/kline/okx/swap/5m/ZBT_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2716223,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 101047,
+          "complete_15m_bars": 33682
         }
       },
       {
         "symbol": "ZEC",
-        "file": "data/kline/okx/swap/5m/ZEC_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1630248,
+        "file": "data/kline/okx/swap/5m/ZEC_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2960335,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 95386,
+          "complete_15m_bars": 31795
         }
       },
       {
         "symbol": "ZEN",
-        "file": "data/kline/okx/swap/5m/ZEN_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1267244,
+        "file": "data/kline/okx/swap/5m/ZEN_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2370187,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 96217,
+          "complete_15m_bars": 32072
         }
       },
       {
         "symbol": "ZETA",
-        "file": "data/kline/okx/swap/5m/ZETA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1209166,
+        "file": "data/kline/okx/swap/5m/ZETA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3595487,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ZIL",
-        "file": "data/kline/okx/swap/5m/ZIL_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1204446,
+        "file": "data/kline/okx/swap/5m/ZIL_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3581473,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ZK",
-        "file": "data/kline/okx/swap/5m/ZK_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1256245,
+        "file": "data/kline/okx/swap/5m/ZK_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3960093,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ZKP",
-        "file": "data/kline/okx/swap/5m/ZKP_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1238449,
+        "file": "data/kline/okx/swap/5m/ZKP_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 1863178,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 77404,
+          "complete_15m_bars": 25801
         }
       },
       {
         "symbol": "ZORA",
-        "file": "data/kline/okx/swap/5m/ZORA_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1281926,
+        "file": "data/kline/okx/swap/5m/ZORA_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 2565065,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 103063,
+          "complete_15m_bars": 34354
         }
       },
       {
         "symbol": "ZRO",
-        "file": "data/kline/okx/swap/5m/ZRO_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1283268,
+        "file": "data/kline/okx/swap/5m/ZRO_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3700162,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       },
       {
         "symbol": "ZRX",
-        "file": "data/kline/okx/swap/5m/ZRX_USDT_SWAP_5m_20260331T065300Z_20260928T125358Z.jsonl.gz",
-        "bytes": 1251524,
+        "file": "data/kline/okx/swap/5m/ZRX_USDT_SWAP_5m_20250403T000000Z_20261003T080101Z.jsonl.gz",
+        "bytes": 3499893,
         "quality": {
-          "incomplete_15m_buckets": 2,
-          "confirmed_5m_rows": 52200,
-          "complete_15m_bars": 17399
+          "incomplete_15m_buckets": 1,
+          "confirmed_5m_rows": 157921,
+          "complete_15m_bars": 52640
         }
       }
     ]
   },
   "stages": {
-    "cached_pumps": 21,
-    "qualified_before_decline": 17,
+    "cached_pumps": 36,
+    "qualified_before_decline": 24,
     "decline_then_pump": 1,
     "pump_gain_threshold": 1,
     "touch_day_high": 1,
@@ -3227,7 +3117,7 @@
     "max_realized_drawdown_pct": 0.0,
     "conservative_adverse_drawdown_pct": 0.0,
     "leverage": 2.0,
-    "risk_per_trade_pct": 0.5,
+    "risk_per_trade_pct": 1.0,
     "skipped": {}
   },
   "by_month_utc": {},

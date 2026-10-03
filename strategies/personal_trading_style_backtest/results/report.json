@@ -1,0 +1,78 @@
+{
+  "strategy_id": "personal_trading_style_backtest",
+  "version": "0.2.0",
+  "selected_policy": "any_no_recent_24h_loss",
+  "selected_policy_metrics": {
+    "episodes": 334,
+    "wins": 258,
+    "losses": 76,
+    "win_rate": 0.772455,
+    "net_pnl": 4078.92181998,
+    "average_net_pnl": 12.21234078,
+    "median_net_pnl": 5.17699814,
+    "profit_factor": 1.21194895,
+    "max_drawdown": -7586.72589081
+  },
+  "selected_policy_walk_forward": [
+    {
+      "policy": "any_no_recent_24h_loss",
+      "split": "all",
+      "episodes": 334,
+      "wins": 258,
+      "losses": 76,
+      "win_rate": 0.772455,
+      "net_pnl": 4078.92181998,
+      "average_net_pnl": 12.21234078,
+      "median_net_pnl": 5.17699814,
+      "profit_factor": 1.21194895,
+      "max_drawdown": -7586.72589081
+    },
+    {
+      "policy": "any_no_recent_24h_loss",
+      "split": "train",
+      "episodes": 217,
+      "wins": 178,
+      "losses": 39,
+      "win_rate": 0.820276,
+      "net_pnl": 8207.52653556,
+      "average_net_pnl": 37.82270293,
+      "median_net_pnl": 3.80154691,
+      "profit_factor": 3.67676526,
+      "max_drawdown": -849.82799834
+    },
+    {
+      "policy": "any_no_recent_24h_loss",
+      "split": "validation",
+      "episodes": 56,
+      "wins": 36,
+      "losses": 20,
+      "win_rate": 0.642857,
+      "net_pnl": -6376.96924582,
+      "average_net_pnl": -113.87445082,
+      "median_net_pnl": 22.69540244,
+      "profit_factor": 0.45165927,
+      "max_drawdown": -7182.16094182
+    },
+    {
+      "policy": "any_no_recent_24h_loss",
+      "split": "test",
+      "episodes": 61,
+      "wins": 44,
+      "losses": 17,
+      "win_rate": 0.721311,
+      "net_pnl": 2248.36453024,
+      "average_net_pnl": 36.85843492,
+      "median_net_pnl": 48.36726694,
+      "profit_factor": 1.49424969,
+      "max_drawdown": -1713.7010574
+    }
+  ],
+  "policy_evaluation_file": "policy_evaluation.csv",
+  "style_metrics_file": "style_metrics.json",
+  "limitations": [
+    "OKX unified bills do not expose a reliable per-fill open/close flag in this export.",
+    "Episodes use zero realized PnL as an entry candidate and are approximate labels.",
+    "The policy comparison uses only entry-time direction and prior-symbol PnL; it is not an OHLC price backtest.",
+    "Transfers and manual margin movements are excluded from strategy PnL."
+  ]
+}

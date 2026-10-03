@@ -27,6 +27,9 @@ git diff --check
 - [`double_pump_exhaustion_short/`](double_pump_exhaustion_short/)：由 `extreme_wick_short` 的 `grid_0580` 固定出的日内翻倍动能衰竭确认做空正式规则；已接入运行时，按连接账号类型路由模拟或实盘，默认停用。
 - [`range_rejection_confirmation_short/`](range_rejection_confirmation_short/)：突破近期高点后出现大实体阴线、收盘回到 EMA20 附近，等待右侧确认再做空的研究候选；未接入运行时。
 - [`intraday_pump_retest_short/`](intraday_pump_retest_short/)：山寨日内涨幅超过 60% 后，高点回落再突涨并缩量收高做空研究候选；未接入运行时。
+- [`personal_trading_style_backtest/`](personal_trading_style_backtest/)：从 OKX 统一交易账单回放个人交易风格、验证入场前过滤条件的研究实验；未接入运行时。
+- [`personal_style_strategy_variants/`](personal_style_strategy_variants/)：将账单归纳出的冲高做空、扫顶、回踩多头和均值回归偏好拆成多分支，用全量 5 分钟行情批量回顾验证；未接入运行时。
+- [`liquid_crypto_trend_long/`](liquid_crypto_trend_long/)：在**下单时点**滚动 24h 报价成交额 ≥ 3000 万 USDT 的加密永续上做纯多头 1 小时趋势跟随（MA72 + 1% 滞回带 + 96 小时持仓上限 + 200% 波动率目标），以同池与全池买入持有篮子作为硬验收基准；未接入运行时。
 
 资产类别排除清单（主流币、稳定币、股票/ETF/指数/商品）的唯一真源是 [`sweep_reversal_short/config/universe.json`](sweep_reversal_short/config/universe.json) 的 `exclude`，`Sources/TradingDomain/StrategyUniverseRules.swift`、`research/live_signal.py` 和 `ema_3line_pullback/src/backtest.py` 都只是副本，由 `scripts/validate_strategy_sync.py` 逐一对齐。
 

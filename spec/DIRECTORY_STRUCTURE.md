@@ -63,7 +63,10 @@ spec/                               稳定的工程规范和接口约定
 | `strategies/extreme_wick_short/` | 山寨日内涨幅超过 100% 的 15m 动能衰竭做空 | 研究候选，未接入运行时 |
 | `strategies/double_pump_exhaustion_short/` | 从翻倍动能衰竭研究中固定出的正式核心规则 | 正式规则；已接入运行时，按账号类型路由模拟或实盘，默认停用 |
 | `strategies/intraday_pump_retest_short/` | 山寨日内涨幅超过 60% 后高点回落、二次突涨缩量做空 | 研究候选，未接入运行时 |
+| `strategies/personal_trading_style_backtest/` | OKX 统一账单回放、个人交易风格验证和候选策略筛选 | 研究候选，未接入运行时 |
+| `strategies/personal_style_strategy_variants/` | 将个人做单偏好拆成多空多分支并用全量行情回顾验证 | 研究候选，未接入运行时 |
 | `strategies/range_rejection_confirmation_short/` | 突破近期高点后的大实体阴线回落，确认跌破 EMA20 后做空 | 研究候选，未接入运行时 |
+| `strategies/liquid_crypto_trend_long/` | 逐时点 24h 报价成交额 ≥ 3000 万 USDT 的加密永续纯多头 1h 趋势跟随 | 研究候选，未接入运行时 |
 
 ## 迁移检查
 

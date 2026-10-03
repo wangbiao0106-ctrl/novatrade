@@ -1,0 +1,138 @@
+{
+  "strategy_id": "personal_trading_style_backtest",
+  "version": "0.2.0",
+  "status": "research_candidate",
+  "source_of_truth": "strategies/personal_trading_style_backtest/STRATEGY.md",
+  "name_zh": "个人交易风格回测实验",
+  "market": "OKX_UNIFIED_BILL_PERPETUAL_REPLAY",
+  "input": {
+    "format": "OKX unified bill history ZIP containing one UTF-8 BOM CSV",
+    "timezone": "UTC+8",
+    "bill_type": "永续合约",
+    "source_is_external": true,
+    "source_is_copied_to_repo": false
+  },
+  "inference": {
+    "entry_candidate": "zero realized PnL order group",
+    "short_entry_side": "卖出",
+    "long_entry_side": "买入",
+    "exit_candidate": "opposite side order group with non-zero realized PnL",
+    "ambiguous_opposite_zero_order": "end current candidate and start a new candidate",
+    "position_reconstruction": "approximate; do not treat as exact FIFO positions"
+  },
+  "walk_forward": {
+    "train_ratio": 0.6,
+    "validation_ratio": 0.2,
+    "minimum_train_episodes": 5,
+    "selection_metric": "train net PnL, then profit factor"
+  },
+  "candidate_policies": [
+    {
+      "name": "all_closed_episodes",
+      "direction": "any",
+      "selection_eligible": false,
+      "description": "All inferred closed episodes; descriptive baseline only"
+    },
+    {
+      "name": "short_only",
+      "direction": "short",
+      "description": "Keep the dominant sell-then-buy-back style"
+    },
+    {
+      "name": "short_no_recent_6h_loss",
+      "direction": "short",
+      "require_prior_6h_nonnegative": true,
+      "description": "Do not open a short when the same symbol lost in the prior six hours"
+    },
+    {
+      "name": "short_no_recent_24h_loss",
+      "direction": "short",
+      "require_prior_24h_nonnegative": true,
+      "description": "Do not open a short when the same symbol lost in the prior 24 hours"
+    },
+    {
+      "name": "long_only",
+      "direction": "long",
+      "description": "Directional comparison for the less frequent long style"
+    },
+    {
+      "name": "long_no_recent_6h_loss",
+      "direction": "long",
+      "require_prior_6h_nonnegative": true,
+      "description": "Keep long entries only when the same symbol had no recent six-hour loss"
+    },
+    {
+      "name": "long_no_recent_24h_loss",
+      "direction": "long",
+      "require_prior_24h_nonnegative": true,
+      "description": "Keep long entries only when the same symbol had no recent 24-hour loss"
+    },
+    {
+      "name": "any_no_recent_6h_loss",
+      "direction": "any",
+      "require_prior_6h_nonnegative": true,
+      "description": "Keep either direction only when the symbol had no recent six-hour loss"
+    },
+    {
+      "name": "any_no_recent_24h_loss",
+      "direction": "any",
+      "require_prior_24h_nonnegative": true,
+      "description": "Keep either direction only when the symbol had no recent 24-hour loss"
+    }
+  ],
+  "price_backtest": {
+    "timeframe_minutes": 5,
+    "entry_rule": "first confirmed candle whose start is strictly after the bill episode entry timestamp",
+    "atr_period": 72,
+    "lookback_6h_bars": 72,
+    "lookback_24h_bars": 288,
+    "stop_atr": 2.0,
+    "target_r": 1.0,
+    "max_hold_bars": 288,
+    "fee_rate_one_way": 0.0005,
+    "slippage_one_way": 0.0005,
+    "max_concurrent_positions": 1,
+    "train_ratio": 0.6,
+    "validation_ratio": 0.2,
+    "minimum_train_trades": 20,
+    "candidate_policies": [
+      {
+        "name": "all_behavior_entries",
+        "direction": "any",
+        "description": "Replay every simulated bill episode entry with fixed risk management"
+      },
+      {
+        "name": "short_only",
+        "direction": "short",
+        "description": "Replay only the dominant short direction"
+      },
+      {
+        "name": "long_only",
+        "direction": "long",
+        "description": "Replay only the less frequent long direction"
+      },
+      {
+        "name": "short_after_24h_up_10pct",
+        "direction": "short",
+        "min_return_24h": 0.1,
+        "description": "Short labels only after a prior 24 hour rise of at least 10 percent"
+      },
+      {
+        "name": "short_after_24h_up_20pct",
+        "direction": "short",
+        "min_return_24h": 0.2,
+        "description": "Short labels only after a prior 24 hour rise of at least 20 percent"
+      },
+      {
+        "name": "short_near_24h_high",
+        "direction": "short",
+        "min_distance_from_24h_high": -0.05,
+        "description": "Short labels only when price is within 5 percent of its prior 24 hour high"
+      }
+    ]
+  },
+  "runtime_integration": {
+    "implemented": false,
+    "reason": "bill-level research experiment; not a production signal generator"
+  }
+}

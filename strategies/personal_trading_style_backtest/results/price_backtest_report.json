@@ -1,0 +1,222 @@
+{
+  "strategy_id": "personal_trading_style_backtest",
+  "version": "0.2.0",
+  "selected_policy": "short_after_24h_up_20pct",
+  "selected_policy_metrics": {
+    "trades": 119,
+    "wins": 62,
+    "losses": 57,
+    "win_rate": 0.5210084033613446,
+    "total_r": -0.1503758612789623,
+    "average_r": -0.0012636626998231884,
+    "median_r": 0.921431765682696,
+    "profit_factor": 0.9974743905815131,
+    "max_drawdown_r": 14.891408820974489,
+    "symbols": 36,
+    "exit_reasons": {
+      "target": 62,
+      "stop": 57
+    }
+  },
+  "selected_policy_walk_forward": [
+    {
+      "policy": "short_after_24h_up_20pct",
+      "split": "all",
+      "capacity_skipped": 83,
+      "trades": 119,
+      "wins": 62,
+      "losses": 57,
+      "win_rate": 0.5210084033613446,
+      "total_r": -0.1503758612789623,
+      "average_r": -0.0012636626998231884,
+      "median_r": 0.921431765682696,
+      "profit_factor": 0.9974743905815131,
+      "max_drawdown_r": 14.891408820974489,
+      "symbols": 36,
+      "exit_reasons": {
+        "target": 62,
+        "stop": 57
+      }
+    },
+    {
+      "policy": "short_after_24h_up_20pct",
+      "split": "train",
+      "capacity_skipped": 0,
+      "trades": 57,
+      "wins": 35,
+      "losses": 22,
+      "win_rate": 0.6140350877192983,
+      "total_r": 10.4752032702726,
+      "average_r": 0.18377549596969472,
+      "median_r": 0.943897375207404,
+      "profit_factor": 1.4539698899131956,
+      "max_drawdown_r": 6.094506434267194,
+      "symbols": 19,
+      "exit_reasons": {
+        "target": 35,
+        "stop": 22
+      }
+    },
+    {
+      "policy": "short_after_24h_up_20pct",
+      "split": "validation",
+      "capacity_skipped": 0,
+      "trades": 26,
+      "wins": 13,
+      "losses": 13,
+      "win_rate": 0.5,
+      "total_r": -1.0429006570792647,
+      "average_r": -0.04011156373381792,
+      "median_r": -0.052210560169547504,
+      "profit_factor": 0.9226662105425406,
+      "max_drawdown_r": 8.410752397446025,
+      "symbols": 9,
+      "exit_reasons": {
+        "stop": 13,
+        "target": 13
+      }
+    },
+    {
+      "policy": "short_after_24h_up_20pct",
+      "split": "test",
+      "capacity_skipped": 0,
+      "trades": 36,
+      "wins": 14,
+      "losses": 22,
+      "win_rate": 0.3888888888888889,
+      "total_r": -9.58267847447229,
+      "average_r": -0.2661855131797859,
+      "median_r": -1.025574149607814,
+      "profit_factor": 0.5830002141977241,
+      "max_drawdown_r": 11.125413175042377,
+      "symbols": 15,
+      "exit_reasons": {
+        "stop": 22,
+        "target": 14
+      }
+    }
+  ],
+  "promotion": {
+    "status": "not_promoted",
+    "reason": "validation_or_test_total_r_not_positive",
+    "validation_total_r": -1.0429006570792647,
+    "test_total_r": -9.58267847447229
+  },
+  "behavior_episodes": 443,
+  "price_trades_simulated": 432,
+  "skipped": {
+    "insufficient_or_gapped_history": 11
+  },
+  "ledger_source_sha256": "14704034159ada4131ab4623a97e530b4782913f05c150e6e43b2f6cbe050b26",
+  "config_sha256": "821b61f971d441198ee23b3efcdeac17b0b01f7a47aed940c70e937dcfa8829f",
+  "kline_sources": {
+    "ACU": "ACU_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "AEON": "AEON_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "AEVO": "AEVO_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "ALLO": "ALLO_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "APR": "APR_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "AVNT": "AVNT_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "BCH": "BCH_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "BEAT": "BEAT_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "BICO": "BICO_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "BOME": "BOME_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "BTC": "BTC_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "CAP": "CAP_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "DOS": "DOS_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "EDEN": "EDEN_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "ENA": "ENA_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "ESP": "ESP_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "ETH": "ETH_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "GIGGLE": "GIGGLE_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "GPS": "GPS_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "GRVT": "GRVT_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "H": "H_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "HOME": "HOME_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "IRYS": "IRYS_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "KAITO": "KAITO_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "KGEN": "KGEN_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "LA": "LA_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "LAB": "LAB_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "LIT": "LIT_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "MMT": "MMT_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "MOVE": "MOVE_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "MUBARAK": "MUBARAK_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "O": "O_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "ONE": "ONE_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "PEPE": "PEPE_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "PIPPIN": "PIPPIN_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "PUMP": "PUMP_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "RE": "RE_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "ROBO": "ROBO_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "SATS": "SATS_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "SHELL": "SHELL_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "SHIB": "SHIB_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "SNDK": "SNDK_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "SOON": "SOON_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "TURBO": "TURBO_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "UB": "UB_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "WLFI": "WLFI_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "ZAMA": "ZAMA_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "ZBT": "ZBT_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "ZORA": "ZORA_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz",
+    "ZRO": "ZRO_USDT_SWAP_5m_20260331T065300Z_20261003T020851Z.jsonl.gz"
+  },
+  "execution_assumptions": {
+    "timeframe_minutes": 5,
+    "entry_rule": "first confirmed candle whose start is strictly after the bill episode entry timestamp",
+    "atr_period": 72,
+    "lookback_6h_bars": 72,
+    "lookback_24h_bars": 288,
+    "stop_atr": 2.0,
+    "target_r": 1.0,
+    "max_hold_bars": 288,
+    "fee_rate_one_way": 0.0005,
+    "slippage_one_way": 0.0005,
+    "max_concurrent_positions": 1,
+    "train_ratio": 0.6,
+    "validation_ratio": 0.2,
+    "minimum_train_trades": 20,
+    "candidate_policies": [
+      {
+        "name": "all_behavior_entries",
+        "direction": "any",
+        "description": "Replay every simulated bill episode entry with fixed risk management"
+      },
+      {
+        "name": "short_only",
+        "direction": "short",
+        "description": "Replay only the dominant short direction"
+      },
+      {
+        "name": "long_only",
+        "direction": "long",
+        "description": "Replay only the less frequent long direction"
+      },
+      {
+        "name": "short_after_24h_up_10pct",
+        "direction": "short",
+        "min_return_24h": 0.1,
+        "description": "Short labels only after a prior 24 hour rise of at least 10 percent"
+      },
+      {
+        "name": "short_after_24h_up_20pct",
+        "direction": "short",
+        "min_return_24h": 0.2,
+        "description": "Short labels only after a prior 24 hour rise of at least 20 percent"
+      },
+      {
+        "name": "short_near_24h_high",
+        "direction": "short",
+        "min_distance_from_24h_high": -0.05,
+        "description": "Short labels only when price is within 5 percent of its prior 24 hour high"
+      }
+    ]
+  },
+  "limitations": [
+    "Bill episodes are observed entry labels, not independently generated signals.",
+    "OHLC candles do not reveal intrabar order; a same-candle stop is resolved before target.",
+    "Funding, liquidation, contract multiplier, minimum order size and mark-price effects are not modeled.",
+    "Results are normalized in R and are not account USDT returns without a position-sizing rule.",
+    "One month of bill labels is too short to establish a stable edge; validation and test results govern promotion."
+  ]
+}

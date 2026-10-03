@@ -14,6 +14,8 @@
 - 延长下跌捕获实验：[`results/trend_capture/README.md`](results/trend_capture/README.md)，补充趋势入场与移动止损，未接入运行时
 - 入场挂单方式实验：[`results/entry_orders/README.md`](results/entry_orders/README.md)，实时信号收盘成交优于前几根 K 线高点限价
 
+最近一年半默认规则复核（`2025-04-03T00:00:00Z` 至 `2026-10-03T07:45:00Z` 的完整 15m K 线）已更新到 `results/momentum_exhaustion_report.json`：279 个合约、2,095 个观察事件、24 笔交易，胜率 41.67%，总净收益 -1.1344R，Profit Factor 0.9171。样本量和收益质量都不足以支持上线。
+
 运行分析：
 
 ```bash

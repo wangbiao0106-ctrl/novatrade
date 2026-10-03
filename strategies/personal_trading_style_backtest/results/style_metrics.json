@@ -1,0 +1,153 @@
+{
+  "source": {
+    "source_file": "NTM5NTczNjI=_欧易统一交易账单_2026-07-22~2026-08-22~UTC+8~6530099a043ba19e63533fd8723d7833.zip",
+    "source_sha256": "14704034159ada4131ab4623a97e530b4782913f05c150e6e43b2f6cbe050b26",
+    "csv_member": "NTM5NTczNjI=~2026-07-22~2026-08-22~UTC+8~6530099a043ba19e63533fd8723d7833_UnifiedBillHistory/560139958070448105/欧易统一交易账单_2026-07-22~2026-08-22~UTC+8~6530099a043ba19e63533fd8723d7833.csv",
+    "account_metadata": "用户ID:<redacted>,﻿账户类型:Main,﻿时区:UTC+8\r",
+    "row_count": 64000,
+    "first_timestamp": "2026-07-22 00:00:04",
+    "last_timestamp": "2026-08-22 23:04:28",
+    "timezone": "UTC+8"
+  },
+  "rows": {
+    "all": 64000,
+    "perpetual": 63436,
+    "perpetual_trade_rows": 63234
+  },
+  "orders": {
+    "groups": 1523,
+    "side": {
+      "卖出": 30571,
+      "买入": 32663
+    },
+    "symbols": 50,
+    "top_symbols_by_rows": [
+      [
+        "BICO-USDT-SWAP",
+        21094
+      ],
+      [
+        "CAP-USDT-SWAP",
+        5876
+      ],
+      [
+        "H-USDT-SWAP",
+        3898
+      ],
+      [
+        "HOME-USDT-SWAP",
+        3493
+      ],
+      [
+        "MUBARAK-USDT-SWAP",
+        2844
+      ],
+      [
+        "DOS-USDT-SWAP",
+        2801
+      ],
+      [
+        "UB-USDT-SWAP",
+        2695
+      ],
+      [
+        "GPS-USDT-SWAP",
+        2673
+      ],
+      [
+        "AEON-USDT-SWAP",
+        2125
+      ],
+      [
+        "BEAT-USDT-SWAP",
+        1898
+      ],
+      [
+        "APR-USDT-SWAP",
+        1517
+      ],
+      [
+        "BOME-USDT-SWAP",
+        1513
+      ],
+      [
+        "ALLO-USDT-SWAP",
+        1152
+      ],
+      [
+        "ZORA-USDT-SWAP",
+        1132
+      ],
+      [
+        "ZBT-USDT-SWAP",
+        957
+      ],
+      [
+        "ESP-USDT-SWAP",
+        700
+      ],
+      [
+        "TURBO-USDT-SWAP",
+        689
+      ],
+      [
+        "KAITO-USDT-SWAP",
+        669
+      ],
+      [
+        "LIT-USDT-SWAP",
+        480
+      ],
+      [
+        "GRVT-USDT-SWAP",
+        431
+      ]
+    ]
+  },
+  "episodes": {
+    "closed": 443,
+    "direction": {
+      "short": 392,
+      "long": 51
+    },
+    "all_closed": {
+      "episodes": 443,
+      "wins": 330,
+      "losses": 113,
+      "win_rate": 0.744921,
+      "net_pnl": 82.29408338,
+      "average_net_pnl": 0.18576543,
+      "median_net_pnl": 8.75206854,
+      "profit_factor": 1.00212269,
+      "max_drawdown": -11745.17878299
+    }
+  },
+  "pnl": {
+    "trade_realized_pnl": 8676.99730862,
+    "trade_fees": -3320.40268032,
+    "funding_net": -603.47843685,
+    "liquidation_net": -194.73638501,
+    "position_change": 732.5499997,
+    "account_change": 3825.82997442,
+    "perpetual_net_excluding_transfers": 4558.37980644
+  },
+  "episode_coverage": {
+    "inferred_episode_net": 82.29408338,
+    "unassigned_strategy_net": 4476.08572306,
+    "inferred_episode_realized_pnl": 3627.62372836,
+    "unassigned_realized_pnl": 5049.37358026,
+    "note": "Unassigned values are expected because the bill export does not expose exact open/close state; they are a diagnostic, not missing cash."
+  },
+  "margin": {
+    "add_events": 30,
+    "add_amount": 150334.63198535,
+    "remove_events": 12,
+    "remove_amount": 55914.67430708
+  },
+  "limitations": [
+    "OKX unified bills do not expose a reliable per-fill open/close flag in this export.",
+    "Episodes use zero realized PnL as an entry candidate and are approximate labels.",
+    "The policy comparison uses only entry-time direction and prior-symbol PnL; it is not an OHLC price backtest.",
+    "Transfers and manual margin movements are excluded from strategy PnL."
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "selection_monthly": [
+    {
+      "held_out": "2026-03",
+      "selected": [
+        120,
+        2.5
+      ],
+      "month_return": 0.0
+    },
+    {
+      "held_out": "2026-04",
+      "selected": [
+        240,
+        2.5
+      ],
+      "month_return": 0.09596806973627658
+    },
+    {
+      "held_out": "2026-05",
+      "selected": [
+        96,
+        2.5
+      ],
+      "month_return": 0.16979853189997196
+    },
+    {
+      "held_out": "2026-06",
+      "selected": [
+        240,
+        2.5
+      ],
+      "month_return": -0.14481946676548563
+    },
+    {
+      "held_out": "2026-07",
+      "selected": [
+        240,
+        2.5
+      ],
+      "month_return": -0.1706797185561012
+    },
+    {
+      "held_out": "2026-08",
+      "selected": [
+        120,
+        2.5
+      ],
+      "month_return": 0.11507593798127935
+    },
+    {
+      "held_out": "2026-09",
+      "selected": [
+        240,
+        2.0
+      ],
+      "month_return": 0.3588533723484777
+    },
+    {
+      "held_out": "2026-10",
+      "selected": [
+        240,
+        2.5
+      ],
+      "month_return": -0.0630792186879443
+    }
+  ],
+  "out_of_sample": {
+    "compounded": 0.29082978817462335,
+    "distinct_selections": 4
+  },
+  "top_by_sharpe": {
+    "max_direction_bars": 96,
+    "vol_target_annual": 2.0,
+    "total_return": 0.5896352531542424,
+    "annual_return": 1.4847626349328218,
+    "max_drawdown": -0.3295093385869484,
+    "sharpe": 1.808933980065877,
+    "calmar": 4.505980441404194
+  },
+  "top_by_return": {
+    "max_direction_bars": 120,
+    "vol_target_annual": 2.5,
+    "total_return": 0.6781428105001461,
+    "annual_return": 1.7637148523200117,
+    "max_drawdown": -0.4038703130138329,
+    "sharpe": 1.7357903099734147,
+    "calmar": 4.3670326723410415
+  }
+}

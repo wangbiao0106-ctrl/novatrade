@@ -32,6 +32,8 @@
 
 ## 复现与状态
 
+最近一年半默认规则复核（`2025-04-03T00:00:00Z` 至 `2026-10-03T08:00:00Z`）覆盖 295 个合约和 11,896,703 根完整 15m K 线。36 个候选突涨中只有 1 个通过完整形态条件，但因 ATR 止损距离超出风控范围被拒绝，最终 0 笔交易；报告中的 `validation.passed` 为 `false`。
+
 ```bash
 python3 strategies/intraday_pump_retest_short/src/backtest.py --scan
 ```

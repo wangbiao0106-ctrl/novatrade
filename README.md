@@ -113,6 +113,18 @@ python3 scripts/export_market_data.py
 
 `manifest.json` 记录时间范围、字段定义、每个合约的文件名、K 线数量和失败状态；每行行情包含 UTC 时间、毫秒时间戳、OHLC、成交量、报价成交量和 `confirmed`。脚本支持断点续跑，已经完成的文件会跳过；需要重新抓取时加 `--force`。已有全量清单需要更新到当前时间时使用 `--update`，它只抓取各合约最后一根附近到现在的增量行情并替换旧文件。可用 `--output` 指定目录，`--symbols BTC-USDT-SWAP ETH-USDT-SWAP` 只导出指定合约，`--workers` 控制并发数。
 
+需要补齐超过 REST 分页效率可接受的历史区间时，使用官方月度 1 分钟 ZIP 并在本地聚合为 5 分钟，再由 REST 补齐当前月份。例如更新最近约一年半：
+
+```bash
+python3 scripts/import_okx_bulk_data.py \
+  --start 2025-04-03T00:00:00Z \
+  --end 2026-10-03T08:01:01Z \
+  --output data/kline/okx/swap/5m \
+  --workers 8
+```
+
+批量导入器会生成相同的 `manifest.json` 和 JSONL 字段；较晚上线的合约只包含上市以来的数据。导入行情后使用 `python3 scripts/build_kline_cache.py --force` 重建多周期缓存。
+
 安装 ATK 后，`okx-locald` 会通过系统 `PATH` 或 `/opt/homebrew/bin/okx`、`/usr/local/bin/okx` 查找 `okx`，也可使用 `OKX_CLI_PATH` 指定绝对路径。诊断时直接运行 `okx` 命令；Swift 适配层使用同一 CLI 的 `--json` 机器输出。未安装或未配置 API Key 时，界面会显示明确错误；公共行情本身不要求 API Key。
 
 ## 目录规范

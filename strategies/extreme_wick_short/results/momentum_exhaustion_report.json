@@ -2,33 +2,33 @@
   "strategy": "extreme_wick_short",
   "version": "0.3.0",
   "data": {
-    "symbols": 278,
-    "start": 1774940400000,
-    "end": 1790793900000,
+    "symbols": 279,
+    "start": 1743638400000,
+    "end": 1791013500000,
     "timeframe_minutes": 15
   },
   "observation_pool": {
-    "events": 612,
+    "events": 2095,
     "intraday_gain_gt": 1.0,
     "thirty_day_low_multiple_min": 0.0
   },
-  "signal_events": 10,
+  "signal_events": 28,
   "metrics": {
-    "trades": 8,
-    "wins": 5,
-    "win_rate": 0.625,
-    "total_r": 3.4526493440626833,
-    "avg_net_r": 0.43158116800783547,
-    "profit_factor": 2.385123312153379,
-    "total_leveraged_return_pct": 80.31420684896953,
-    "avg_leveraged_return_pct": 10.039275856121192,
-    "max_drawdown_leveraged_pct": 20.825176258735432,
+    "trades": 24,
+    "wins": 10,
+    "win_rate": 0.4166666666666667,
+    "total_r": -1.1343749144587694,
+    "avg_net_r": -0.04726562143578202,
+    "profit_factor": 0.9171181806345433,
+    "total_leveraged_return_pct": 41.77311216274144,
+    "avg_leveraged_return_pct": 1.7405463401142265,
+    "max_drawdown_leveraged_pct": 108.57528157570069,
     "leverage": 2.0,
-    "symbols": 7,
+    "symbols": 19,
     "exit_reasons": {
-      "时间离场": 4,
-      "止损": 2,
-      "止盈": 2
+      "时间离场": 8,
+      "止损": 13,
+      "止盈": 3
     }
   },
   "by_symbol": {
@@ -46,6 +46,22 @@
       "symbols": 1,
       "exit_reasons": {
         "时间离场": 1
+      }
+    },
+    "BERA": {
+      "trades": 1,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -1.011442019978135,
+      "avg_net_r": -1.011442019978135,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -26.61439703208836,
+      "avg_leveraged_return_pct": -26.61439703208836,
+      "max_drawdown_leveraged_pct": 26.61439703208836,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 1
       }
     },
     "BICO": {
@@ -80,6 +96,86 @@
         "止盈": 1
       }
     },
+    "ENJ": {
+      "trades": 1,
+      "wins": 1,
+      "win_rate": 1.0,
+      "total_r": 1.6775108388751123,
+      "avg_net_r": 1.6775108388751123,
+      "profit_factor": 999.0,
+      "total_leveraged_return_pct": 37.71155777366787,
+      "avg_leveraged_return_pct": 37.71155777366787,
+      "max_drawdown_leveraged_pct": 0.0,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "时间离场": 1
+      }
+    },
+    "FIL": {
+      "trades": 1,
+      "wins": 1,
+      "win_rate": 1.0,
+      "total_r": 1.524385806059856,
+      "avg_net_r": 1.524385806059856,
+      "profit_factor": 999.0,
+      "total_leveraged_return_pct": 34.26095549582486,
+      "avg_leveraged_return_pct": 34.26095549582486,
+      "max_drawdown_leveraged_pct": 0.0,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "时间离场": 1
+      }
+    },
+    "H": {
+      "trades": 1,
+      "wins": 1,
+      "win_rate": 1.0,
+      "total_r": 0.5957086228339955,
+      "avg_net_r": 0.5957086228339955,
+      "profit_factor": 999.0,
+      "total_leveraged_return_pct": 18.517200941491502,
+      "avg_leveraged_return_pct": 18.517200941491502,
+      "max_drawdown_leveraged_pct": 0.0,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "时间离场": 1
+      }
+    },
+    "JELLYJELLY": {
+      "trades": 3,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -3.046990609151349,
+      "avg_net_r": -1.0156635363837831,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -57.58521144121826,
+      "avg_leveraged_return_pct": -19.195070480406088,
+      "max_drawdown_leveraged_pct": 57.58521144121826,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 3
+      }
+    },
+    "KAT": {
+      "trades": 1,
+      "wins": 1,
+      "win_rate": 1.0,
+      "total_r": 1.9892109011445804,
+      "avg_net_r": 1.9892109011445804,
+      "profit_factor": 999.0,
+      "total_leveraged_return_pct": 44.96018956466198,
+      "avg_leveraged_return_pct": 44.96018956466198,
+      "max_drawdown_leveraged_pct": 0.0,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止盈": 1
+      }
+    },
     "LAB": {
       "trades": 1,
       "wins": 0,
@@ -90,6 +186,54 @@
       "total_leveraged_return_pct": -20.825176258735432,
       "avg_leveraged_return_pct": -20.825176258735432,
       "max_drawdown_leveraged_pct": 20.825176258735432,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 1
+      }
+    },
+    "LPT": {
+      "trades": 1,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -1.0176246598792125,
+      "avg_net_r": -1.0176246598792125,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -16.93709857220243,
+      "avg_leveraged_return_pct": -16.93709857220243,
+      "max_drawdown_leveraged_pct": 16.93709857220243,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 1
+      }
+    },
+    "MOODENG": {
+      "trades": 1,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -1.0128369767514678,
+      "avg_net_r": -1.0128369767514678,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -23.56249184869747,
+      "avg_leveraged_return_pct": -23.56249184869747,
+      "max_drawdown_leveraged_pct": 23.56249184869747,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 1
+      }
+    },
+    "NMR": {
+      "trades": 1,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -1.0195833333939701,
+      "avg_net_r": -1.0195833333939701,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -15.200131785861501,
+      "avg_leveraged_return_pct": -15.200131785861501,
+      "max_drawdown_leveraged_pct": 15.200131785861501,
       "leverage": 2.0,
       "symbols": 1,
       "exit_reasons": {
@@ -129,6 +273,55 @@
         "时间离场": 1
       }
     },
+    "ORDI": {
+      "trades": 2,
+      "wins": 1,
+      "win_rate": 0.5,
+      "total_r": -0.20228455530142486,
+      "avg_net_r": -0.10114227765071243,
+      "profit_factor": 0.8021539263609933,
+      "total_leveraged_return_pct": 11.8398793935923,
+      "avg_leveraged_return_pct": 5.91993969679615,
+      "max_drawdown_leveraged_pct": 13.234117931218305,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "时间离场": 1,
+        "止损": 1
+      }
+    },
+    "PYTH": {
+      "trades": 1,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -1.0216342668279086,
+      "avg_net_r": -1.0216342668279086,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -13.731379675628169,
+      "avg_leveraged_return_pct": -13.731379675628169,
+      "max_drawdown_leveraged_pct": 13.731379675628169,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 1
+      }
+    },
+    "RAVE": {
+      "trades": 2,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -2.041444006151528,
+      "avg_net_r": -1.020722003075764,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -32.200167499770416,
+      "avg_leveraged_return_pct": -16.100083749885208,
+      "max_drawdown_leveraged_pct": 32.200167499770416,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 2
+      }
+    },
     "SOPH": {
       "trades": 1,
       "wins": 1,
@@ -147,6 +340,120 @@
     }
   },
   "by_month_utc": {
+    "2025-05": {
+      "trades": 3,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -3.0450391704656754,
+      "avg_net_r": -1.0150130568218918,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -61.12070977438617,
+      "avg_leveraged_return_pct": -20.37356992479539,
+      "max_drawdown_leveraged_pct": 61.12070977438617,
+      "leverage": 2.0,
+      "symbols": 3,
+      "exit_reasons": {
+        "止损": 3
+      }
+    },
+    "2025-08": {
+      "trades": 2,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -2.041217600221879,
+      "avg_net_r": -1.0206088001109395,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -28.93151146148967,
+      "avg_leveraged_return_pct": -14.465755730744835,
+      "max_drawdown_leveraged_pct": 28.93151146148967,
+      "leverage": 2.0,
+      "symbols": 2,
+      "exit_reasons": {
+        "止损": 2
+      }
+    },
+    "2025-10": {
+      "trades": 1,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -1.016597193095967,
+      "avg_net_r": -1.016597193095967,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -18.020502781590423,
+      "avg_leveraged_return_pct": -18.020502781590423,
+      "max_drawdown_leveraged_pct": 18.020502781590423,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 1
+      }
+    },
+    "2025-11": {
+      "trades": 2,
+      "wins": 2,
+      "win_rate": 1.0,
+      "total_r": 2.1200944288938515,
+      "avg_net_r": 1.0600472144469257,
+      "profit_factor": 999.0,
+      "total_leveraged_return_pct": 52.77815643731636,
+      "avg_leveraged_return_pct": 26.38907821865818,
+      "max_drawdown_leveraged_pct": 0.0,
+      "leverage": 2.0,
+      "symbols": 2,
+      "exit_reasons": {
+        "时间离场": 2
+      }
+    },
+    "2025-12": {
+      "trades": 1,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -1.0158158822203875,
+      "avg_net_r": -1.0158158822203875,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -18.943589306141572,
+      "avg_leveraged_return_pct": -18.943589306141572,
+      "max_drawdown_leveraged_pct": 18.943589306141572,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 1
+      }
+    },
+    "2026-02": {
+      "trades": 1,
+      "wins": 0,
+      "win_rate": 0.0,
+      "total_r": -1.011442019978135,
+      "avg_net_r": -1.011442019978135,
+      "profit_factor": 0.0,
+      "total_leveraged_return_pct": -26.61439703208836,
+      "avg_leveraged_return_pct": -26.61439703208836,
+      "max_drawdown_leveraged_pct": 26.61439703208836,
+      "leverage": 2.0,
+      "symbols": 1,
+      "exit_reasons": {
+        "止损": 1
+      }
+    },
+    "2026-04": {
+      "trades": 6,
+      "wins": 3,
+      "win_rate": 0.5,
+      "total_r": 1.42299317856674,
+      "avg_net_r": 0.23716552976112334,
+      "profit_factor": 1.4644418508268977,
+      "total_leveraged_return_pct": 62.31145923215173,
+      "avg_leveraged_return_pct": 10.385243205358622,
+      "max_drawdown_leveraged_pct": 45.43428543098872,
+      "leverage": 2.0,
+      "symbols": 4,
+      "exit_reasons": {
+        "时间离场": 2,
+        "止损": 3,
+        "止盈": 1
+      }
+    },
     "2026-05": {
       "trades": 1,
       "wins": 0,

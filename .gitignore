@@ -7,4 +7,6 @@ __pycache__/
 .cache/
 data/kline/okx/swap/
 strategies/sweep_reversal_short/results/
+# Rebuildable 1h arrays folded from data/kline by the strategy's own backtest.
+strategies/liquid_crypto_trend_long/results/cache/
 dist/

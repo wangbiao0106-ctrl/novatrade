@@ -1,0 +1,2812 @@
+{
+  "strategy_id": "personal_style_strategy_variants",
+  "version": "0.1.0",
+  "data_inventory": {
+    "manifest_contracts": 485,
+    "selected_files": 288,
+    "eligible_symbols": [
+      "0G",
+      "1INCH",
+      "2Z",
+      "A",
+      "AAVE",
+      "ACH",
+      "ACT",
+      "ACU",
+      "AEON",
+      "AERO",
+      "AEVO",
+      "AGLD",
+      "AI",
+      "AIXBT",
+      "AKE",
+      "ALGO",
+      "ALLO",
+      "ANIME",
+      "APE",
+      "API3",
+      "APR",
+      "APT",
+      "AR",
+      "ARB",
+      "ARKM",
+      "ARX",
+      "ASTER",
+      "AT",
+      "ATH",
+      "ATOM",
+      "AUCTION",
+      "AVAX",
+      "AVNT",
+      "AXS",
+      "AZTEC",
+      "BABY",
+      "BAND",
+      "BARD",
+      "BASED",
+      "BAT",
+      "BCH",
+      "BEAT",
+      "BERA",
+      "BICO",
+      "BIGTIME",
+      "BILL",
+      "BIO",
+      "BLEND",
+      "BLUR",
+      "BMNR",
+      "BOME",
+      "BONK",
+      "BOT",
+      "BRETT",
+      "BREV",
+      "BSB",
+      "BSP",
+      "CAP",
+      "CASHCAT",
+      "CBRS",
+      "CC",
+      "CELO",
+      "CFX",
+      "CHIP",
+      "CHZ",
+      "CNPY",
+      "COAI",
+      "COMP",
+      "CORE",
+      "CP",
+      "CRO",
+      "CRV",
+      "CVX",
+      "CYPH",
+      "DASH",
+      "DATA",
+      "DGAI",
+      "DOOD",
+      "DOS",
+      "DOT",
+      "DRAM",
+      "DYDX",
+      "EDEN",
+      "EDGE",
+      "EGLD",
+      "EIGEN",
+      "ENA",
+      "ENJ",
+      "ENS",
+      "ENSO",
+      "ESP",
+      "ETC",
+      "ETHFI",
+      "ETHW",
+      "F",
+      "FARTCOIN",
+      "FET",
+      "FIL",
+      "FLOCK",
+      "FLOKI",
+      "FLOW",
+      "FOGO",
+      "FWDI",
+      "GALA",
+      "GAS",
+      "GIGGLE",
+      "GLM",
+      "GMT",
+      "GMX",
+      "GPRO",
+      "GPS",
+      "GRAM",
+      "GRASS",
+      "GRT",
+      "GRVT",
+      "H",
+      "HBAR",
+      "HMSTR",
+      "HOME",
+      "HUMA",
+      "HYPE",
+      "ICP",
+      "IMX",
+      "INFQ",
+      "INIT",
+      "INJ",
+      "IOST",
+      "IOTA",
+      "IRYS",
+      "JELLYJELLY",
+      "JTO",
+      "JUP",
+      "KAITO",
+      "KAT",
+      "KGEN",
+      "KITE",
+      "KMNO",
+      "KSM",
+      "LA",
+      "LAB",
+      "LAYER",
+      "LDO",
+      "LIGHT",
+      "LINEA",
+      "LINK",
+      "LIT",
+      "LPT",
+      "LQTY",
+      "LTC",
+      "LUNA",
+      "MAGIC",
+      "MANA",
+      "MASK",
+      "ME",
+      "MEGA",
+      "MEME",
+      "MERL",
+      "MET",
+      "METIS",
+      "MEW",
+      "MINA",
+      "MMT",
+      "MON",
+      "MOODENG",
+      "MORPHO",
+      "MOVE",
+      "MUBARAK",
+      "NEAR",
+      "NEIRO",
+      "NEO",
+      "NES",
+      "NIGHT",
+      "NMR",
+      "NOT",
+      "O",
+      "OFC",
+      "OKB",
+      "OL",
+      "ONDO",
+      "ONE",
+      "ONT",
+      "OP",
+      "OPG",
+      "OPN",
+      "ORDER",
+      "ORDI",
+      "PARTI",
+      "PENDLE",
+      "PENG",
+      "PENGU",
+      "PEOPLE",
+      "PEPE",
+      "PI",
+      "PIEVERSE",
+      "PIPPIN",
+      "PLUME",
+      "PNUT",
+      "POL",
+      "PONS",
+      "POPCAT",
+      "PROS",
+      "PROVE",
+      "PUMP",
+      "PURR",
+      "PYTH",
+      "QNT",
+      "QTUM",
+      "RAM",
+      "RAVE",
+      "RAY",
+      "RE",
+      "RECALL",
+      "RENDER",
+      "RESOLV",
+      "RIVER",
+      "RLS",
+      "ROBO",
+      "RSR",
+      "RVN",
+      "S",
+      "SAHARA",
+      "SAND",
+      "SAPIEN",
+      "SATS",
+      "SEI",
+      "SENT",
+      "SHELL",
+      "SHIB",
+      "SIGN",
+      "SKY",
+      "SLX",
+      "SNX",
+      "SNXX",
+      "SOON",
+      "SOPH",
+      "SPACE",
+      "SPK",
+      "SPX",
+      "SSV",
+      "STRC",
+      "STRK",
+      "STX",
+      "SUI",
+      "SUSHI",
+      "SYRUP",
+      "TAO",
+      "THETA",
+      "TIA",
+      "TRB",
+      "TRIA",
+      "TRUMP",
+      "TRUST",
+      "TRUTH",
+      "TURBO",
+      "UB",
+      "UMA",
+      "UNI",
+      "UP",
+      "USAR",
+      "USELESS",
+      "VANA",
+      "VIRTUAL",
+      "VVV",
+      "W",
+      "WAL",
+      "WCT",
+      "WET",
+      "WIF",
+      "WLD",
+      "WLFI",
+      "WOO",
+      "XLM",
+      "XPL",
+      "XTZ",
+      "YB",
+      "YFI",
+      "YGG",
+      "ZAMA",
+      "ZBT",
+      "ZEC",
+      "ZEN",
+      "ZETA",
+      "ZIL",
+      "ZK",
+      "ZKP",
+      "ZORA",
+      "ZRO",
+      "ZRX"
+    ],
+    "bars": 14220054,
+    "symbols_with_events": 251
+  },
+  "variants": {
+    "A_exhaustion_short": {
+      "base_5bp": {
+        "cost": "base_5bp",
+        "raw_trades": 8705,
+        "capacity_skipped": 5001,
+        "walk_forward": {
+          "all": {
+            "variant": "A_exhaustion_short",
+            "cost": "base_5bp",
+            "split": "all",
+            "capacity_skipped": 5001,
+            "trades": 3704,
+            "wins": 1679,
+            "win_rate": 0.4532937365010799,
+            "total_r": -791.558977287747,
+            "expectancy_r": -0.21370382756148715,
+            "profit_factor": 0.6508001384559261,
+            "max_drawdown_r": 791.7187654003849,
+            "mean_mae_r": 0.9961031247622648,
+            "mean_mfe_r": 0.8442931926592052,
+            "symbols": 227,
+            "exit_reasons": {
+              "stop": 2021,
+              "target": 1671,
+              "time_exit": 11,
+              "stop_gap": 1
+            }
+          },
+          "train": {
+            "variant": "A_exhaustion_short",
+            "cost": "base_5bp",
+            "split": "train",
+            "capacity_skipped": 0,
+            "trades": 2181,
+            "wins": 980,
+            "win_rate": 0.4493351673544246,
+            "total_r": -472.99757824065074,
+            "expectancy_r": -0.21687188365000104,
+            "profit_factor": 0.6461999782215557,
+            "max_drawdown_r": 475.03357057577085,
+            "mean_mae_r": 0.9850756271162314,
+            "mean_mfe_r": 0.8345521645203897,
+            "symbols": 182,
+            "exit_reasons": {
+              "stop": 1199,
+              "target": 973,
+              "time_exit": 9
+            }
+          },
+          "validation": {
+            "variant": "A_exhaustion_short",
+            "cost": "base_5bp",
+            "split": "validation",
+            "capacity_skipped": 0,
+            "trades": 740,
+            "wins": 314,
+            "win_rate": 0.4243243243243243,
+            "total_r": -204.86536982742345,
+            "expectancy_r": -0.27684509436138277,
+            "profit_factor": 0.572389355069527,
+            "max_drawdown_r": 208.14241254026015,
+            "mean_mae_r": 1.0531426506018176,
+            "mean_mfe_r": 0.8240868296363549,
+            "symbols": 110,
+            "exit_reasons": {
+              "stop": 425,
+              "target": 314,
+              "stop_gap": 1
+            }
+          },
+          "test": {
+            "variant": "A_exhaustion_short",
+            "cost": "base_5bp",
+            "split": "test",
+            "capacity_skipped": 0,
+            "trades": 783,
+            "wins": 385,
+            "win_rate": 0.49169859514687103,
+            "total_r": -113.69602921967278,
+            "expectancy_r": -0.1452056567301058,
+            "profit_factor": 0.7477789816335488,
+            "max_drawdown_r": 116.20981874537898,
+            "mean_mae_r": 0.9729124775652405,
+            "mean_mfe_r": 0.8905229385182936,
+            "symbols": 131,
+            "exit_reasons": {
+              "target": 384,
+              "stop": 397,
+              "time_exit": 2
+            }
+          }
+        },
+        "monthly": {
+          "2026-04": {
+            "trades": 593,
+            "wins": 264,
+            "win_rate": 0.4451939291736931,
+            "total_r": -129.02402429010218,
+            "expectancy_r": -0.21757845580118393,
+            "profit_factor": 0.6455237432346943,
+            "max_drawdown_r": 134.01011279655364,
+            "mean_mae_r": 0.9834865461069201,
+            "mean_mfe_r": 0.8169469305344043,
+            "symbols": 106,
+            "exit_reasons": {
+              "stop": 329,
+              "target": 263,
+              "time_exit": 1
+            }
+          },
+          "2026-05": {
+            "trades": 673,
+            "wins": 289,
+            "win_rate": 0.4294205052005943,
+            "total_r": -174.1991695161198,
+            "expectancy_r": -0.2588397763983947,
+            "profit_factor": 0.5939521794785518,
+            "max_drawdown_r": 174.1991695161198,
+            "mean_mae_r": 0.9935064054532009,
+            "mean_mfe_r": 0.8274201457546474,
+            "symbols": 106,
+            "exit_reasons": {
+              "stop": 382,
+              "target": 288,
+              "time_exit": 3
+            }
+          },
+          "2026-06": {
+            "trades": 593,
+            "wins": 270,
+            "win_rate": 0.45531197301854975,
+            "total_r": -118.65082299154626,
+            "expectancy_r": -0.200085704876132,
+            "profit_factor": 0.6685305138940189,
+            "max_drawdown_r": 122.82588707937927,
+            "mean_mae_r": 0.9760609038852521,
+            "mean_mfe_r": 0.849355841197291,
+            "symbols": 101,
+            "exit_reasons": {
+              "stop": 323,
+              "target": 267,
+              "time_exit": 3
+            }
+          },
+          "2026-07": {
+            "trades": 545,
+            "wins": 248,
+            "win_rate": 0.45504587155963305,
+            "total_r": -120.63249857718593,
+            "expectancy_r": -0.22134403408657977,
+            "profit_factor": 0.6393105884402276,
+            "max_drawdown_r": 126.17104726634757,
+            "mean_mae_r": 1.0101040838486286,
+            "mean_mfe_r": 0.8393438208912022,
+            "symbols": 86,
+            "exit_reasons": {
+              "target": 246,
+              "stop": 296,
+              "time_exit": 2,
+              "stop_gap": 1
+            }
+          },
+          "2026-08": {
+            "trades": 601,
+            "wins": 265,
+            "win_rate": 0.44093178036605657,
+            "total_r": -144.80712557160845,
+            "expectancy_r": -0.24094363655841672,
+            "profit_factor": 0.616674101454872,
+            "max_drawdown_r": 146.56773315271897,
+            "mean_mae_r": 1.0478953500971062,
+            "mean_mfe_r": 0.8332090174322919,
+            "symbols": 112,
+            "exit_reasons": {
+              "target": 265,
+              "stop": 336
+            }
+          },
+          "2026-09": {
+            "trades": 656,
+            "wins": 324,
+            "win_rate": 0.49390243902439024,
+            "total_r": -94.15206105615333,
+            "expectancy_r": -0.14352448331730688,
+            "profit_factor": 0.7500775595275686,
+            "max_drawdown_r": 95.02877987912085,
+            "mean_mae_r": 0.9735698903032244,
+            "mean_mfe_r": 0.9011716428933456,
+            "symbols": 114,
+            "exit_reasons": {
+              "stop": 332,
+              "target": 323,
+              "time_exit": 1
+            }
+          },
+          "2026-10": {
+            "trades": 43,
+            "wins": 19,
+            "win_rate": 0.4418604651162791,
+            "total_r": -10.093275285032613,
+            "expectancy_r": -0.2347273322100608,
+            "profit_factor": 0.6246293908970623,
+            "max_drawdown_r": 10.093275285032613,
+            "mean_mae_r": 0.9295545641694878,
+            "mean_mfe_r": 0.7656066111482808,
+            "symbols": 16,
+            "exit_reasons": {
+              "stop": 23,
+              "target": 19,
+              "time_exit": 1
+            }
+          }
+        },
+        "robustness": {
+          "top_train_symbol": "EDGE",
+          "top_train_days": [
+            "2026-04-27",
+            "2026-05-24",
+            "2026-07-07"
+          ],
+          "without_top_symbol": {
+            "trades": 3658,
+            "wins": 1649,
+            "win_rate": 0.4507927829414981,
+            "total_r": -800.6586270194041,
+            "expectancy_r": -0.21887879360836662,
+            "profit_factor": 0.6440482070799541,
+            "max_drawdown_r": 800.818415132042,
+            "mean_mae_r": 0.999524136786339,
+            "mean_mfe_r": 0.8402558695020352,
+            "symbols": 226,
+            "exit_reasons": {
+              "stop": 2005,
+              "target": 1641,
+              "time_exit": 11,
+              "stop_gap": 1
+            }
+          },
+          "without_top_train_days": {
+            "trades": 3650,
+            "wins": 1641,
+            "win_rate": 0.44958904109589043,
+            "total_r": -806.9477035383211,
+            "expectancy_r": -0.22108156261323883,
+            "profit_factor": 0.6411615065838786,
+            "max_drawdown_r": 807.107491650959,
+            "mean_mae_r": 1.0007798720932108,
+            "mean_mfe_r": 0.8409124901331082,
+            "symbols": 227,
+            "exit_reasons": {
+              "stop": 2005,
+              "target": 1633,
+              "time_exit": 11,
+              "stop_gap": 1
+            }
+          }
+        }
+      },
+      "stress_10bp": {
+        "cost": "stress_10bp",
+        "raw_trades": 8826,
+        "capacity_skipped": 5154,
+        "walk_forward": {
+          "all": {
+            "variant": "A_exhaustion_short",
+            "cost": "stress_10bp",
+            "split": "all",
+            "capacity_skipped": 5154,
+            "trades": 3672,
+            "wins": 1597,
+            "win_rate": 0.4349128540305011,
+            "total_r": -1325.9861306746432,
+            "expectancy_r": -0.36110733406172224,
+            "profit_factor": 0.48165520606492684,
+            "max_drawdown_r": 1325.9861306746432,
+            "mean_mae_r": 1.0192133471640565,
+            "mean_mfe_r": 0.7997170805431473,
+            "symbols": 227,
+            "exit_reasons": {
+              "stop": 2071,
+              "target": 1589,
+              "time_exit": 11,
+              "stop_gap": 1
+            }
+          },
+          "train": {
+            "variant": "A_exhaustion_short",
+            "cost": "stress_10bp",
+            "split": "train",
+            "capacity_skipped": 0,
+            "trades": 2171,
+            "wins": 936,
+            "win_rate": 0.4311377245508982,
+            "total_r": -779.1026340204821,
+            "expectancy_r": -0.3588680948965835,
+            "profit_factor": 0.4834045271784515,
+            "max_drawdown_r": 780.6634526364406,
+            "mean_mae_r": 1.0112325117622798,
+            "mean_mfe_r": 0.7897646181932191,
+            "symbols": 182,
+            "exit_reasons": {
+              "stop": 1233,
+              "target": 929,
+              "time_exit": 9
+            }
+          },
+          "validation": {
+            "variant": "A_exhaustion_short",
+            "cost": "stress_10bp",
+            "split": "validation",
+            "capacity_skipped": 0,
+            "trades": 732,
+            "wins": 306,
+            "win_rate": 0.4180327868852459,
+            "total_r": -296.97143346834486,
+            "expectancy_r": -0.4056986796015644,
+            "profit_factor": 0.4386819427355317,
+            "max_drawdown_r": 297.6496664998371,
+            "mean_mae_r": 1.0606862910196295,
+            "mean_mfe_r": 0.7934943999478933,
+            "symbols": 107,
+            "exit_reasons": {
+              "stop": 425,
+              "target": 306,
+              "stop_gap": 1
+            }
+          },
+          "test": {
+            "variant": "A_exhaustion_short",
+            "cost": "stress_10bp",
+            "split": "test",
+            "capacity_skipped": 0,
+            "trades": 769,
+            "wins": 355,
+            "win_rate": 0.4616384915474642,
+            "total_r": -249.9120631858162,
+            "expectancy_r": -0.3249831770946895,
+            "profit_factor": 0.5202364634880057,
+            "max_drawdown_r": 251.08006728843617,
+            "mean_mae_r": 1.0022669216178643,
+            "mean_mfe_r": 0.8337376240508451,
+            "symbols": 130,
+            "exit_reasons": {
+              "target": 354,
+              "stop": 413,
+              "time_exit": 2
+            }
+          }
+        },
+        "monthly": {
+          "2026-04": {
+            "trades": 588,
+            "wins": 253,
+            "win_rate": 0.4302721088435374,
+            "total_r": -203.84435243707745,
+            "expectancy_r": -0.34667406877054,
+            "profit_factor": 0.49559462202618937,
+            "max_drawdown_r": 205.5336343450688,
+            "mean_mae_r": 1.0093398700259368,
+            "mean_mfe_r": 0.7793303577983514,
+            "symbols": 105,
+            "exit_reasons": {
+              "stop": 335,
+              "target": 252,
+              "time_exit": 1
+            }
+          },
+          "2026-05": {
+            "trades": 668,
+            "wins": 270,
+            "win_rate": 0.4041916167664671,
+            "total_r": -280.85576234463366,
+            "expectancy_r": -0.4204427580009483,
+            "profit_factor": 0.42768611199120654,
+            "max_drawdown_r": 281.72821794655704,
+            "mean_mae_r": 1.0304887275016872,
+            "mean_mfe_r": 0.7787471002434154,
+            "symbols": 106,
+            "exit_reasons": {
+              "target": 269,
+              "stop": 396,
+              "time_exit": 3
+            }
+          },
+          "2026-06": {
+            "trades": 595,
+            "wins": 264,
+            "win_rate": 0.4436974789915966,
+            "total_r": -192.26861194234738,
+            "expectancy_r": -0.32314052427285295,
+            "profit_factor": 0.5202211433356301,
+            "max_drawdown_r": 194.28156574718264,
+            "mean_mae_r": 0.9923540940993172,
+            "mean_mfe_r": 0.8037689942720554,
+            "symbols": 100,
+            "exit_reasons": {
+              "stop": 331,
+              "target": 261,
+              "time_exit": 3
+            }
+          },
+          "2026-07": {
+            "trades": 540,
+            "wins": 237,
+            "win_rate": 0.4388888888888889,
+            "total_r": -200.13148894417623,
+            "expectancy_r": -0.37061386841514116,
+            "profit_factor": 0.4681340767826954,
+            "max_drawdown_r": 204.8819996970419,
+            "mean_mae_r": 1.0274345114069514,
+            "mean_mfe_r": 0.7942754072306213,
+            "symbols": 86,
+            "exit_reasons": {
+              "target": 235,
+              "stop": 302,
+              "time_exit": 2,
+              "stop_gap": 1
+            }
+          },
+          "2026-08": {
+            "trades": 595,
+            "wins": 257,
+            "win_rate": 0.4319327731092437,
+            "total_r": -221.76359999879574,
+            "expectancy_r": -0.3727119327710849,
+            "profit_factor": 0.47150042592921404,
+            "max_drawdown_r": 223.30459554330466,
+            "mean_mae_r": 1.056048281792806,
+            "mean_mfe_r": 0.804184832362116,
+            "symbols": 108,
+            "exit_reasons": {
+              "target": 257,
+              "stop": 338
+            }
+          },
+          "2026-09": {
+            "trades": 645,
+            "wins": 298,
+            "win_rate": 0.462015503875969,
+            "total_r": -212.5323360606826,
+            "expectancy_r": -0.32950749776850025,
+            "profit_factor": 0.5147327026032157,
+            "max_drawdown_r": 212.5323360606826,
+            "mean_mae_r": 1.0069843961310414,
+            "mean_mfe_r": 0.8396721863590063,
+            "symbols": 113,
+            "exit_reasons": {
+              "stop": 347,
+              "target": 297,
+              "time_exit": 1
+            }
+          },
+          "2026-10": {
+            "trades": 41,
+            "wins": 18,
+            "win_rate": 0.43902439024390244,
+            "total_r": -14.589978946931236,
+            "expectancy_r": -0.3558531450471033,
+            "profit_factor": 0.49066622624910644,
+            "max_drawdown_r": 14.589978946931236,
+            "mean_mae_r": 0.9164417541451026,
+            "mean_mfe_r": 0.7532194988531208,
+            "symbols": 16,
+            "exit_reasons": {
+              "stop": 22,
+              "target": 18,
+              "time_exit": 1
+            }
+          }
+        },
+        "robustness": {
+          "top_train_symbol": "ETHFI",
+          "top_train_days": [
+            "2026-04-27",
+            "2026-07-07",
+            "2026-07-13"
+          ],
+          "without_top_symbol": {
+            "trades": 3647,
+            "wins": 1582,
+            "win_rate": 0.43378119001919385,
+            "total_r": -1322.787963368677,
+            "expectancy_r": -0.3627057755329525,
+            "profit_factor": 0.4802480646202755,
+            "max_drawdown_r": 1322.787963368677,
+            "mean_mae_r": 1.020601178839137,
+            "mean_mfe_r": 0.7991178022365698,
+            "symbols": 226,
+            "exit_reasons": {
+              "stop": 2061,
+              "target": 1574,
+              "time_exit": 11,
+              "stop_gap": 1
+            }
+          },
+          "without_top_train_days": {
+            "trades": 3630,
+            "wins": 1566,
+            "win_rate": 0.43140495867768597,
+            "total_r": -1336.578972303421,
+            "expectancy_r": -0.3682035736373063,
+            "profit_factor": 0.4748155908460094,
+            "max_drawdown_r": 1336.578972303421,
+            "mean_mae_r": 1.021981199408841,
+            "mean_mfe_r": 0.7956047056592652,
+            "symbols": 227,
+            "exit_reasons": {
+              "stop": 2060,
+              "target": 1558,
+              "time_exit": 11,
+              "stop_gap": 1
+            }
+          }
+        }
+      }
+    },
+    "D_breakout_pullback_long": {
+      "base_5bp": {
+        "cost": "base_5bp",
+        "raw_trades": 6760,
+        "capacity_skipped": 4187,
+        "walk_forward": {
+          "all": {
+            "variant": "D_breakout_pullback_long",
+            "cost": "base_5bp",
+            "split": "all",
+            "capacity_skipped": 4187,
+            "trades": 2573,
+            "wins": 1275,
+            "win_rate": 0.49553050913330743,
+            "total_r": -155.0119481068974,
+            "expectancy_r": -0.0602456075036523,
+            "profit_factor": 0.8837668469999177,
+            "max_drawdown_r": 178.3138440389524,
+            "mean_mae_r": 0.8574387306929194,
+            "mean_mfe_r": 0.8607800364846813,
+            "symbols": 221,
+            "exit_reasons": {
+              "stop": 1243,
+              "target": 1237,
+              "time_exit": 93
+            }
+          },
+          "train": {
+            "variant": "D_breakout_pullback_long",
+            "cost": "base_5bp",
+            "split": "train",
+            "capacity_skipped": 0,
+            "trades": 1599,
+            "wins": 793,
+            "win_rate": 0.4959349593495935,
+            "total_r": -86.41412702174958,
+            "expectancy_r": -0.05404260601735437,
+            "profit_factor": 0.8950794474627549,
+            "max_drawdown_r": 108.97314344139342,
+            "mean_mae_r": 0.8628616285655998,
+            "mean_mfe_r": 0.8706813782763595,
+            "symbols": 166,
+            "exit_reasons": {
+              "stop": 767,
+              "target": 773,
+              "time_exit": 59
+            }
+          },
+          "validation": {
+            "variant": "D_breakout_pullback_long",
+            "cost": "base_5bp",
+            "split": "validation",
+            "capacity_skipped": 0,
+            "trades": 429,
+            "wins": 217,
+            "win_rate": 0.5058275058275058,
+            "total_r": -20.73319864448344,
+            "expectancy_r": -0.048329134369425354,
+            "profit_factor": 0.9045115006240517,
+            "max_drawdown_r": 28.833355742163963,
+            "mean_mae_r": 0.8413049333654881,
+            "mean_mfe_r": 0.8730290080378156,
+            "symbols": 82,
+            "exit_reasons": {
+              "target": 205,
+              "stop": 203,
+              "time_exit": 21
+            }
+          },
+          "test": {
+            "variant": "D_breakout_pullback_long",
+            "cost": "base_5bp",
+            "split": "test",
+            "capacity_skipped": 0,
+            "trades": 545,
+            "wins": 265,
+            "win_rate": 0.48623853211009177,
+            "total_r": -47.86462244066426,
+            "expectancy_r": -0.0878249953039711,
+            "profit_factor": 0.8365763814591087,
+            "max_drawdown_r": 50.449462471334954,
+            "mean_mae_r": 0.8542280616196208,
+            "mean_mfe_r": 0.8220881936935105,
+            "symbols": 113,
+            "exit_reasons": {
+              "target": 259,
+              "stop": 273,
+              "time_exit": 13
+            }
+          }
+        },
+        "monthly": {
+          "2026-04": {
+            "trades": 499,
+            "wins": 265,
+            "win_rate": 0.531062124248497,
+            "total_r": 7.115407570853879,
+            "expectancy_r": 0.014259333809326391,
+            "profit_factor": 1.0294749737812094,
+            "max_drawdown_r": 21.184147686158603,
+            "mean_mae_r": 0.8390922758257675,
+            "mean_mfe_r": 0.9143413585605831,
+            "symbols": 83,
+            "exit_reasons": {
+              "stop": 226,
+              "target": 262,
+              "time_exit": 11
+            }
+          },
+          "2026-05": {
+            "trades": 429,
+            "wins": 208,
+            "win_rate": 0.48484848484848486,
+            "total_r": -31.926066651366533,
+            "expectancy_r": -0.07441973578407117,
+            "profit_factor": 0.8580394835844433,
+            "max_drawdown_r": 44.03265320596053,
+            "mean_mae_r": 0.8530499610149107,
+            "mean_mfe_r": 0.8745558492838394,
+            "symbols": 77,
+            "exit_reasons": {
+              "stop": 208,
+              "target": 202,
+              "time_exit": 19
+            }
+          },
+          "2026-06": {
+            "trades": 482,
+            "wins": 236,
+            "win_rate": 0.4896265560165975,
+            "total_r": -29.681194209116434,
+            "expectancy_r": -0.06157924109775195,
+            "profit_factor": 0.8808146950051909,
+            "max_drawdown_r": 49.95052110853193,
+            "mean_mae_r": 0.8630967677552163,
+            "mean_mfe_r": 0.8421715978000491,
+            "symbols": 91,
+            "exit_reasons": {
+              "target": 229,
+              "stop": 232,
+              "time_exit": 21
+            }
+          },
+          "2026-07": {
+            "trades": 300,
+            "wins": 135,
+            "win_rate": 0.45,
+            "total_r": -48.54858834045621,
+            "expectancy_r": -0.16182862780152046,
+            "profit_factor": 0.7141948916796658,
+            "max_drawdown_r": 57.51786922158199,
+            "mean_mae_r": 0.9411757395157538,
+            "mean_mfe_r": 0.8368891814982505,
+            "symbols": 69,
+            "exit_reasons": {
+              "time_exit": 14,
+              "target": 127,
+              "stop": 159
+            }
+          },
+          "2026-08": {
+            "trades": 371,
+            "wins": 190,
+            "win_rate": 0.5121293800539084,
+            "total_r": -12.263919244140864,
+            "expectancy_r": -0.0330563861028056,
+            "profit_factor": 0.9338698756506951,
+            "max_drawdown_r": 33.866473353579316,
+            "mean_mae_r": 0.8199584859508986,
+            "mean_mfe_r": 0.8674962738751874,
+            "symbols": 83,
+            "exit_reasons": {
+              "target": 181,
+              "stop": 173,
+              "time_exit": 17
+            }
+          },
+          "2026-09": {
+            "trades": 471,
+            "wins": 230,
+            "win_rate": 0.4883227176220807,
+            "total_r": -38.231236918643354,
+            "expectancy_r": -0.08117035439202412,
+            "profit_factor": 0.8483845013304515,
+            "max_drawdown_r": 48.169538507972604,
+            "mean_mae_r": 0.8539650104351326,
+            "mean_mfe_r": 0.8268525746321544,
+            "symbols": 96,
+            "exit_reasons": {
+              "target": 226,
+              "stop": 235,
+              "time_exit": 10
+            }
+          },
+          "2026-10": {
+            "trades": 21,
+            "wins": 11,
+            "win_rate": 0.5238095238095238,
+            "total_r": -1.4763503140278862,
+            "expectancy_r": -0.07030239590608983,
+            "profit_factor": 0.8635508780742488,
+            "max_drawdown_r": 5.791662675815203,
+            "mean_mae_r": 0.7969949069026492,
+            "mean_mfe_r": 0.7173377029547012,
+            "symbols": 11,
+            "exit_reasons": {
+              "target": 10,
+              "stop": 10,
+              "time_exit": 1
+            }
+          }
+        },
+        "robustness": {
+          "top_train_symbol": "BILL",
+          "top_train_days": [
+            "2026-05-02",
+            "2026-05-12",
+            "2026-05-20"
+          ],
+          "without_top_symbol": {
+            "trades": 2525,
+            "wins": 1244,
+            "win_rate": 0.49267326732673267,
+            "total_r": -166.32430263799378,
+            "expectancy_r": -0.0658710109457401,
+            "profit_factor": 0.8735614967019875,
+            "max_drawdown_r": 189.62619857004879,
+            "mean_mae_r": 0.8594426409024232,
+            "mean_mfe_r": 0.8585651162752621,
+            "symbols": 220,
+            "exit_reasons": {
+              "stop": 1226,
+              "target": 1206,
+              "time_exit": 93
+            }
+          },
+          "without_top_train_days": {
+            "trades": 2525,
+            "wins": 1237,
+            "win_rate": 0.4899009900990099,
+            "total_r": -180.8677832047749,
+            "expectancy_r": -0.07163080522961389,
+            "profit_factor": 0.8633934390256742,
+            "max_drawdown_r": 204.1696791368299,
+            "mean_mae_r": 0.8631487216642091,
+            "mean_mfe_r": 0.8546710143885649,
+            "symbols": 221,
+            "exit_reasons": {
+              "stop": 1234,
+              "target": 1200,
+              "time_exit": 91
+            }
+          }
+        }
+      },
+      "stress_10bp": {
+        "cost": "stress_10bp",
+        "raw_trades": 6755,
+        "capacity_skipped": 4219,
+        "walk_forward": {
+          "all": {
+            "variant": "D_breakout_pullback_long",
+            "cost": "stress_10bp",
+            "split": "all",
+            "capacity_skipped": 4219,
+            "trades": 2536,
+            "wins": 1240,
+            "win_rate": 0.4889589905362776,
+            "total_r": -316.93605056168815,
+            "expectancy_r": -0.12497478334451416,
+            "profit_factor": 0.7732374284237605,
+            "max_drawdown_r": 328.0375196859786,
+            "mean_mae_r": 0.8639802658025733,
+            "mean_mfe_r": 0.8443991539564222,
+            "symbols": 221,
+            "exit_reasons": {
+              "stop": 1238,
+              "target": 1202,
+              "time_exit": 96
+            }
+          },
+          "train": {
+            "variant": "D_breakout_pullback_long",
+            "cost": "stress_10bp",
+            "split": "train",
+            "capacity_skipped": 0,
+            "trades": 1577,
+            "wins": 774,
+            "win_rate": 0.49080532656943565,
+            "total_r": -180.5234349691749,
+            "expectancy_r": -0.1144726918003646,
+            "profit_factor": 0.790397785073147,
+            "max_drawdown_r": 191.62490409346537,
+            "mean_mae_r": 0.8680357538988512,
+            "mean_mfe_r": 0.8564819903347788,
+            "symbols": 164,
+            "exit_reasons": {
+              "stop": 764,
+              "target": 754,
+              "time_exit": 59
+            }
+          },
+          "validation": {
+            "variant": "D_breakout_pullback_long",
+            "cost": "stress_10bp",
+            "split": "validation",
+            "capacity_skipped": 0,
+            "trades": 427,
+            "wins": 210,
+            "win_rate": 0.4918032786885246,
+            "total_r": -54.766284752921386,
+            "expectancy_r": -0.1282582781098862,
+            "profit_factor": 0.7652791621209973,
+            "max_drawdown_r": 58.60975521718684,
+            "mean_mae_r": 0.8593122127422488,
+            "mean_mfe_r": 0.8401268526361604,
+            "symbols": 83,
+            "exit_reasons": {
+              "stop": 207,
+              "target": 199,
+              "time_exit": 21
+            }
+          },
+          "test": {
+            "variant": "D_breakout_pullback_long",
+            "cost": "stress_10bp",
+            "split": "test",
+            "capacity_skipped": 0,
+            "trades": 532,
+            "wins": 256,
+            "win_rate": 0.48120300751879697,
+            "total_r": -81.64633083959168,
+            "expectancy_r": -0.15347054669096155,
+            "profit_factor": 0.730596975334671,
+            "max_drawdown_r": 83.34130918909963,
+            "mean_mae_r": 0.8557053671727393,
+            "mean_mfe_r": 0.812011258646429,
+            "symbols": 112,
+            "exit_reasons": {
+              "target": 249,
+              "stop": 267,
+              "time_exit": 16
+            }
+          }
+        },
+        "monthly": {
+          "2026-04": {
+            "trades": 495,
+            "wins": 259,
+            "win_rate": 0.5232323232323233,
+            "total_r": -23.46322359376793,
+            "expectancy_r": -0.04740045170458167,
+            "profit_factor": 0.9076629663785757,
+            "max_drawdown_r": 37.98949248349105,
+            "mean_mae_r": 0.8420538979856403,
+            "mean_mfe_r": 0.899748502737819,
+            "symbols": 82,
+            "exit_reasons": {
+              "stop": 227,
+              "target": 257,
+              "time_exit": 11
+            }
+          },
+          "2026-05": {
+            "trades": 419,
+            "wins": 199,
+            "win_rate": 0.47494033412887826,
+            "total_r": -61.07683783114044,
+            "expectancy_r": -0.14576810938219686,
+            "profit_factor": 0.7403881940042647,
+            "max_drawdown_r": 65.88154001857995,
+            "mean_mae_r": 0.8610432207708978,
+            "mean_mfe_r": 0.8572866792963995,
+            "symbols": 76,
+            "exit_reasons": {
+              "stop": 207,
+              "target": 193,
+              "time_exit": 19
+            }
+          },
+          "2026-06": {
+            "trades": 475,
+            "wins": 233,
+            "win_rate": 0.4905263157894737,
+            "total_r": -54.18166131509698,
+            "expectancy_r": -0.11406665540020419,
+            "profit_factor": 0.7906598384391249,
+            "max_drawdown_r": 68.62261437940424,
+            "mean_mae_r": 0.8698094273104585,
+            "mean_mfe_r": 0.833404431769889,
+            "symbols": 90,
+            "exit_reasons": {
+              "target": 225,
+              "stop": 230,
+              "time_exit": 20
+            }
+          },
+          "2026-07": {
+            "trades": 300,
+            "wins": 134,
+            "win_rate": 0.44666666666666666,
+            "total_r": -65.50529550654916,
+            "expectancy_r": -0.21835098502183053,
+            "profit_factor": 0.633994147817868,
+            "max_drawdown_r": 73.6348418263854,
+            "mean_mae_r": 0.9420917760545984,
+            "mean_mfe_r": 0.8093334655227626,
+            "symbols": 69,
+            "exit_reasons": {
+              "time_exit": 15,
+              "target": 126,
+              "stop": 159
+            }
+          },
+          "2026-08": {
+            "trades": 368,
+            "wins": 183,
+            "win_rate": 0.49728260869565216,
+            "total_r": -42.034709752430274,
+            "expectancy_r": -0.11422475476203883,
+            "profit_factor": 0.7885578474927039,
+            "max_drawdown_r": 51.88530336752276,
+            "mean_mae_r": 0.8401176701646021,
+            "mean_mfe_r": 0.8367315287372021,
+            "symbols": 83,
+            "exit_reasons": {
+              "target": 175,
+              "stop": 176,
+              "time_exit": 17
+            }
+          },
+          "2026-09": {
+            "trades": 459,
+            "wins": 223,
+            "win_rate": 0.485838779956427,
+            "total_r": -66.89665111000188,
+            "expectancy_r": -0.14574433793028727,
+            "profit_factor": 0.7427418949590322,
+            "max_drawdown_r": 75.81361175655589,
+            "mean_mae_r": 0.8539265205602099,
+            "mean_mfe_r": 0.8179198285921108,
+            "symbols": 95,
+            "exit_reasons": {
+              "target": 217,
+              "time_exit": 13,
+              "stop": 229
+            }
+          },
+          "2026-10": {
+            "trades": 20,
+            "wins": 9,
+            "win_rate": 0.45,
+            "total_r": -3.7776714527011963,
+            "expectancy_r": -0.1888835726350598,
+            "profit_factor": 0.6759573274551308,
+            "max_drawdown_r": 6.945083091762536,
+            "mean_mae_r": 0.8278789361435235,
+            "mean_mfe_r": 0.7404039153239819,
+            "symbols": 10,
+            "exit_reasons": {
+              "target": 9,
+              "stop": 10,
+              "time_exit": 1
+            }
+          }
+        },
+        "robustness": {
+          "top_train_symbol": "BILL",
+          "top_train_days": [
+            "2026-05-02",
+            "2026-05-20",
+            "2026-06-02"
+          ],
+          "without_top_symbol": {
+            "trades": 2489,
+            "wins": 1209,
+            "win_rate": 0.4857372438730414,
+            "total_r": -326.48892448742106,
+            "expectancy_r": -0.13117272980611527,
+            "profit_factor": 0.7633363406264503,
+            "max_drawdown_r": 337.59039361171153,
+            "mean_mae_r": 0.8664159828444981,
+            "mean_mfe_r": 0.8421217903984458,
+            "symbols": 220,
+            "exit_reasons": {
+              "stop": 1222,
+              "target": 1172,
+              "time_exit": 95
+            }
+          },
+          "without_top_train_days": {
+            "trades": 2489,
+            "wins": 1203,
+            "win_rate": 0.4833266372036963,
+            "total_r": -339.5420263137423,
+            "expectancy_r": -0.13641704552581044,
+            "profit_factor": 0.7553629096211079,
+            "max_drawdown_r": 350.6434954380328,
+            "mean_mae_r": 0.8687584865673604,
+            "mean_mfe_r": 0.8379106805462033,
+            "symbols": 221,
+            "exit_reasons": {
+              "stop": 1230,
+              "target": 1167,
+              "time_exit": 92
+            }
+          }
+        }
+      }
+    },
+    "B_double_sweep_short": {
+      "base_5bp": {
+        "cost": "base_5bp",
+        "raw_trades": 1784,
+        "capacity_skipped": 722,
+        "walk_forward": {
+          "all": {
+            "variant": "B_double_sweep_short",
+            "cost": "base_5bp",
+            "split": "all",
+            "capacity_skipped": 722,
+            "trades": 1062,
+            "wins": 453,
+            "win_rate": 0.4265536723163842,
+            "total_r": -205.98572578608238,
+            "expectancy_r": -0.19396019377220564,
+            "profit_factor": 0.7013948564183345,
+            "max_drawdown_r": 208.27196970901102,
+            "mean_mae_r": 0.9807322914242242,
+            "mean_mfe_r": 0.9094589115296213,
+            "symbols": 179,
+            "exit_reasons": {
+              "target": 447,
+              "stop": 606,
+              "time_exit": 9
+            }
+          },
+          "train": {
+            "variant": "B_double_sweep_short",
+            "cost": "base_5bp",
+            "split": "train",
+            "capacity_skipped": 0,
+            "trades": 599,
+            "wins": 271,
+            "win_rate": 0.4524207011686144,
+            "total_r": -75.78944952390005,
+            "expectancy_r": -0.1265266269180302,
+            "profit_factor": 0.7944639840574751,
+            "max_drawdown_r": 84.19127204780082,
+            "mean_mae_r": 0.95828494956533,
+            "mean_mfe_r": 0.9547741913309366,
+            "symbols": 144,
+            "exit_reasons": {
+              "target": 267,
+              "stop": 327,
+              "time_exit": 5
+            }
+          },
+          "validation": {
+            "variant": "B_double_sweep_short",
+            "cost": "base_5bp",
+            "split": "validation",
+            "capacity_skipped": 0,
+            "trades": 216,
+            "wins": 75,
+            "win_rate": 0.3472222222222222,
+            "total_r": -79.99555441208598,
+            "expectancy_r": -0.37034978894484255,
+            "profit_factor": 0.4984423118864699,
+            "max_drawdown_r": 83.632136804052,
+            "mean_mae_r": 1.0110989540102981,
+            "mean_mfe_r": 0.812172250941574,
+            "symbols": 82,
+            "exit_reasons": {
+              "stop": 139,
+              "target": 74,
+              "time_exit": 3
+            }
+          },
+          "test": {
+            "variant": "B_double_sweep_short",
+            "cost": "base_5bp",
+            "split": "test",
+            "capacity_skipped": 0,
+            "trades": 247,
+            "wins": 107,
+            "win_rate": 0.4331983805668016,
+            "total_r": -50.20072185009628,
+            "expectancy_r": -0.20324178886678662,
+            "profit_factor": 0.6893360948683429,
+            "max_drawdown_r": 52.28884467954748,
+            "mean_mae_r": 1.0086139054116163,
+            "mean_mfe_r": 0.8846413653192181,
+            "symbols": 84,
+            "exit_reasons": {
+              "stop": 140,
+              "target": 106,
+              "time_exit": 1
+            }
+          }
+        },
+        "monthly": {
+          "2026-04": {
+            "trades": 176,
+            "wins": 78,
+            "win_rate": 0.4431818181818182,
+            "total_r": -24.385942238542103,
+            "expectancy_r": -0.13855648999171655,
+            "profit_factor": 0.7763291450000435,
+            "max_drawdown_r": 25.503098366086327,
+            "mean_mae_r": 0.9504466969956014,
+            "mean_mfe_r": 0.8841568220405308,
+            "symbols": 69,
+            "exit_reasons": {
+              "target": 76,
+              "stop": 98,
+              "time_exit": 2
+            }
+          },
+          "2026-05": {
+            "trades": 200,
+            "wins": 89,
+            "win_rate": 0.445,
+            "total_r": -30.17774190586467,
+            "expectancy_r": -0.1508887095293235,
+            "profit_factor": 0.7613666931787566,
+            "max_drawdown_r": 43.33236403977854,
+            "mean_mae_r": 0.950988584591487,
+            "mean_mfe_r": 0.978718393437637,
+            "symbols": 88,
+            "exit_reasons": {
+              "target": 89,
+              "stop": 111
+            }
+          },
+          "2026-06": {
+            "trades": 160,
+            "wins": 74,
+            "win_rate": 0.4625,
+            "total_r": -15.474539469649033,
+            "expectancy_r": -0.09671587168530646,
+            "profit_factor": 0.8385305852212719,
+            "max_drawdown_r": 28.510431775849835,
+            "mean_mae_r": 0.9566623395641891,
+            "mean_mfe_r": 0.9702781422948705,
+            "symbols": 66,
+            "exit_reasons": {
+              "stop": 85,
+              "target": 73,
+              "time_exit": 2
+            }
+          },
+          "2026-07": {
+            "trades": 120,
+            "wins": 51,
+            "win_rate": 0.425,
+            "total_r": -24.21471232201017,
+            "expectancy_r": -0.20178926935008482,
+            "profit_factor": 0.6896473449324146,
+            "max_drawdown_r": 25.31021362450999,
+            "mean_mae_r": 1.0353799750928685,
+            "mean_mfe_r": 0.9165688459292437,
+            "symbols": 52,
+            "exit_reasons": {
+              "stop": 69,
+              "target": 50,
+              "time_exit": 1
+            }
+          },
+          "2026-08": {
+            "trades": 179,
+            "wins": 62,
+            "win_rate": 0.3463687150837989,
+            "total_r": -66.14768011262518,
+            "expectancy_r": -0.3695401123610345,
+            "profit_factor": 0.4993895075558434,
+            "max_drawdown_r": 67.31313096966197,
+            "mean_mae_r": 1.00741765105937,
+            "mean_mfe_r": 0.8247785912516753,
+            "symbols": 79,
+            "exit_reasons": {
+              "target": 61,
+              "stop": 115,
+              "time_exit": 3
+            }
+          },
+          "2026-09": {
+            "trades": 212,
+            "wins": 93,
+            "win_rate": 0.4386792452830189,
+            "total_r": -41.9621773808557,
+            "expectancy_r": -0.19793479896630056,
+            "profit_factor": 0.696324410888641,
+            "max_drawdown_r": 48.32210951382616,
+            "mean_mae_r": 0.9954663994863049,
+            "mean_mfe_r": 0.8977421322136346,
+            "symbols": 71,
+            "exit_reasons": {
+              "stop": 119,
+              "target": 92,
+              "time_exit": 1
+            }
+          },
+          "2026-10": {
+            "trades": 15,
+            "wins": 6,
+            "win_rate": 0.4,
+            "total_r": -3.6229323565354634,
+            "expectancy_r": -0.24152882376903093,
+            "profit_factor": 0.6436153649491126,
+            "max_drawdown_r": 6.93765991782387,
+            "mean_mae_r": 1.0255433553909792,
+            "mean_mfe_r": 0.7533747023845382,
+            "symbols": 10,
+            "exit_reasons": {
+              "stop": 9,
+              "target": 6
+            }
+          }
+        },
+        "robustness": {
+          "top_train_symbol": "LAB",
+          "top_train_days": [
+            "2026-05-01",
+            "2026-06-17",
+            "2026-06-24"
+          ],
+          "without_top_symbol": {
+            "trades": 1042,
+            "wins": 441,
+            "win_rate": 0.42322456813819576,
+            "total_r": -211.3913292757941,
+            "expectancy_r": -0.20287075746237432,
+            "profit_factor": 0.6897741781350705,
+            "max_drawdown_r": 213.67757319872274,
+            "mean_mae_r": 0.9832973311774734,
+            "mean_mfe_r": 0.904119008834321,
+            "symbols": 178,
+            "exit_reasons": {
+              "target": 435,
+              "stop": 598,
+              "time_exit": 9
+            }
+          },
+          "without_top_train_days": {
+            "trades": 1045,
+            "wins": 439,
+            "win_rate": 0.4200956937799043,
+            "total_r": -218.46297850278566,
+            "expectancy_r": -0.20905548182084754,
+            "profit_factor": 0.6818856171301044,
+            "max_drawdown_r": 220.7492224257143,
+            "mean_mae_r": 0.9859786654154112,
+            "mean_mfe_r": 0.9011979400138417,
+            "symbols": 176,
+            "exit_reasons": {
+              "target": 433,
+              "stop": 603,
+              "time_exit": 9
+            }
+          }
+        }
+      },
+      "stress_10bp": {
+        "cost": "stress_10bp",
+        "raw_trades": 1858,
+        "capacity_skipped": 788,
+        "walk_forward": {
+          "all": {
+            "variant": "B_double_sweep_short",
+            "cost": "stress_10bp",
+            "split": "all",
+            "capacity_skipped": 788,
+            "trades": 1070,
+            "wins": 431,
+            "win_rate": 0.402803738317757,
+            "total_r": -396.7365194004261,
+            "expectancy_r": -0.3707817938321741,
+            "profit_factor": 0.5094525458954735,
+            "max_drawdown_r": 398.9143467405879,
+            "mean_mae_r": 0.9954407189874295,
+            "mean_mfe_r": 0.8496817717157861,
+            "symbols": 179,
+            "exit_reasons": {
+              "target": 426,
+              "stop": 632,
+              "time_exit": 12
+            }
+          },
+          "train": {
+            "variant": "B_double_sweep_short",
+            "cost": "stress_10bp",
+            "split": "train",
+            "capacity_skipped": 0,
+            "trades": 610,
+            "wins": 264,
+            "win_rate": 0.43278688524590164,
+            "total_r": -175.84498707946335,
+            "expectancy_r": -0.28827047062207123,
+            "profit_factor": 0.5937552727500462,
+            "max_drawdown_r": 177.007104066458,
+            "mean_mae_r": 0.9679093685048964,
+            "mean_mfe_r": 0.8942540327116033,
+            "symbols": 142,
+            "exit_reasons": {
+              "target": 260,
+              "stop": 343,
+              "time_exit": 7
+            }
+          },
+          "validation": {
+            "variant": "B_double_sweep_short",
+            "cost": "stress_10bp",
+            "split": "validation",
+            "capacity_skipped": 0,
+            "trades": 221,
+            "wins": 73,
+            "win_rate": 0.33031674208144796,
+            "total_r": -120.77820481839919,
+            "expectancy_r": -0.5465077141104033,
+            "profit_factor": 0.3606393660297802,
+            "max_drawdown_r": 123.66372059191812,
+            "mean_mae_r": 1.0324907156257128,
+            "mean_mfe_r": 0.7523980277532936,
+            "symbols": 82,
+            "exit_reasons": {
+              "stop": 146,
+              "target": 72,
+              "time_exit": 3
+            }
+          },
+          "test": {
+            "variant": "B_double_sweep_short",
+            "cost": "stress_10bp",
+            "split": "test",
+            "capacity_skipped": 0,
+            "trades": 239,
+            "wins": 94,
+            "win_rate": 0.39330543933054396,
+            "total_r": -100.1133275025636,
+            "expectancy_r": -0.4188842154918983,
+            "profit_factor": 0.4646440416484863,
+            "max_drawdown_r": 101.25220531666561,
+            "mean_mae_r": 1.0314493990597497,
+            "mean_mfe_r": 0.8258768688214863,
+            "symbols": 84,
+            "exit_reasons": {
+              "stop": 143,
+              "target": 94,
+              "time_exit": 2
+            }
+          }
+        },
+        "monthly": {
+          "2026-04": {
+            "trades": 179,
+            "wins": 77,
+            "win_rate": 0.4301675977653631,
+            "total_r": -48.49815053344673,
+            "expectancy_r": -0.27093938845500976,
+            "profit_factor": 0.6113447804961513,
+            "max_drawdown_r": 49.53710005950656,
+            "mean_mae_r": 0.9722216675456772,
+            "mean_mfe_r": 0.8274997755209634,
+            "symbols": 70,
+            "exit_reasons": {
+              "target": 75,
+              "stop": 102,
+              "time_exit": 2
+            }
+          },
+          "2026-05": {
+            "trades": 205,
+            "wins": 87,
+            "win_rate": 0.424390243902439,
+            "total_r": -66.78968442751847,
+            "expectancy_r": -0.32580333867082156,
+            "profit_factor": 0.556647143807734,
+            "max_drawdown_r": 72.46919228843235,
+            "mean_mae_r": 0.9645448339907396,
+            "mean_mfe_r": 0.9071254576874146,
+            "symbols": 88,
+            "exit_reasons": {
+              "target": 87,
+              "stop": 117,
+              "time_exit": 1
+            }
+          },
+          "2026-06": {
+            "trades": 159,
+            "wins": 70,
+            "win_rate": 0.44025157232704404,
+            "total_r": -40.55041725165908,
+            "expectancy_r": -0.2550340707651515,
+            "profit_factor": 0.6291496656668467,
+            "max_drawdown_r": 44.27730131247057,
+            "mean_mae_r": 0.9419549692125614,
+            "mean_mfe_r": 0.9307105130995234,
+            "symbols": 66,
+            "exit_reasons": {
+              "stop": 87,
+              "target": 69,
+              "time_exit": 3
+            }
+          },
+          "2026-07": {
+            "trades": 127,
+            "wins": 49,
+            "win_rate": 0.3858267716535433,
+            "total_r": -55.161520590941066,
+            "expectancy_r": -0.43434268181843366,
+            "profit_factor": 0.45283011586899696,
+            "max_drawdown_r": 55.627699730218765,
+            "mean_mae_r": 1.0600505341781221,
+            "mean_mfe_r": 0.8223116100457619,
+            "symbols": 54,
+            "exit_reasons": {
+              "stop": 78,
+              "target": 48,
+              "time_exit": 1
+            }
+          },
+          "2026-08": {
+            "trades": 181,
+            "wins": 62,
+            "win_rate": 0.3425414364640884,
+            "total_r": -92.26100561370242,
+            "expectancy_r": -0.5097293127828864,
+            "profit_factor": 0.38722669066108817,
+            "max_drawdown_r": 93.39277376468289,
+            "mean_mae_r": 1.0224813389097054,
+            "mean_mfe_r": 0.7813777328949012,
+            "symbols": 78,
+            "exit_reasons": {
+              "target": 61,
+              "stop": 117,
+              "time_exit": 3
+            }
+          },
+          "2026-09": {
+            "trades": 204,
+            "wins": 80,
+            "win_rate": 0.39215686274509803,
+            "total_r": -88.19467006313843,
+            "expectancy_r": -0.43232681403499257,
+            "profit_factor": 0.45353880781892275,
+            "max_drawdown_r": 91.86149287092148,
+            "mean_mae_r": 1.0224167774087245,
+            "mean_mfe_r": 0.8365263694954039,
+            "symbols": 71,
+            "exit_reasons": {
+              "stop": 122,
+              "target": 80,
+              "time_exit": 2
+            }
+          },
+          "2026-10": {
+            "trades": 15,
+            "wins": 6,
+            "win_rate": 0.4,
+            "total_r": -5.281070920020024,
+            "expectancy_r": -0.35207139466800164,
+            "profit_factor": 0.5292837091305586,
+            "max_drawdown_r": 8.145792105797485,
+            "mean_mae_r": 1.0215197985544346,
+            "mean_mfe_r": 0.7052681334695455,
+            "symbols": 10,
+            "exit_reasons": {
+              "stop": 9,
+              "target": 6
+            }
+          }
+        },
+        "robustness": {
+          "top_train_symbol": "LAB",
+          "top_train_days": [
+            "2026-06-12",
+            "2026-06-17",
+            "2026-06-21"
+          ],
+          "without_top_symbol": {
+            "trades": 1049,
+            "wins": 419,
+            "win_rate": 0.3994280266920877,
+            "total_r": -399.7858207770827,
+            "expectancy_r": -0.3811113639438349,
+            "profit_factor": 0.49935833431646065,
+            "max_drawdown_r": 401.9636481172445,
+            "mean_mae_r": 0.9969901381725544,
+            "mean_mfe_r": 0.8446539605857476,
+            "symbols": 178,
+            "exit_reasons": {
+              "target": 414,
+              "stop": 623,
+              "time_exit": 12
+            }
+          },
+          "without_top_train_days": {
+            "trades": 1058,
+            "wins": 420,
+            "win_rate": 0.39697542533081287,
+            "total_r": -406.52504509279015,
+            "expectancy_r": -0.38423917305556743,
+            "profit_factor": 0.49669221185478835,
+            "max_drawdown_r": 408.70287243295195,
+            "mean_mae_r": 1.0016785979449563,
+            "mean_mfe_r": 0.8410372083169527,
+            "symbols": 179,
+            "exit_reasons": {
+              "target": 415,
+              "stop": 631,
+              "time_exit": 12
+            }
+          }
+        }
+      }
+    },
+    "E_extreme_reversion_short": {
+      "base_5bp": {
+        "cost": "base_5bp",
+        "raw_trades": 865,
+        "capacity_skipped": 202,
+        "walk_forward": {
+          "all": {
+            "variant": "E_extreme_reversion_short",
+            "cost": "base_5bp",
+            "split": "all",
+            "capacity_skipped": 202,
+            "trades": 663,
+            "wins": 361,
+            "win_rate": 0.5444947209653092,
+            "total_r": -27.164042243716317,
+            "expectancy_r": -0.040971406099119645,
+            "profit_factor": 0.9058855260806933,
+            "max_drawdown_r": 41.47790164280419,
+            "mean_mae_r": 0.7659028916894951,
+            "mean_mfe_r": 0.7137647075465797,
+            "symbols": 164,
+            "exit_reasons": {
+              "target": 342,
+              "time_exit": 60,
+              "stop": 261
+            }
+          },
+          "train": {
+            "variant": "E_extreme_reversion_short",
+            "cost": "base_5bp",
+            "split": "train",
+            "capacity_skipped": 0,
+            "trades": 433,
+            "wins": 241,
+            "win_rate": 0.5565819861431871,
+            "total_r": -4.846693918036576,
+            "expectancy_r": -0.011193288494310786,
+            "profit_factor": 0.9732421876779378,
+            "max_drawdown_r": 21.678548373819524,
+            "mean_mae_r": 0.7377415450029099,
+            "mean_mfe_r": 0.7073993498371183,
+            "symbols": 115,
+            "exit_reasons": {
+              "target": 230,
+              "time_exit": 40,
+              "stop": 163
+            }
+          },
+          "validation": {
+            "variant": "E_extreme_reversion_short",
+            "cost": "base_5bp",
+            "split": "validation",
+            "capacity_skipped": 0,
+            "trades": 116,
+            "wins": 57,
+            "win_rate": 0.49137931034482757,
+            "total_r": -17.339066561899184,
+            "expectancy_r": -0.14947471174051025,
+            "profit_factor": 0.7007240214099413,
+            "max_drawdown_r": 19.18497773094928,
+            "mean_mae_r": 0.8644706769950854,
+            "mean_mfe_r": 0.7072422132338293,
+            "symbols": 58,
+            "exit_reasons": {
+              "target": 53,
+              "stop": 52,
+              "time_exit": 11
+            }
+          },
+          "test": {
+            "variant": "E_extreme_reversion_short",
+            "cost": "base_5bp",
+            "split": "test",
+            "capacity_skipped": 0,
+            "trades": 114,
+            "wins": 63,
+            "win_rate": 0.5526315789473685,
+            "total_r": -4.978281763780561,
+            "expectancy_r": -0.04366913827877689,
+            "profit_factor": 0.8995484759825849,
+            "max_drawdown_r": 9.463564765597592,
+            "mean_mae_r": 0.7725695585302222,
+            "mean_mfe_r": 0.7445788235858415,
+            "symbols": 62,
+            "exit_reasons": {
+              "stop": 46,
+              "target": 59,
+              "time_exit": 9
+            }
+          }
+        },
+        "monthly": {
+          "2026-04": {
+            "trades": 108,
+            "wins": 64,
+            "win_rate": 0.5925925925925926,
+            "total_r": 5.458451247347524,
+            "expectancy_r": 0.050541215253217815,
+            "profit_factor": 1.1346361069978295,
+            "max_drawdown_r": 6.990261874575728,
+            "mean_mae_r": 0.6890957030915807,
+            "mean_mfe_r": 0.6836001817459775,
+            "symbols": 46,
+            "exit_reasons": {
+              "target": 59,
+              "time_exit": 14,
+              "stop": 35
+            }
+          },
+          "2026-05": {
+            "trades": 124,
+            "wins": 69,
+            "win_rate": 0.5564516129032258,
+            "total_r": -2.0061392509947114,
+            "expectancy_r": -0.016178542346731557,
+            "profit_factor": 0.961991169502042,
+            "max_drawdown_r": 8.45484651313268,
+            "mean_mae_r": 0.7307259296543595,
+            "mean_mfe_r": 0.6991805434164132,
+            "symbols": 54,
+            "exit_reasons": {
+              "target": 67,
+              "stop": 47,
+              "time_exit": 10
+            }
+          },
+          "2026-06": {
+            "trades": 137,
+            "wins": 72,
+            "win_rate": 0.5255474452554745,
+            "total_r": -6.692216282806884,
+            "expectancy_r": -0.04884829403508676,
+            "profit_factor": 0.8896088397755766,
+            "max_drawdown_r": 14.538367265910136,
+            "mean_mae_r": 0.7614326616364315,
+            "mean_mfe_r": 0.729190335681759,
+            "symbols": 57,
+            "exit_reasons": {
+              "target": 71,
+              "stop": 56,
+              "time_exit": 10
+            }
+          },
+          "2026-07": {
+            "trades": 92,
+            "wins": 50,
+            "win_rate": 0.5434782608695652,
+            "total_r": -6.576640054061075,
+            "expectancy_r": -0.07148521797892472,
+            "profit_factor": 0.8440665621700646,
+            "max_drawdown_r": 8.661545381567844,
+            "mean_mae_r": 0.820963060056286,
+            "mean_mfe_r": 0.7141640587318221,
+            "symbols": 43,
+            "exit_reasons": {
+              "target": 46,
+              "stop": 39,
+              "time_exit": 7
+            }
+          },
+          "2026-08": {
+            "trades": 96,
+            "wins": 48,
+            "win_rate": 0.5,
+            "total_r": -12.578817087692675,
+            "expectancy_r": -0.13102934466346539,
+            "profit_factor": 0.7276692788086798,
+            "max_drawdown_r": 18.874190148091746,
+            "mean_mae_r": 0.8376500638093324,
+            "mean_mfe_r": 0.7276821124091808,
+            "symbols": 54,
+            "exit_reasons": {
+              "target": 44,
+              "stop": 41,
+              "time_exit": 11
+            }
+          },
+          "2026-09": {
+            "trades": 103,
+            "wins": 56,
+            "win_rate": 0.5436893203883495,
+            "total_r": -5.123714876715705,
+            "expectancy_r": -0.04974480462830782,
+            "profit_factor": 0.8867829661964578,
+            "max_drawdown_r": 9.463564765597596,
+            "mean_mae_r": 0.7781292376831461,
+            "mean_mfe_r": 0.7334238678184618,
+            "symbols": 58,
+            "exit_reasons": {
+              "target": 53,
+              "stop": 42,
+              "time_exit": 8
+            }
+          },
+          "2026-10": {
+            "trades": 3,
+            "wins": 2,
+            "win_rate": 0.6666666666666666,
+            "total_r": 0.35503406120721026,
+            "expectancy_r": 0.11834468706907009,
+            "profit_factor": 1.3347249325012163,
+            "max_drawdown_r": 1.0606740841031321,
+            "mean_mae_r": 0.7848907342248452,
+            "mean_mfe_r": 0.5654945076233355,
+            "symbols": 3,
+            "exit_reasons": {
+              "target": 2,
+              "stop": 1
+            }
+          }
+        },
+        "robustness": {
+          "top_train_symbol": "BSB",
+          "top_train_days": [
+            "2026-04-16",
+            "2026-06-02",
+            "2026-07-07"
+          ],
+          "without_top_symbol": {
+            "trades": 639,
+            "wins": 347,
+            "win_rate": 0.543035993740219,
+            "total_r": -31.02802064122868,
+            "expectancy_r": -0.048557152803174734,
+            "profit_factor": 0.8899234089597355,
+            "max_drawdown_r": 43.27706327694863,
+            "mean_mae_r": 0.7725657708275209,
+            "mean_mfe_r": 0.7090565562934638,
+            "symbols": 163,
+            "exit_reasons": {
+              "target": 328,
+              "time_exit": 56,
+              "stop": 255
+            }
+          },
+          "without_top_train_days": {
+            "trades": 638,
+            "wins": 337,
+            "win_rate": 0.5282131661442007,
+            "total_r": -43.46340036054775,
+            "expectancy_r": -0.06812445197578015,
+            "profit_factor": 0.8492084734234201,
+            "max_drawdown_r": 52.13355203788353,
+            "mean_mae_r": 0.7801779214298813,
+            "mean_mfe_r": 0.7060671781063453,
+            "symbols": 161,
+            "exit_reasons": {
+              "target": 321,
+              "time_exit": 56,
+              "stop": 261
+            }
+          }
+        }
+      },
+      "stress_10bp": {
+        "cost": "stress_10bp",
+        "raw_trades": 865,
+        "capacity_skipped": 207,
+        "walk_forward": {
+          "all": {
+            "variant": "E_extreme_reversion_short",
+            "cost": "stress_10bp",
+            "split": "all",
+            "capacity_skipped": 207,
+            "trades": 658,
+            "wins": 351,
+            "win_rate": 0.5334346504559271,
+            "total_r": -70.03760881180284,
+            "expectancy_r": -0.10644013497234477,
+            "profit_factor": 0.7721749531990766,
+            "max_drawdown_r": 77.20304250141277,
+            "mean_mae_r": 0.7768794434871023,
+            "mean_mfe_r": 0.6921730857814088,
+            "symbols": 163,
+            "exit_reasons": {
+              "target": 331,
+              "time_exit": 63,
+              "stop": 264
+            }
+          },
+          "train": {
+            "variant": "E_extreme_reversion_short",
+            "cost": "stress_10bp",
+            "split": "train",
+            "capacity_skipped": 0,
+            "trades": 429,
+            "wins": 234,
+            "win_rate": 0.5454545454545454,
+            "total_r": -32.41612383897184,
+            "expectancy_r": -0.07556206023070361,
+            "profit_factor": 0.8316099052316571,
+            "max_drawdown_r": 40.758101698966286,
+            "mean_mae_r": 0.749740989367672,
+            "mean_mfe_r": 0.6879155129901359,
+            "symbols": 114,
+            "exit_reasons": {
+              "target": 222,
+              "time_exit": 42,
+              "stop": 165
+            }
+          },
+          "validation": {
+            "variant": "E_extreme_reversion_short",
+            "cost": "stress_10bp",
+            "split": "validation",
+            "capacity_skipped": 0,
+            "trades": 116,
+            "wins": 56,
+            "win_rate": 0.4827586206896552,
+            "total_r": -23.715820381962523,
+            "expectancy_r": -0.20444672743071135,
+            "profit_factor": 0.6142321609434648,
+            "max_drawdown_r": 25.225397441393525,
+            "mean_mae_r": 0.8645042431921001,
+            "mean_mfe_r": 0.683390504055277,
+            "symbols": 58,
+            "exit_reasons": {
+              "target": 52,
+              "stop": 52,
+              "time_exit": 12
+            }
+          },
+          "test": {
+            "variant": "E_extreme_reversion_short",
+            "cost": "stress_10bp",
+            "split": "test",
+            "capacity_skipped": 0,
+            "trades": 113,
+            "wins": 61,
+            "win_rate": 0.5398230088495575,
+            "total_r": -13.905664590868486,
+            "expectancy_r": -0.1230589786802521,
+            "profit_factor": 0.7397665366018694,
+            "max_drawdown_r": 16.7713400325852,
+            "mean_mae_r": 0.7899583819955612,
+            "mean_mfe_r": 0.7173525389467837,
+            "symbols": 61,
+            "exit_reasons": {
+              "stop": 47,
+              "target": 57,
+              "time_exit": 9
+            }
+          }
+        },
+        "monthly": {
+          "2026-04": {
+            "trades": 106,
+            "wins": 61,
+            "win_rate": 0.5754716981132075,
+            "total_r": -1.4135538975093391,
+            "expectancy_r": -0.013335414127446602,
+            "profit_factor": 0.9668370169827336,
+            "max_drawdown_r": 7.930310520738939,
+            "mean_mae_r": 0.6933469742224053,
+            "mean_mfe_r": 0.6660129810827268,
+            "symbols": 45,
+            "exit_reasons": {
+              "target": 56,
+              "time_exit": 15,
+              "stop": 35
+            }
+          },
+          "2026-05": {
+            "trades": 123,
+            "wins": 67,
+            "win_rate": 0.5447154471544715,
+            "total_r": -10.72902303495163,
+            "expectancy_r": -0.08722782955245227,
+            "profit_factor": 0.8103041707104297,
+            "max_drawdown_r": 15.832780384459735,
+            "mean_mae_r": 0.7493820984965586,
+            "mean_mfe_r": 0.6786304827027213,
+            "symbols": 54,
+            "exit_reasons": {
+              "target": 65,
+              "stop": 48,
+              "time_exit": 10
+            }
+          },
+          "2026-06": {
+            "trades": 136,
+            "wins": 70,
+            "win_rate": 0.5147058823529411,
+            "total_r": -15.18270015079237,
+            "expectancy_r": -0.11163750110876743,
+            "profit_factor": 0.7654185391313838,
+            "max_drawdown_r": 21.764856514057172,
+            "mean_mae_r": 0.7766344100731285,
+            "mean_mfe_r": 0.7117427316789743,
+            "symbols": 57,
+            "exit_reasons": {
+              "target": 69,
+              "stop": 57,
+              "time_exit": 10
+            }
+          },
+          "2026-07": {
+            "trades": 92,
+            "wins": 50,
+            "win_rate": 0.5434782608695652,
+            "total_r": -11.712725096555937,
+            "expectancy_r": -0.12731222931039063,
+            "profit_factor": 0.7369445722579787,
+            "max_drawdown_r": 13.11810815596873,
+            "mean_mae_r": 0.8237016314165334,
+            "mean_mfe_r": 0.6865186507410166,
+            "symbols": 43,
+            "exit_reasons": {
+              "target": 45,
+              "stop": 39,
+              "time_exit": 8
+            }
+          },
+          "2026-08": {
+            "trades": 96,
+            "wins": 47,
+            "win_rate": 0.4895833333333333,
+            "total_r": -17.826970531559873,
+            "expectancy_r": -0.1856976097037487,
+            "profit_factor": 0.6363627179388691,
+            "max_drawdown_r": 23.501907318254226,
+            "mean_mae_r": 0.8381658645115772,
+            "mean_mfe_r": 0.7050308808264808,
+            "symbols": 54,
+            "exit_reasons": {
+              "target": 43,
+              "stop": 41,
+              "time_exit": 12
+            }
+          },
+          "2026-09": {
+            "trades": 102,
+            "wins": 54,
+            "win_rate": 0.5294117647058824,
+            "total_r": -13.296368596576766,
+            "expectancy_r": -0.1303565548683997,
+            "profit_factor": 0.7277767917337915,
+            "max_drawdown_r": 16.7713400325852,
+            "mean_mae_r": 0.7968184750416928,
+            "mean_mfe_r": 0.7053208249092222,
+            "symbols": 57,
+            "exit_reasons": {
+              "target": 51,
+              "stop": 43,
+              "time_exit": 8
+            }
+          },
+          "2026-10": {
+            "trades": 3,
+            "wins": 2,
+            "win_rate": 0.6666666666666666,
+            "total_r": 0.1237324961430708,
+            "expectancy_r": 0.0412441653810236,
+            "profit_factor": 1.1105760295417626,
+            "max_drawdown_r": 1.1189811811459482,
+            "mean_mae_r": 0.7918863747436765,
+            "mean_mfe_r": 0.5995163334554612,
+            "symbols": 3,
+            "exit_reasons": {
+              "target": 2,
+              "stop": 1
+            }
+          }
+        },
+        "robustness": {
+          "top_train_symbol": "PIPPIN",
+          "top_train_days": [
+            "2026-05-11",
+            "2026-06-02",
+            "2026-07-07"
+          ],
+          "without_top_symbol": {
+            "trades": 653,
+            "wins": 346,
+            "win_rate": 0.5298621745788668,
+            "total_r": -73.56241314862562,
+            "expectancy_r": -0.11265300635317856,
+            "profit_factor": 0.7607091318121904,
+            "max_drawdown_r": 79.19068468612349,
+            "mean_mae_r": 0.7809459415229123,
+            "mean_mfe_r": 0.6901679376208678,
+            "symbols": 162,
+            "exit_reasons": {
+              "target": 326,
+              "time_exit": 63,
+              "stop": 264
+            }
+          },
+          "without_top_train_days": {
+            "trades": 635,
+            "wins": 330,
+            "win_rate": 0.5196850393700787,
+            "total_r": -82.85497602221932,
+            "expectancy_r": -0.1304802772003453,
+            "profit_factor": 0.7291563442094735,
+            "max_drawdown_r": 90.02040971182925,
+            "mean_mae_r": 0.7881873302496428,
+            "mean_mfe_r": 0.68481841685315,
+            "symbols": 163,
+            "exit_reasons": {
+              "target": 312,
+              "time_exit": 60,
+              "stop": 263
+            }
+          }
+        }
+      }
+    },
+    "C_pump_retest_short": {
+      "base_5bp": {
+        "cost": "base_5bp",
+        "raw_trades": 135,
+        "capacity_skipped": 15,
+        "walk_forward": {
+          "all": {
+            "variant": "C_pump_retest_short",
+            "cost": "base_5bp",
+            "split": "all",
+            "capacity_skipped": 15,
+            "trades": 120,
+            "wins": 38,
+            "win_rate": 0.31666666666666665,
+            "total_r": -35.635226444185044,
+            "expectancy_r": -0.29696022036820874,
+            "profit_factor": 0.5993089896347504,
+            "max_drawdown_r": 42.15912276567159,
+            "mean_mae_r": 1.5056714444840635,
+            "mean_mfe_r": 1.4000448882400256,
+            "symbols": 53,
+            "exit_reasons": {
+              "target": 38,
+              "stop": 82
+            }
+          },
+          "train": {
+            "variant": "C_pump_retest_short",
+            "cost": "base_5bp",
+            "split": "train",
+            "capacity_skipped": 0,
+            "trades": 96,
+            "wins": 29,
+            "win_rate": 0.3020833333333333,
+            "total_r": -31.863238201138333,
+            "expectancy_r": -0.3319087312618577,
+            "profit_factor": 0.5608276645071759,
+            "max_drawdown_r": 36.7574390195456,
+            "mean_mae_r": 1.5376432619373757,
+            "mean_mfe_r": 1.3880466873350954,
+            "symbols": 44,
+            "exit_reasons": {
+              "target": 29,
+              "stop": 67
+            }
+          },
+          "validation": {
+            "variant": "C_pump_retest_short",
+            "cost": "base_5bp",
+            "split": "validation",
+            "capacity_skipped": 0,
+            "trades": 14,
+            "wins": 3,
+            "win_rate": 0.21428571428571427,
+            "total_r": -7.741677299506046,
+            "expectancy_r": -0.5529769499647176,
+            "profit_factor": 0.35912738082291973,
+            "max_drawdown_r": 7.741677299506046,
+            "mean_mae_r": 1.606339439239004,
+            "mean_mfe_r": 1.1407086812642422,
+            "symbols": 8,
+            "exit_reasons": {
+              "stop": 11,
+              "target": 3
+            }
+          },
+          "test": {
+            "variant": "C_pump_retest_short",
+            "cost": "base_5bp",
+            "split": "test",
+            "capacity_skipped": 0,
+            "trades": 10,
+            "wins": 6,
+            "win_rate": 0.6,
+            "total_r": 3.9696890564593357,
+            "expectancy_r": 0.39696890564593357,
+            "profit_factor": 1.922839519249916,
+            "max_drawdown_r": 2.144567332022697,
+            "mean_mae_r": 1.0578068042753495,
+            "mean_mfe_r": 1.8782983066934544,
+            "symbols": 6,
+            "exit_reasons": {
+              "target": 6,
+              "stop": 4
+            }
+          }
+        },
+        "monthly": {
+          "2026-04": {
+            "trades": 39,
+            "wins": 14,
+            "win_rate": 0.358974358974359,
+            "total_r": -7.395060862754308,
+            "expectancy_r": -0.18961694519882843,
+            "profit_factor": 0.7255454689505979,
+            "max_drawdown_r": 9.137607421989859,
+            "mean_mae_r": 1.4276534616986187,
+            "mean_mfe_r": 1.4838287942862176,
+            "symbols": 25,
+            "exit_reasons": {
+              "target": 14,
+              "stop": 25
+            }
+          },
+          "2026-05": {
+            "trades": 24,
+            "wins": 5,
+            "win_rate": 0.20833333333333334,
+            "total_r": -13.469617857153525,
+            "expectancy_r": -0.561234077381397,
+            "profit_factor": 0.34622354959402424,
+            "max_drawdown_r": 14.897124394338395,
+            "mean_mae_r": 1.804646325541784,
+            "mean_mfe_r": 1.2004889125699827,
+            "symbols": 15,
+            "exit_reasons": {
+              "stop": 19,
+              "target": 5
+            }
+          },
+          "2026-06": {
+            "trades": 28,
+            "wins": 9,
+            "win_rate": 0.32142857142857145,
+            "total_r": -8.044712520280708,
+            "expectancy_r": -0.28731116143859686,
+            "profit_factor": 0.6107857943506945,
+            "max_drawdown_r": 14.4870557279157,
+            "mean_mae_r": 1.4836891085618225,
+            "mean_mfe_r": 1.4714101019069825,
+            "symbols": 16,
+            "exit_reasons": {
+              "stop": 19,
+              "target": 9
+            }
+          },
+          "2026-07": {
+            "trades": 7,
+            "wins": 1,
+            "win_rate": 0.14285714285714285,
+            "total_r": -5.137266495336307,
+            "expectancy_r": -0.7338952136194725,
+            "profit_factor": 0.21205983329350764,
+            "max_drawdown_r": 5.137266495336307,
+            "mean_mae_r": 1.6588194032362829,
+            "mean_mfe_r": 0.8141273402878391,
+            "symbols": 6,
+            "exit_reasons": {
+              "stop": 6,
+              "target": 1
+            }
+          },
+          "2026-08": {
+            "trades": 14,
+            "wins": 4,
+            "win_rate": 0.2857142857142857,
+            "total_r": -5.294942713214094,
+            "expectancy_r": -0.3782101938010067,
+            "profit_factor": 0.5171523054841759,
+            "max_drawdown_r": 5.941094351306237,
+            "mean_mae_r": 1.4228810974318566,
+            "mean_mfe_r": 1.385229913368644,
+            "symbols": 9,
+            "exit_reasons": {
+              "stop": 10,
+              "target": 4
+            }
+          },
+          "2026-09": {
+            "trades": 8,
+            "wins": 5,
+            "win_rate": 0.625,
+            "total_r": 3.7063740045538944,
+            "expectancy_r": 0.4632967505692368,
+            "profit_factor": 2.1467701533511097,
+            "max_drawdown_r": 1.0949757188969325,
+            "mean_mae_r": 1.076901286550958,
+            "mean_mfe_r": 1.879092085923702,
+            "symbols": 4,
+            "exit_reasons": {
+              "stop": 3,
+              "target": 5
+            }
+          }
+        },
+        "robustness": {
+          "top_train_symbol": "RAVE",
+          "top_train_days": [
+            "2026-04-18",
+            "2026-05-19",
+            "2026-06-29"
+          ],
+          "without_top_symbol": {
+            "trades": 110,
+            "wins": 33,
+            "win_rate": 0.3,
+            "total_r": -37.55298096305841,
+            "expectancy_r": -0.34139073602780384,
+            "profit_factor": 0.5510990906616523,
+            "max_drawdown_r": 45.124880321266986,
+            "mean_mae_r": 1.5634333122555542,
+            "mean_mfe_r": 1.341320394798572,
+            "symbols": 52,
+            "exit_reasons": {
+              "target": 33,
+              "stop": 77
+            }
+          },
+          "without_top_train_days": {
+            "trades": 113,
+            "wins": 32,
+            "win_rate": 0.2831858407079646,
+            "total_r": -42.84607248856741,
+            "expectancy_r": -0.37916878308466734,
+            "profit_factor": 0.5116216341278449,
+            "max_drawdown_r": 49.369968810053955,
+            "mean_mae_r": 1.5588722980912677,
+            "mean_mfe_r": 1.3278531955227721,
+            "symbols": 52,
+            "exit_reasons": {
+              "target": 32,
+              "stop": 81
+            }
+          }
+        }
+      },
+      "stress_10bp": {
+        "cost": "stress_10bp",
+        "raw_trades": 135,
+        "capacity_skipped": 15,
+        "walk_forward": {
+          "all": {
+            "variant": "C_pump_retest_short",
+            "cost": "stress_10bp",
+            "split": "all",
+            "capacity_skipped": 15,
+            "trades": 120,
+            "wins": 38,
+            "win_rate": 0.31666666666666665,
+            "total_r": -45.469309437873704,
+            "expectancy_r": -0.3789109119822809,
+            "profit_factor": 0.5232328244460087,
+            "max_drawdown_r": 51.1031623748037,
+            "mean_mae_r": 1.4901758798318585,
+            "mean_mfe_r": 1.3332501222523347,
+            "symbols": 53,
+            "exit_reasons": {
+              "target": 38,
+              "stop": 82
+            }
+          },
+          "train": {
+            "variant": "C_pump_retest_short",
+            "cost": "stress_10bp",
+            "split": "train",
+            "capacity_skipped": 0,
+            "trades": 96,
+            "wins": 29,
+            "win_rate": 0.3020833333333333,
+            "total_r": -39.610683479956094,
+            "expectancy_r": -0.4126112862495426,
+            "profit_factor": 0.4902581887244274,
+            "max_drawdown_r": 43.02492108832823,
+            "mean_mae_r": 1.5208135940157022,
+            "mean_mfe_r": 1.3238851010544068,
+            "symbols": 44,
+            "exit_reasons": {
+              "target": 29,
+              "stop": 67
+            }
+          },
+          "validation": {
+            "variant": "C_pump_retest_short",
+            "cost": "stress_10bp",
+            "split": "validation",
+            "capacity_skipped": 0,
+            "trades": 14,
+            "wins": 3,
+            "win_rate": 0.21428571428571427,
+            "total_r": -8.891705381360447,
+            "expectancy_r": -0.6351218129543176,
+            "profit_factor": 0.31991828782609927,
+            "max_drawdown_r": 8.891705381360447,
+            "mean_mae_r": 1.586727203800664,
+            "mean_mfe_r": 1.0808878058171747,
+            "symbols": 8,
+            "exit_reasons": {
+              "stop": 11,
+              "target": 3
+            }
+          },
+          "test": {
+            "variant": "C_pump_retest_short",
+            "cost": "stress_10bp",
+            "split": "test",
+            "capacity_skipped": 0,
+            "trades": 10,
+            "wins": 6,
+            "win_rate": 0.6,
+            "total_r": 3.0330794234428335,
+            "expectancy_r": 0.3033079423442834,
+            "profit_factor": 1.6610554462542773,
+            "max_drawdown_r": 2.2824137111399248,
+            "mean_mae_r": 1.0608819701106307,
+            "mean_mfe_r": 1.7764615687616694,
+            "symbols": 6,
+            "exit_reasons": {
+              "target": 6,
+              "stop": 4
+            }
+          }
+        },
+        "monthly": {
+          "2026-04": {
+            "trades": 39,
+            "wins": 14,
+            "win_rate": 0.358974358974359,
+            "total_r": -10.55001488591167,
+            "expectancy_r": -0.27051320220286335,
+            "profit_factor": 0.6332665991916204,
+            "max_drawdown_r": 12.052241873573594,
+            "mean_mae_r": 1.4149582200905666,
+            "mean_mfe_r": 1.4092674475713824,
+            "symbols": 25,
+            "exit_reasons": {
+              "target": 14,
+              "stop": 25
+            }
+          },
+          "2026-05": {
+            "trades": 24,
+            "wins": 5,
+            "win_rate": 0.20833333333333334,
+            "total_r": -15.281564353925948,
+            "expectancy_r": -0.6367318480802479,
+            "profit_factor": 0.3076332937044811,
+            "max_drawdown_r": 16.64018972983931,
+            "mean_mae_r": 1.7756822560291046,
+            "mean_mfe_r": 1.1585761906316037,
+            "symbols": 15,
+            "exit_reasons": {
+              "stop": 19,
+              "target": 5
+            }
+          },
+          "2026-06": {
+            "trades": 28,
+            "wins": 9,
+            "win_rate": 0.32142857142857145,
+            "total_r": -10.400440903078863,
+            "expectancy_r": -0.3714443179671022,
+            "profit_factor": 0.5318345746916335,
+            "max_drawdown_r": 15.873672581876471,
+            "mean_mae_r": 1.470088290144631,
+            "mean_mfe_r": 1.4002643428931254,
+            "symbols": 16,
+            "exit_reasons": {
+              "stop": 19,
+              "target": 9
+            }
+          },
+          "2026-07": {
+            "trades": 7,
+            "wins": 1,
+            "win_rate": 0.14285714285714285,
+            "total_r": -5.733823625290769,
+            "expectancy_r": -0.819117660755824,
+            "profit_factor": 0.181837649829626,
+            "max_drawdown_r": 5.733823625290769,
+            "mean_mae_r": 1.6411094109929203,
+            "mean_mfe_r": 0.7686571600337363,
+            "symbols": 6,
+            "exit_reasons": {
+              "stop": 6,
+              "target": 1
+            }
+          },
+          "2026-08": {
+            "trades": 14,
+            "wins": 4,
+            "win_rate": 0.2857142857142857,
+            "total_r": -6.488749399430775,
+            "expectancy_r": -0.4634820999593411,
+            "profit_factor": 0.4526745829595079,
+            "max_drawdown_r": 6.806933919412749,
+            "mean_mae_r": 1.4091663964721612,
+            "mean_mfe_r": 1.311421320173174,
+            "symbols": 9,
+            "exit_reasons": {
+              "stop": 10,
+              "target": 4
+            }
+          },
+          "2026-09": {
+            "trades": 8,
+            "wins": 5,
+            "win_rate": 0.625,
+            "total_r": 2.9852837297643218,
+            "expectancy_r": 0.3731604662205402,
+            "profit_factor": 1.8647566994970666,
+            "max_drawdown_r": 1.1841805144404753,
+            "mean_mae_r": 1.0803491624977564,
+            "mean_mfe_r": 1.7843569295212105,
+            "symbols": 4,
+            "exit_reasons": {
+              "stop": 3,
+              "target": 5
+            }
+          }
+        },
+        "robustness": {
+          "top_train_symbol": "PIPPIN",
+          "top_train_days": [
+            "2026-04-18",
+            "2026-05-19",
+            "2026-06-05"
+          ],
+          "without_top_symbol": {
+            "trades": 119,
+            "wins": 37,
+            "win_rate": 0.31092436974789917,
+            "total_r": -46.832438780215725,
+            "expectancy_r": -0.3935499057160985,
+            "profit_factor": 0.508939769757084,
+            "max_drawdown_r": 52.46629171714572,
+            "mean_mae_r": 1.4953764780194843,
+            "mean_mfe_r": 1.3010620522119705,
+            "symbols": 52,
+            "exit_reasons": {
+              "target": 37,
+              "stop": 82
+            }
+          },
+          "without_top_train_days": {
+            "trades": 115,
+            "wins": 33,
+            "win_rate": 0.28695652173913044,
+            "total_r": -51.969977155407875,
+            "expectancy_r": -0.4519128448296336,
+            "profit_factor": 0.45507025445715815,
+            "max_drawdown_r": 57.60383009233787,
+            "mean_mae_r": 1.5377722430292724,
+            "mean_mfe_r": 1.2692220303949289,
+            "symbols": 52,
+            "exit_reasons": {
+              "target": 33,
+              "stop": 82
+            }
+          }
+        }
+      }
+    }
+  },
+  "costs": {
+    "base_5bp": {
+      "fee_one_way": 0.0005,
+      "slippage_one_way": 0.0005
+    },
+    "stress_10bp": {
+      "fee_one_way": 0.001,
+      "slippage_one_way": 0.001
+    }
+  },
+  "source_sha256": "eb7d8c6d8c447814813f029894054e5889ae10f232f0adc3a3c444c62cb453f8",
+  "config_sha256": "ebfc64139d9a81cfd5a3becf85f32b8b298800bff332c829fe02e1ce3ee99713",
+  "limitations": [
+    "OHLC cannot resolve intrabar order; stop is prioritized.",
+    "Funding, mark price, contract multiplier and order-book queue are not modeled.",
+    "All signals are research rules and have not been connected to runtime."
+  ]
+}

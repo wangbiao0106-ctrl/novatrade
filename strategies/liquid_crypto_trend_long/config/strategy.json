@@ -1,0 +1,80 @@
+{
+  "strategy": "liquid_crypto_trend_long",
+  "version": "1.0.0",
+  "name_zh": "高流动性加密永续趋势跟随（纯多头）",
+  "name_en": "Liquid Crypto Trend Long",
+  "source_of_truth": "strategies/liquid_crypto_trend_long/STRATEGY.md",
+  "status": "research_candidate",
+  "runtime_integration": "not_implemented",
+  "market": "OKX_USDT_LINEAR_PERPETUAL",
+  "input_timeframe_minutes": 5,
+  "signal_timeframe_minutes": 60,
+  "candle_timestamp": "bar_open_time",
+  "timezone": "UTC",
+  "universe": {
+    "asset_type": "crypto_usdt_linear_perpetual",
+    "classification_field": "instCategory",
+    "crypto_category_value": "1",
+    "excluded_categories": ["3", "4"],
+    "excluded_category_meaning": {
+      "3": "代币化股票/ETF/指数",
+      "4": "代币化商品"
+    },
+    "stablecoins_excluded": true,
+    "mainstream_included": true,
+    "mainstream_symbols": ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "TRX"],
+    "min_quote_volume_24h_usdt": 30000000,
+    "volume_lookback_bars": 24,
+    "volume_min_bars": 12,
+    "volume_field": "quote_volume",
+    "volume_measured_point_in_time": true,
+    "exclude_snapshot": "config/universe.json"
+  },
+  "signal": {
+    "ma_window_bars": 72,
+    "hysteresis_pct": 1.0,
+    "max_direction_bars": 96,
+    "entry_condition": "close_above_ma_times_one_plus_hysteresis",
+    "exit_condition": "close_below_ma_times_one_minus_hysteresis",
+    "duration_cap_rule": "同一方向持满 96 根 1h K 线后强制平仓，直到带外信号重新给出方向",
+    "confirmation": "已确认收盘的 1h K 线"
+  },
+  "position": {
+    "direction": "long_only",
+    "weighting": "equal_weight_eligible",
+    "vol_target_annual": 2.0,
+    "vol_lookback_bars": 168,
+    "vol_scale_cap": 3.0,
+    "rebalance": "hourly_on_confirmed_1h_close"
+  },
+  "costs": {
+    "fee_rate_one_way": 0.0005,
+    "slippage_one_way": 0.0002,
+    "round_trip": 0.0014,
+    "funding_rate_round_trip": 0.0,
+    "funding_modelled": false
+  },
+  "risk": {
+    "max_gross_exposure_field_units": 3.0,
+    "no_stop_loss": true,
+    "no_take_profit": true,
+    "exit_only_by_band_flip_or_duration_cap": true,
+    "leverage_note": "敞口由波动率目标决定，实测平均总敞口约 1 倍名义；不使用固定杠杆"
+  },
+  "benchmarks": {
+    "required": true,
+    "eligible_basket": "同池等权逐时再平衡买入持有",
+    "full_universe": "全部可用加密品种等权逐时再平衡买入持有",
+    "acceptance": "策略必须同时超过两个基准的区间收益与夏普，否则不得定稿"
+  },
+  "evidence": {
+    "data_source": "data/kline/okx/swap/5m",
+    "window_start_utc": "2025-04-03",
+    "window_end_utc": "2026-10-03",
+    "universe_size_crypto": 286,
+    "average_eligible_symbols": 39.64326418965124,
+    "reproduce": "python3 strategies/liquid_crypto_trend_long/src/backtest.py",
+    "validated_on_single_regime": false,
+    "requires_bear_regime_check": true
+  }
+}
