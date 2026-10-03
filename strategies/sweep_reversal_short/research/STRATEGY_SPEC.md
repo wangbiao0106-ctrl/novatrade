@@ -228,7 +228,7 @@ BTC 门控必须 fail-closed：信号时刻之前不足 200 根 1h K 线或 SMA2
 - 对照：同一口径下 177 币快照在新样本外只有 45 笔 +（−0.07R），即 §5 的 177 币证据不能外推；收益来自动态成交额排名，但两者样本都小。
 - 全体合规币（不做排名与下限过滤）144 笔、期望 +0.19R、回撤 14.12R，明显弱于生产范围，支持保留排名上限与成交额下限。
 
-产物：`results/full_history/report_fee5bps.json` 与逐笔 CSV（目录被忽略，可重建）。
+产物：`results/full_history/report_fee5bps.json` 与逐笔 CSV，已随仓库提交；同目录的 `results/full_history/data/`（约 1.3 GB 的 5m/15m/30m/1h/4h npz 数组）按 `.gitignore` 忽略，由 `report_full_history.py` 从 `data/kline/okx/swap/5m` 重建。
 
 ## 8. 已知局限（务必知悉）
 
