@@ -52,7 +52,7 @@ struct RightRail: View {
                     if model.fills.isEmpty { RailEmpty("暂无\(accountLabel)成交记录") }
                     ForEach(model.fills.prefix(8)) { fill in
                         RailRow {
-                            Text(fill.timestamp.formatted(date: .omitted, time: .shortened)).foregroundStyle(.secondary)
+                            Text(formatLocalTime(fill.timestamp)).foregroundStyle(.secondary)
                             Spacer()
                             Text(formatQuantity(fill.quantity)).monospacedDigit()
                             Text("费 \(formatQuantity(fill.fee))").foregroundStyle(.secondary)
@@ -64,7 +64,7 @@ struct RightRail: View {
                     ForEach(model.runtimeLogs.suffix(12).reversed()) { log in
                         VStack(alignment: .leading, spacing: 3) {
                             Text(log.message).font(.caption).lineLimit(2)
-                            Text(log.timestamp.formatted(date: .omitted, time: .shortened)).font(.caption2).foregroundStyle(.secondary)
+                            Text(formatLocalTime(log.timestamp)).font(.caption2).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
                     }
                 }

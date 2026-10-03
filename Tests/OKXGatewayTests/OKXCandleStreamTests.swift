@@ -21,6 +21,19 @@ func candleStreamDecodesLiveAndClosedBarsInTimeOrder() throws {
 }
 
 @Test
+func candleStreamUsesUTCAlignedChannelForOneDayInterval() throws {
+    let frame = #"{"arg":{"channel":"candle1Dutc","instId":"BTC-USDT-SWAP"},"data":[["1760054400000","100","110","95","105","12","12","1248","1"]]}"#
+    let event = try OKXCandleSocket.candleFrame(frame, instrumentID: "BTC-USDT-SWAP", interval: .oneDay)
+
+    guard case let .candles(candles) = event else {
+        Issue.record("Expected UTC daily candle row")
+        return
+    }
+    #expect(candles.count == 1)
+    #expect(candles[0].timestamp == Date(timeIntervalSince1970: 1_760_054_400))
+}
+
+@Test
 func candleStreamSeparatesAcknowledgementsAndHeartbeatFromPrices() throws {
     let subscribed = #"{"event":"subscribe","arg":{"channel":"candle1H","instId":"BTC-USDT-SWAP"},"connId":"abc"}"#
     #expect(try OKXCandleSocket.candleFrame(subscribed, instrumentID: "BTC-USDT-SWAP", interval: .oneHour) == .subscribed)

@@ -10,10 +10,12 @@ MIN_SYSTEM_VERSION="15.0"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
+LEGACY_APP_BUNDLE="$ROOT_DIR/.build/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_EXECUTABLE"
+LEGACY_APP_BINARY="$LEGACY_APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE"
 SERVICE_BINARY="$APP_MACOS/okx-locald"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 ICONSET_DIR="$ROOT_DIR/Sources/MacTraderApp/Resources/NovaTrade.iconset"
@@ -27,7 +29,16 @@ DMG_FILE="$DIST_DIR/NovaTrade.dmg"
 # different checkout's binaries.
 stop_running() {
   pkill -f "^$APP_BINARY( |$)" >/dev/null 2>&1 || true
+  pkill -f "^$LEGACY_APP_BINARY( |$)" >/dev/null 2>&1 || true
   pkill -f "^$SERVICE_BINARY( |$)" >/dev/null 2>&1 || true
+}
+
+# Older builds used .build/NovaTrade.app. Keeping that bundle beside dist/
+# gives macOS two apps with the same bundle identifier, which makes appshot
+# capture fail with Apple Event error -10018.
+prepare_for_launch() {
+  stop_running
+  rm -rf "$LEGACY_APP_BUNDLE"
 }
 
 cd "$ROOT_DIR"
@@ -85,7 +96,7 @@ open_app() {
 
 case "$MODE" in
   run)
-    stop_running
+    prepare_for_launch
     open_app
     ;;
   package|--package)
@@ -97,16 +108,16 @@ case "$MODE" in
     printf 'Created %s\n' "$DMG_FILE"
     ;;
   --debug|debug)
-    stop_running
+    prepare_for_launch
     lldb -- "$APP_BINARY"
     ;;
   --logs|logs)
-    stop_running
+    prepare_for_launch
     open_app
     /usr/bin/log stream --info --style compact --predicate "process == \"$APP_EXECUTABLE\""
     ;;
   --verify|verify)
-    stop_running
+    prepare_for_launch
     open_app
     sleep 1
     pgrep -f "^$APP_BINARY( |$)" >/dev/null

@@ -204,6 +204,22 @@ func decodesCandleQuoteVolumeFromATKRow() async throws {
 }
 
 @Test
+func requestsUTCAlignedDailyBarsForOneDayInterval() async throws {
+    let runner = StubATKRunner(outputs: [
+        "market candles BTC-USDT-SWAP --bar 1Dutc --limit 300 --json": ATKCommandResult(stdout: #"[["1760054400000","100","110","95","105","12","12","1248","1"]]"#)
+    ])
+
+    let candles = try await ATKClient(runner: runner).marketCandles(instrumentID: "BTC-USDT-SWAP", interval: .oneDay)
+
+    #expect(candles.count == 1)
+    // 2025-10-10 00:00:00 UTC must remain that instant; display formatting
+    // can apply the computer's local time zone later without changing OHLC.
+    #expect(candles[0].timestamp == Date(timeIntervalSince1970: 1_760_054_400))
+    #expect(candles[0].open == 100)
+    #expect(candles[0].close == 105)
+}
+
+@Test
 func rejectsBooleanTickerTimestampInsteadOfTreatingItAsEpochMilliseconds() async throws {
     let runner = StubATKRunner(outputs: [
         "market ticker BTC-USDT-SWAP --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","last":"100.5","ts":true}]"#)

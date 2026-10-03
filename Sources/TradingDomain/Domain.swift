@@ -82,6 +82,25 @@ public enum KlineInterval: String, Codable, CaseIterable, Sendable {
     case fourHours = "4H"
     case oneDay = "1D"
 
+    /// The OKX wire identifier for this interval. OKX's plain `1D` bar is
+    /// aligned to UTC+8, while `1Dutc` starts and ends at UTC midnight. Keep
+    /// the domain raw value as `1D` so persisted settings and strategy
+    /// packages remain backward-compatible, and translate only at the
+    /// exchange boundary.
+    public var exchangeBar: String {
+        self == .oneDay ? "1Dutc" : rawValue
+    }
+
+    /// Decodes an OKX bar identifier while accepting the legacy `1D` alias.
+    /// This is useful for callers that address the local service directly.
+    public init?(exchangeBar: String) {
+        if exchangeBar == "1Dutc" || exchangeBar == "1D" {
+            self = .oneDay
+        } else {
+            self.init(rawValue: exchangeBar)
+        }
+    }
+
     /// Bar length in minutes, used to turn bar counts into wall-clock time.
     public var minutes: Int {
         switch self {

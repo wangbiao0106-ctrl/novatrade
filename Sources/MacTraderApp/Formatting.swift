@@ -73,11 +73,37 @@ private let shortTimestampFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.dateFormat = "MM-dd HH:mm"
+    // Candle/risk timestamps are absolute instants.  Their day boundaries are
+    // decided by the service in UTC, but operator-facing labels stay local.
+    formatter.timeZone = .autoupdatingCurrent
     return formatter
 }()
 
 /// Compact local time for rail rows ("10-02 12:30").
 func formatShortTimestamp(_ date: Date) -> String { shortTimestampFormatter.string(from: date) }
+
+private let localTimeFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = .current
+    formatter.dateStyle = .none
+    formatter.timeStyle = .short
+    formatter.timeZone = .autoupdatingCurrent
+    return formatter
+}()
+
+/// Localized clock time for fills and runtime log rows.
+func formatLocalTime(_ date: Date) -> String { localTimeFormatter.string(from: date) }
+
+private let localClockFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "HH:mm:ss"
+    formatter.timeZone = .autoupdatingCurrent
+    return formatter
+}()
+
+/// 24-hour local clock used by the live candle status line.
+func formatLocalClock(_ date: Date) -> String { localClockFormatter.string(from: date) }
 
 /// OKX contract counts are whole numbers for most instruments; keep the
 /// fraction only when the lot size actually produces one.

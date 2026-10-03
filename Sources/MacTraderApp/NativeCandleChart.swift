@@ -15,6 +15,9 @@ private enum ChartDateFormat {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = pattern
+        // Keep chart labels in the operator's local timezone.  Daily candle
+        // boundaries are UTC data semantics and must not leak into display.
+        formatter.timeZone = .autoupdatingCurrent
         return formatter
     }
 }

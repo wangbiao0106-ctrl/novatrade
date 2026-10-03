@@ -132,7 +132,7 @@ public struct ATKClient: Sendable {
 
     public func marketCandles(instrumentID: String, interval: KlineInterval, limit: Int = 300) async throws -> [Candle] {
         try Self.validateInstrumentID(instrumentID)
-        let root = try await runJSON(["market", "candles", instrumentID, "--bar", interval.rawValue, "--limit", String(min(max(limit, 1), 300))])
+        let root = try await runJSON(["market", "candles", instrumentID, "--bar", interval.exchangeBar, "--limit", String(min(max(limit, 1), 300))])
         guard let rows = root as? [[Any]] else { throw ATKError.invalidJSON("K 线数据格式无效") }
         return try rows.enumerated().map { index, row in
             guard let candle = Self.decodeCandle(row) else {

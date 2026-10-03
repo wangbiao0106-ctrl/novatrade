@@ -67,7 +67,7 @@ public struct OKXCandleSocket: Sendable {
                                 heartbeat.cancel()
                                 socket.cancel(with: .normalClosure, reason: nil)
                             }
-                            let subscription: [String: Any] = ["op": "subscribe", "args": [["channel": "candle\(interval.rawValue)", "instId": instrumentID]]]
+                            let subscription: [String: Any] = ["op": "subscribe", "args": [["channel": "candle\(interval.exchangeBar)", "instId": instrumentID]]]
                             let data = try JSONSerialization.data(withJSONObject: subscription)
                             try await socket.send(.string(String(decoding: data, as: UTF8.self)))
                             while !Task.isCancelled {
@@ -125,7 +125,7 @@ public struct OKXCandleSocket: Sendable {
         }
         guard let argument = object["arg"] as? [String: Any],
               argument["instId"] as? String == instrumentID,
-              argument["channel"] as? String == "candle\(interval.rawValue)" else { return .ignored }
+              argument["channel"] as? String == "candle\(interval.exchangeBar)" else { return .ignored }
         if object["event"] as? String == "subscribe" { return .subscribed }
         guard let rows = object["data"] as? [[String]], !rows.isEmpty else { return .ignored }
         // WSS rows include the confirmation flag. Treat a truncated or

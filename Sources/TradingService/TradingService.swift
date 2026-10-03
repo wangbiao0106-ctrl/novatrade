@@ -3543,7 +3543,7 @@ public struct TradingHTTPServer {
         app.router.get("api/v1/market/candles") { [backend] request in
             let params = request.uri.queryParameters
             guard let instrument = params.get("instId"), !instrument.isEmpty,
-                  let interval = params.get("bar").flatMap(KlineInterval.init(rawValue:)) else { throw HBHTTPError(.badRequest) }
+                  let interval = params.get("bar").flatMap(KlineInterval.init(exchangeBar:)) else { throw HBHTTPError(.badRequest) }
             return try request.application.encoder.encode(await backend.marketSnapshot(instrumentID: instrument, interval: interval), from: request)
         }
         app.router.get("api/v1/strategies") { [backend] request in try request.application.encoder.encode(await backend.strategies(), from: request) }

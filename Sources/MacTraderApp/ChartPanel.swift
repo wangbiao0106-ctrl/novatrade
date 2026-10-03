@@ -97,7 +97,7 @@ struct ChartPanel: View {
                 .foregroundStyle(model.candleDataSource.isLive && !stale ? .mint : .orange)
                 .help("历史 K 线首次通过 API 加载；实时 K 柱仅由 OKX WSS candle 频道更新")
             if let updated = model.candleLastUpdatedAt {
-                Text(updated.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute().second()))
+                Text(formatLocalClock(updated))
                     .monospacedDigit().foregroundStyle(.secondary)
             }
         }
