@@ -19,6 +19,8 @@
     "scope": "dynamic.hlsrCandidates",
     "universe_refresh_seconds": 30,
     "evaluation_interval": "confirmed_15m_close",
+    "candidate_gain_source": "okx_ticker.open24h_rolling_24h",
+    "ui_change_percent_source": "okx_ticker.sodUtc0_utc_day_display_only",
     "higher_timeframe": "4H",
     "higher_timeframe_minimum_history_bars": 55,
     "entry_order": "next_15m_open_market",

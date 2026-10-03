@@ -21,6 +21,11 @@ func strategySpecificScopesDoNotReuseTheHot20Pool() {
     let contracts = [
         ContractMarket(id: "SWEEP-USDT-SWAP", name: "SWEEP", baseCurrency: "SWEEP", quoteCurrency: "USDT", last: 1, changePercent: 5, volume24h: 80_000_000),
         ContractMarket(id: "HLSR-USDT-SWAP", name: "HLSR", baseCurrency: "HLSR", quoteCurrency: "USDT", last: 1, changePercent: 41, volume24h: 31_000_001),
+        // SAND-like state after 08:00 Asia/Shanghai: the UTC-day move
+        // is negative, while rolling 24h gain still clears HLSR's gate.
+        ContractMarket(id: "SAND-USDT-SWAP", name: "SAND", baseCurrency: "SAND", quoteCurrency: "USDT", last: 1, changePercent: -2.3, rollingChangePercent: 43.8, volume24h: 369_622_000),
+        // A UTC-day-only mover must not enter the rolling-24h strategy pool.
+        ContractMarket(id: "DAILY-ONLY-USDT-SWAP", name: "DAILY-ONLY", baseCurrency: "DAILY-ONLY", quoteCurrency: "USDT", last: 1, changePercent: 55, rollingChangePercent: 20, volume24h: 40_000_000),
         ContractMarket(id: "HLSR-LOW-VOLUME-USDT-SWAP", name: "HLSR low volume", baseCurrency: "HLSR-LOW-VOLUME", quoteCurrency: "USDT", last: 1, changePercent: 80, volume24h: 29_000_000),
         ContractMarket(id: "DME-USDT-SWAP", name: "DME", baseCurrency: "DME", quoteCurrency: "USDT", last: 1, changePercent: 101, volume24h: 10_000_000),
         ContractMarket(id: "DME-LOW-VOLUME-USDT-SWAP", name: "DME low volume", baseCurrency: "DME-LOW-VOLUME", quoteCurrency: "USDT", last: 1, changePercent: 120, volume24h: 9_000_000),
@@ -29,7 +34,7 @@ func strategySpecificScopesDoNotReuseTheHot20Pool() {
     #expect(StrategyType.sweepReversalShort.defaultUniverseCategory == .sweepCandidates)
     #expect(StrategyType.hlsr.defaultUniverseCategory == .hlsrCandidates)
     #expect(StrategyType.doublePumpExhaustionShort.defaultUniverseCategory == .doublePumpCandidates)
-    #expect(StrategyScope.dynamic(.hlsrCandidates).resolvedInstrumentIDs(from: contracts) == ["HLSR-USDT-SWAP"])
+    #expect(StrategyScope.dynamic(.hlsrCandidates).resolvedInstrumentIDs(from: contracts) == ["SAND-USDT-SWAP", "HLSR-USDT-SWAP"])
     #expect(StrategyScope.dynamic(.doublePumpCandidates).resolvedInstrumentIDs(from: contracts) == ["DME-USDT-SWAP"])
 }
 

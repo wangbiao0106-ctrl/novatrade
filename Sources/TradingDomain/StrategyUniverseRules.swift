@@ -66,13 +66,13 @@ public enum StrategyUniverseRules {
 
     public static func isEligibleDoublePump(_ contract: ContractMarket) -> Bool {
         isEligibleHotAltcoin(contract)
-            && contract.changePercent > doublePumpMinimumGainPercent
+            && contract.rollingChangePercent > doublePumpMinimumGainPercent
             && contract.volume24h >= doublePumpMinimumQuoteVolume24h
     }
 
     public static func isEligibleHLSR(_ contract: ContractMarket) -> Bool {
         isEligibleHotAltcoin(contract)
-            && contract.changePercent > hlsrMinimumGainPercent
+            && contract.rollingChangePercent > hlsrMinimumGainPercent
             && contract.volume24h > hlsrMinimumQuoteVolume24h
     }
 }

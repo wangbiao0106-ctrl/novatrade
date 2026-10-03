@@ -155,18 +155,21 @@ public struct ATKClient: Sendable {
         let markets = rows.compactMap { row -> ContractMarket? in
             guard let id = row["instId"] as? String,
                   let last = Self.decimal(row["last"]), last > 0 else { return nil }
-            // OKX exposes both UTC and UTC+8 day-open prices.  The market
-            // sidebar's daily move must use the UTC day boundary.  Contracts
-            // listed during the current UTC day report `sodUtc0` as 0, so they
-            // fall back to the rolling 24h open.
+            // Keep the two price-change baselines separate: `sodUtc0` drives
+            // the UTC-day move shown by the market UI, while `open24h` drives
+            // the rolling 24h gain used by strategy candidate filters. For a
+            // newly listed contract with no `sodUtc0`, the UI day move falls
+            // back to the rolling open; the strategy value remains fail-closed
+            // when `open24h` is absent.
             let utcDayOpen = Self.decimal(row["sodUtc0"]).flatMap { $0 > 0 ? $0 : nil }
             let rollingOpen = Self.decimal(row["open24h"]).flatMap { $0 > 0 ? $0 : nil }
-            let open = utcDayOpen ?? rollingOpen ?? last
-            let change = open == 0 ? 0 : (last - open) / open * 100
+            let dayOpen = utcDayOpen ?? rollingOpen
+            let dayChange = dayOpen.map { (last - $0) / $0 * 100 } ?? 0
+            let rollingChange = rollingOpen.map { (last - $0) / $0 * 100 } ?? 0
             let volume = Self.quoteVolume24h(row, last: last)
             let base = id.split(separator: "-").first.map(String.init) ?? id
             let quote = id.split(separator: "-").dropFirst().first.map(String.init) ?? "USDT"
-            return ContractMarket(id: id, name: base, baseCurrency: base, quoteCurrency: quote, last: last, changePercent: change, volume24h: volume, category: "全部", updatedAt: .now)
+            return ContractMarket(id: id, name: base, baseCurrency: base, quoteCurrency: quote, last: last, changePercent: dayChange, rollingChangePercent: rollingChange, volume24h: volume, category: "全部", updatedAt: .now)
         }
         // Keep the complete list while tagging ranking buckets for the sidebar.
         // A contract may belong to one visible bucket; the "全部" view always contains every item.
@@ -179,7 +182,7 @@ public struct ATKClient: Sendable {
             else if gainIDs.contains(market.id) { category = "涨幅" }
             else if lossIDs.contains(market.id) { category = "跌幅" }
             else { category = "全部" }
-            return ContractMarket(id: market.id, name: market.name, baseCurrency: market.baseCurrency, quoteCurrency: market.quoteCurrency, last: market.last, changePercent: market.changePercent, volume24h: market.volume24h, category: category, updatedAt: market.updatedAt)
+            return ContractMarket(id: market.id, name: market.name, baseCurrency: market.baseCurrency, quoteCurrency: market.quoteCurrency, last: market.last, changePercent: market.changePercent, rollingChangePercent: market.rollingChangePercent, volume24h: market.volume24h, category: category, updatedAt: market.updatedAt)
         }
     }
 

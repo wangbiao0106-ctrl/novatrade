@@ -249,16 +249,44 @@ public struct ContractMarket: Codable, Equatable, Sendable, Identifiable {
     public let baseCurrency: String
     public let quoteCurrency: String
     public let last: Decimal
+    /// The exchange's UTC-day move, used by the market sidebar and gain/loss
+    /// display. This resets at UTC midnight (08:00 Asia/Shanghai).
     public let changePercent: Decimal
+    /// Rolling 24-hour price move, used by strategy universe hard filters.
+    public let rollingChangePercent: Decimal
     /// Rolling 24h quote turnover (USDT for linear swaps), not contracts or
     /// base-coin units; every universe ranking and volume floor uses it.
     public let volume24h: Decimal
     public let category: String
     public let updatedAt: Date
 
-    public init(id: String, name: String, baseCurrency: String, quoteCurrency: String, last: Decimal, changePercent: Decimal = 0, volume24h: Decimal = 0, category: String = "全部", updatedAt: Date = .now) {
+    public init(id: String, name: String, baseCurrency: String, quoteCurrency: String, last: Decimal, changePercent: Decimal = 0, rollingChangePercent: Decimal? = nil, volume24h: Decimal = 0, category: String = "全部", updatedAt: Date = .now) {
         self.id = id; self.name = name; self.baseCurrency = baseCurrency; self.quoteCurrency = quoteCurrency
-        self.last = last; self.changePercent = changePercent; self.volume24h = volume24h; self.category = category; self.updatedAt = updatedAt
+        self.last = last; self.changePercent = changePercent
+        self.rollingChangePercent = rollingChangePercent ?? changePercent
+        self.volume24h = volume24h; self.category = category; self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, baseCurrency, quoteCurrency, last, changePercent
+        case rollingChangePercent, volume24h, category, updatedAt
+    }
+
+    /// Keep persisted/API payloads from before the split readable. Older
+    /// payloads only had one change field, so it remains the best fallback for
+    /// the strategy value.
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        baseCurrency = try values.decode(String.self, forKey: .baseCurrency)
+        quoteCurrency = try values.decode(String.self, forKey: .quoteCurrency)
+        last = try values.decode(Decimal.self, forKey: .last)
+        changePercent = try values.decode(Decimal.self, forKey: .changePercent)
+        rollingChangePercent = try values.decodeIfPresent(Decimal.self, forKey: .rollingChangePercent) ?? changePercent
+        volume24h = try values.decode(Decimal.self, forKey: .volume24h)
+        category = try values.decode(String.self, forKey: .category)
+        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
     }
 }
 
@@ -781,11 +809,11 @@ public struct StrategyScope: Codable, Equatable, Sendable {
         case .hlsrCandidates:
             return contracts
                 .filter(StrategyUniverseRules.isEligibleHLSR)
-                .sorted { $0.changePercent > $1.changePercent }
+                .sorted { $0.rollingChangePercent > $1.rollingChangePercent }
         case .doublePumpCandidates:
             return contracts
                 .filter(StrategyUniverseRules.isEligibleDoublePump)
-                .sorted { $0.changePercent > $1.changePercent }
+                .sorted { $0.rollingChangePercent > $1.rollingChangePercent }
         }
     }
 }

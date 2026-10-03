@@ -307,6 +307,8 @@ func marketContractsUseUTCDayOpenForChangePercent() async throws {
     let markets = try await ATKClient(runner: runner).marketContracts()
     #expect(markets.count == 1)
     #expect(markets[0].changePercent == Decimal(10))
+    #expect(markets[0].rollingChangePercent > 1.85)
+    #expect(markets[0].rollingChangePercent < 1.86)
 }
 
 @Test

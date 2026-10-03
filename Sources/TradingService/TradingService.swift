@@ -2831,7 +2831,7 @@ public actor TradingBackend {
         let losers = Set(all.sorted { $0.changePercent < $1.changePercent }.prefix(12).map(\.id))
         let enriched = all.map { item in
             let category = byVolume.contains(item.id) ? "热门" : gainers.contains(item.id) ? "涨幅" : losers.contains(item.id) ? "跌幅" : "全部"
-            return ContractMarket(id: item.id, name: item.name, baseCurrency: item.baseCurrency, quoteCurrency: item.quoteCurrency, last: item.last, changePercent: item.changePercent, volume24h: item.volume24h, category: category, updatedAt: item.updatedAt)
+            return ContractMarket(id: item.id, name: item.name, baseCurrency: item.baseCurrency, quoteCurrency: item.quoteCurrency, last: item.last, changePercent: item.changePercent, rollingChangePercent: item.rollingChangePercent, volume24h: item.volume24h, category: category, updatedAt: item.updatedAt)
         }.sorted { $0.volume24h > $1.volume24h }
         contractUniverse = enriched
         await paper.refreshStrategyUniverse(enriched)
