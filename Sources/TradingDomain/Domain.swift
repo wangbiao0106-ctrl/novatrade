@@ -482,6 +482,17 @@ public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sen
 
     public static var availableCases: [StrategyType] { [.sweepReversalShort] }
 
+    /// Machine-readable version of the compiled rule implementation. This is
+    /// intentionally owned by the runtime type rather than client input or a
+    /// package manifest, so API consumers can identify the code actually
+    /// evaluating signals.
+    public var runtimeVersion: String? {
+        switch self {
+        case .sweepReversalShort: return "1.4"
+        case .external: return nil
+        }
+    }
+
     /// Stable machine-readable identifier. Keep this independent from UI copy.
     public var identifier: String { rawValue }
 
@@ -828,6 +839,14 @@ public struct StrategyConfig: Codable, Equatable, Sendable, Identifiable {
     public var cooldownBars: Int
     public var scope: StrategyScope
 
+    /// Version of the compiled strategy rule behind this instance. It is
+    /// derived from `type` and is never accepted from persisted/client input.
+    public var strategyVersion: String? { type.runtimeVersion }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, interval, type, parameters, enabled, capitalPoolPercent, cooldownBars, scope, strategyVersion
+    }
+
     /// Configured contract leverage for this strategy instance. It lives in
     /// ``parameters`` so strategy packages can add numeric knobs without
     /// changing the persisted schema.
@@ -845,6 +864,33 @@ public struct StrategyConfig: Codable, Equatable, Sendable, Identifiable {
     public init(id: UUID = UUID(), name: String, scope: StrategyScope, interval: KlineInterval, type: StrategyType, parameters: [String: Double] = [:], enabled: Bool = false, capitalPoolPercent: Double = StrategyType.sweepReversalShort.maxCapitalPoolPercent, cooldownBars: Int = 3) {
         self.id = id; self.name = name; self.interval = interval; self.type = type; self.parameters = parameters; self.enabled = enabled
         self.capitalPoolPercent = capitalPoolPercent; self.cooldownBars = cooldownBars; self.scope = scope
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try container.decode(UUID.self, forKey: .id),
+                  name: try container.decode(String.self, forKey: .name),
+                  scope: try container.decode(StrategyScope.self, forKey: .scope),
+                  interval: try container.decode(KlineInterval.self, forKey: .interval),
+                  type: try container.decode(StrategyType.self, forKey: .type),
+                  parameters: try container.decode([String: Double].self, forKey: .parameters),
+                  enabled: try container.decode(Bool.self, forKey: .enabled),
+                  capitalPoolPercent: try container.decode(Double.self, forKey: .capitalPoolPercent),
+                  cooldownBars: try container.decode(Int.self, forKey: .cooldownBars))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(interval, forKey: .interval)
+        try container.encode(type, forKey: .type)
+        try container.encode(parameters, forKey: .parameters)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(capitalPoolPercent, forKey: .capitalPoolPercent)
+        try container.encode(cooldownBars, forKey: .cooldownBars)
+        try container.encode(scope, forKey: .scope)
+        try container.encodeIfPresent(strategyVersion, forKey: .strategyVersion)
     }
 }
 

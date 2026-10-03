@@ -23,6 +23,24 @@ func runtimeStrategiesDoNotEncodeAnAccountExecutionMode() async throws {
     }
 }
 
+@Test("Compiled strategy version is exposed and cannot be client-overridden")
+func compiledStrategyVersionIsAuthoritative() throws {
+    let config = StrategyConfig(name: "Sweep",
+                                scope: .dynamic(.sweepCandidates),
+                                interval: .oneHour,
+                                type: .sweepReversalShort)
+    #expect(StrategyType.sweepReversalShort.runtimeVersion == "1.4")
+    #expect(config.strategyVersion == "1.4")
+
+    let encoder = JSONEncoder()
+    let encoded = try encoder.encode(config)
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    #expect(object["strategyVersion"] as? String == "1.4")
+    object["strategyVersion"] = "99.0"
+    let decoded = try JSONDecoder().decode(StrategyConfig.self, from: JSONSerialization.data(withJSONObject: object))
+    #expect(decoded.strategyVersion == "1.4")
+}
+
 @Test("Legacy package execution metadata does not alter the runtime strategy")
 func packageExecutionMetadataCannotRestrictStrategyMode() throws {
     let demoOnly = try StrategyPackageManifest(

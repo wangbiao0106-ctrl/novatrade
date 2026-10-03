@@ -220,6 +220,7 @@ struct StrategyStatusModule: View {
     private var ruleDetails: String {
         [
             "规则：\(config.type.displayName)",
+            "版本：\(config.strategyVersion.map { "v\($0)" } ?? "未发布")",
             "信号：\(config.type.signalCycleDescription)",
             "止损：\(config.type.stopLossDescription)",
             "止盈：\(config.type.takeProfitDescription)",

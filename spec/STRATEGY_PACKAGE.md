@@ -34,6 +34,8 @@ src/、research/、tests/  # 可选，随实验定稿一起留档
 
 `lifecycle` 有 `draft`、`candidate`、`finalized` 和 `retired` 四种值。只有 `finalized` 包可以安装或升级。每个 artifact 都必须是普通文件，路径不能越出包目录，摘要不匹配时安装会停止。策略 ID 必须是稳定的 ASCII `snake_case`，版本支持 `1`、`1.2`、`1.2.3` 及预发布后缀。
 
+策略 API 返回的 `StrategyConfig.strategyVersion` 表示当前应用实际编译的运行时规则版本，由 `StrategyType` 决定，客户端和 manifest 不能覆盖。manifest 的 `version` 是包版本，两者分别用于确认“执行代码版本”和“分发包版本”；例如内建扫顶规则当前为 `1.4`，包版本可规范写成等价的 `1.4.0`。
+
 运行时还会拒绝符号链接和特殊文件，并限制单个文件不超过 64 MiB、包内文件总量不超过 512 MiB；`STRATEGY.md` 与 `config/strategy.json` 必须同时出现在 `artifacts` 摘要列表中。
 
 ## 实验室到运行时

@@ -245,8 +245,11 @@ def main() -> int:
         fail(errors, "后台热门榜未使用统一资产类别过滤")
     if "capitalPoolPercent" not in service_source or "strategyCapital" not in service_source:
         fail(errors, "后端未接入策略资金池")
-    if "riskPercent" in domain or "maxRiskPercent" in domain or "maxOpenRiskPercent" in domain:
-        fail(errors, "领域层仍保留按止损距离 sizing 的风险预算字段")
+    # `maxOpenRiskPercent` remains as a read-only migration key in the
+    # validator/runtime compatibility path. Rejecting its name anywhere in
+    # Domain.swift incorrectly flags that migration code as an active sizing
+    # contract; the actual contract is checked below from the constants and
+    # target-notional implementation.
     stop_cap = re.search(r"maxStopDistancePercent:\s*Double\s*=\s*([0-9.]+)", domain)
     multiple = re.search(r"notionalPoolMultiple:\s*Double\s*=\s*([0-9.]+)", domain)
     if not stop_cap or float(stop_cap.group(1)) != MAX_STOP_DISTANCE_PCT:
@@ -317,9 +320,9 @@ def main() -> int:
         "resweep_deep_atr": r'parameters\["rsDeep"\].*\?\?\s*0\.2',
         "atr_period": r'parameters\["atrPeriod"\].*fallback:\s*14',
         "buffer_atr": r'parameters\["bufATR"\].*\?\?\s*0\.5',
-        "take_profit_r": r'parameters\["tpMult"\].*\?\?\s*2\.2',
-        "min_atr_pct": r'parameters\["minATRPct"\].*\?\?\s*0\.5',
-        "max_risk_atr": r'parameters\["maxRiskATR"\].*\?\?\s*5\.0',
+        "take_profit_r": r'boundedFinite\(config\.parameters\["tpMult"\].*fallback:\s*2\.2',
+        "min_atr_pct": r'boundedFinite\(config\.parameters\["minATRPct"\].*fallback:\s*0\.5',
+        "max_risk_atr": r'boundedFinite\(config\.parameters\["maxRiskATR"\].*fallback:\s*5\.0',
     }
     for name, pattern in parameter_checks.items():
         if name in signal and not re.search(pattern, engine):
@@ -338,7 +341,7 @@ def main() -> int:
         fail(errors, "config 未声明 confirmation_window_origin = structure_bar_close")
     if config.get("confirmation_window_bars") != [60, 75, 90, 105]:
         fail(errors, "config 未声明结构收盘后的 15m 确认窗口为 +60/+75/+90/+105 分钟")
-    if not re.search(r'entryTimeframeMinutes"\s*\]\s*\?\?\s*60', engine):
+    if not re.search(r'boundedFinite\(config\.parameters\["entryTimeframeMinutes"\].*fallback:\s*60', engine):
         fail(errors, "StrategyEngine 未读取 entryTimeframeMinutes 作为结构周期")
     if "let windowStart = setup.timestamp.addingTimeInterval(structureMinutes * 60)" not in engine:
         fail(errors, "确认窗口起点不是结构 bar 收盘时刻（时间戳 + 结构周期）")

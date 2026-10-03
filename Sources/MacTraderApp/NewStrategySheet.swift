@@ -218,6 +218,7 @@ struct NewStrategySheet: View {
                     }
                     Divider().overlay(Color.white.opacity(0.08))
                     VStack(alignment: .leading, spacing: 8) {
+                        infoRow("规则版本", value: selectedRule.runtimeVersion.map { "v\($0)" } ?? "未发布")
                         infoRow("扫描范围", value: selectedRule.defaultScope.displayName)
                         infoRow("信号周期", value: selectedRule.signalCycleDescription)
                         infoRow("止损", value: selectedRule.stopLossDescription)
