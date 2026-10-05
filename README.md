@@ -1,52 +1,60 @@
 # OKX Self Trader
 
-面向 macOS 的本地 OKX 自助交易系统，前后端分离：SwiftUI 客户端 `mac-trader` 只通过回环地址访问本地服务 `okx-locald`。当前版本以 OKX Agent Trade Kit（ATK）为连接层：Swift 应用使用 ATK 的 API Key profile，通过 `okx --json` 获取结构化数据；MCP 只作为 AI 客户端入口。
+面向 macOS 的本地 OKX 自助交易系统，前后端分离：SwiftUI 客户端 `mac-trader` 只通过回环地址访问 FastAPI 本地服务。行情请求由 Python 直接调用 OKX REST/WebSocket；MCP 只作为 AI 客户端入口。
 
 ## 架构
 
 ```text
 mac-trader（SwiftUI）
       |  REST + WebSocket，127.0.0.1:8787
-okx-locald（Hummingbird：策略、风控、StreamHub）
-      |                         |
-ATKGateway（Process 适配层）   OKXCandleSocket（OKX Business WSS 实时 K 线）
-      |
-okx --json  <->  ~/.okx/config.toml API Key profile
+FastAPI backend（鉴权、行情、状态、WebSocket）
 
 AI 客户端  --->  okx-trade-mcp（stdio，可只读或按模块启用）
 ```
 
-Swift 代码不直接打开 `~/.okx/config.toml`，也不保存或展示 API Key、Secret、Passphrase 或 OAuth Token。`config show --json` 的原始输出可能包含密钥，适配层只在内存中提取 profile/site/是否存在 API Key，随后丢弃原始输出，绝不写入日志、界面或审计。
+FastAPI 只读取 `OKX_REST_URL`、`OKX_WS_URL` 等非敏感连接配置；API Key、Secret 和 Passphrase 不会写入应用状态目录。
 
-## ATK API Key 配置
+## 私有接口配置
 
-当前项目固定使用 ATK API Key，不调用 OAuth：
+账户、持仓、挂单和下单接口使用 OKX v5 私有 REST 签名。先复制配置模板并填入凭据：
 
 ```bash
-npm install -g @okx_ai/okx-trade-cli@1.4.8 @okx_ai/okx-trade-mcp@1.4.8
-okx config init
-okx config show --json
+python3 -m pip install -r backend/requirements.txt
+mkdir -p "$HOME/Library/Application Support/NovaTrade"
+cp backend/.env.example "$HOME/Library/Application Support/NovaTrade/backend.env"
+# 编辑 backend.env 后启动应用；FastAPI 会自动读取这个文件
 ```
 
-配置向导会设置站点、实盘/模拟盘和 API Key、Secret Key、Passphrase。API Key 只需 `Read + Trade` 权限，禁止 `Withdraw`。
+`OKX_DEMO=1` 使用模拟盘并发送 `x-simulated-trading: 1`；实盘必须设为 `0`，并且在客户端中先启用实盘交易。API Key 只需要 `Read + Trade` 权限，禁止 `Withdraw`。
 
-Swift 应用不会直接打开配置文件，也不会持久化或展示密钥。`config show --json` 的原始输出可能包含密钥，适配层只在内存中提取 profile/site/是否存在 API Key，随后丢弃原始输出。
-
-如果配置中没有 API Key profile，交易路径会明确报错并要求先运行 `okx config init`。OAuth 相关 ATK 方法保留在底层适配器中，但当前应用不会调用。
+私有凭据只从进程环境读取，不会写入日志、JSON 状态或返回给客户端。未配置凭据时，FastAPI 返回未认证账户状态，订单接口返回明确错误。
 
 ## 当前版本
 
 - macOS SwiftUI 交易工作台：支持永续合约搜索、自选收藏、合约切换、周期切换、行情指标和策略配置/启停。
 - K 线使用 SwiftUI 原生 Canvas：红涨绿跌、连续拖拽、悬停十字线、日期/价格轴、成交量和 EMA。历史数据首次通过 API 预热；实时 K 柱仅使用 OKX V5 Business WSS 的 candle 频道，没有 K 线轮询或 ticker 拼接。WSS 不提供历史查询，因此首次历史加载仍需 API。
-- `okx-locald` 使用 Hummingbird 提供 REST 和本地 WebSocket；上游订阅、断线、重连状态会传到图表底栏。使用 OKX 文本 ping/pong 保活，断线后指数退避并重新订阅。多个本地客户端订阅同一合约/周期时共享同一个上游 OKX 连接和辅助轮询（StreamHub 扇出），实时 K 柱只在服务端摄入一次。
-- 策略扫描池按策略类型独立解析并缓存；K 线评估和 StreamHub 订阅共用同一份解析结果，避免每根 K 线重复筛选全量合约。可用 `GET /api/v1/strategies/targets?fresh=true` 查看后台实际使用的 instrument ID、策略专属 universe 和刷新时间。
-- 本地服务对 ATK CLI 调用带 TTL 缓存和单飞去重（ticker 2s、账户/持仓/挂单 5s、合约列表与历史预热 60s），多个客户端并发轮询时不再重复拉起 CLI 进程；下单成功后立即失效账户缓存。
-- 状态目录（`~/Library/Application Support/NovaTrade/`）只有两份运行时文件：`paper-state.json` 原子写入策略、状态、订单、成交和风控；`runtime-log.jsonl` 保存最近 1000 条运行日志，服务启动时自动回读并压缩。
+- FastAPI backend 负责本地 REST/WebSocket 请求的 token、Host/Origin 校验，并直接请求 OKX 公共 REST/WSS。历史 K 线和实时 K 线都由 Python 处理，客户端不再启动 Swift 本地服务。
+- 策略和风控状态保存在应用支持目录的 JSON 文件中；可用 `GET /api/v1/strategies/targets?fresh=true` 读取当前缓存。
+- 状态目录（`~/Library/Application Support/NovaTrade/`）的基础运行文件包括 `paper-state.json`（原子写入策略、状态、订单、成交和风控）与 `runtime-log.jsonl`（最近 1000 条运行日志）；启用 AI 后还会增加独立的 AI 配置、决策审计和订单 reservation 文件。
 - 风控：日亏/回撤熔断按 UTC 日界滚动日初权益基线；模拟撮合支持部分平仓（保留剩余仓位）和同向加仓均价合并，已实现盈亏扣除手续费。
-- 工作台通过本地服务读取合约行情和 API Key profile 状态；未配置或暂时无法连接 ATK 时显示等待状态，不注入虚构行情或策略实例。
-- `ATKGateway`：使用 `Process` 调用 CLI，不经过 shell；支持 JSON 解码、退出码和测试替身。
+- 工作台通过 FastAPI 读取合约行情和账户状态；未配置私有凭据时显示未认证状态，不注入虚构余额或策略实例。
 - UI 默认不提供下单按钮；实盘 HTTP 接口需要先手动启用交易，再经过 profile、订单参数和风控检查。
 - OKX 永续订单的 `quantity` 始终表示合约张数（`sz`），下单前读取 `ctVal/ctMult/lotSz/minSz/tickSz`；策略按真实报价名义价值换算并向下取整，规格缺失或不符合时拒绝下单。
+- AI 自主交易由 FastAPI 内的 `AI Decision Worker` 管理：Codex CLI 只读取脱敏行情快照并返回严格 JSON 交易意图，不能读取 OKX 凭据、执行 `okx` CLI 或直接下单。服务端订单网关统一负责风险、合约规格、幂等和未知提交恢复。
+- AI 策略固定使用 `gpt-6-luna / medium`，候选信号或多周期冲突均使用此模型；旧模型路由配置会自动迁移，并保留观察池与风控设置。
+- AI 观察标的始终来自固定合约白名单，不再按热门榜、涨幅榜或其他动态分类自动选币。用户可在参数设置中从全部 USDT 线性永续合约多选。
+- AI 决策日志保留每轮独立的决策结果、执行状态和逐币明细；单币 `hold` 必须属于本次观察集合。`confidence` 是模型对当前动作的自评信心，99% 的 `hold` 表示继续观望，不会下单。每次决策的观察名单保存为状态的 `lastDecisionInstruments` 和审计行的 `instruments`；历史记录缺少名单时不会用当前池代替。
+- AI 策略实例卡片只显示模式、运行状态和最近动作，保留启停与平仓操作，并通过运行日志图标打开决策日志。日志按决策时间倒序显示，每轮一条，时间位于左侧；不再提供聊天区或观察池、时效、技术记录等附加面板。每条记录的“查看明细表”固定显示该轮方向、胜率、盈亏比和点位，后续评估不会替换已打开的历史明细；参数设置仍可从日志窗口顶部打开。
+- 每轮 AI 评估按固定观察池逐币显示完整合约 ID、多空方向、预计胜率、盈亏比、建议挂单价和不满足的开仓条件，`hold` 也保留整池明细。没有明确方向或可靠估计时显示观望及空值，并说明原因。生产响应要求本次每个观察合约恰好一条评估，遗漏、重复或池外合约会被拒绝；一次决策仍最多提交一个交易意图。建议挂单价是模型提出的入场点位，不表示订单已经提交。服务端拒绝开仓后，安全 `hold` 仍保留逐币评估，审计的 `rawDecision` 保存模型原始意图，便于区分模型建议和服务端执行结果；旧记录没有这些字段时仍可读取。
+- AI 同时读取服务端计算的逐币行情摘要与完整原始快照。摘要只计算已确认 K 线的价格、涨跌幅、均价、近期高低点、真实波幅均值及盘口事实，缺数保持未知；方向、条件入场方案和预计胜率仍由 AI 判断。尚未达到开仓门槛的币也应保留可解释的方向、价位和质量估计，而不是用整个观察池的 `hold` 清空分析。
+- Prompt 中字段一致的 K 线使用「列名 + 每行数值」无损编码，减少重复字段名；全部合约、周期、K 线和原始字段均保留，字段不一致的行仍用原对象表示。此编码只影响传输，不修改行情快照或交易规则。
+- 观察池超过 4 个合约时，每批 4 币、最多 4 批并行分析，再由同一固定模型汇总一次总决策。逐币评估必须完整合并，分批建议不会直接下单；分析和汇总分别使用原有 CLI 超时时限，失败时取消其余进程。汇总失败会保留已经完成的整池评估，并显示系统观望及错误。开仓仍受原有快照、决策有效期与提交前时效检查约束。
+- 快照时效由服务器 UTC 计算，`capturedAt` 是开始采集的时间，采集和 AI 推理均计入有效期。Prompt 明确提供当前时间与真实年龄，服务器记录时效核验结果；设置杠杆和发送开仓订单前还会重新检查快照与决策期限，过期指令不发出订单。最新未收盘 K 线保留实时行情用途，已收盘历史用于确认信号。
+- AI 采集全部观察合约的四个周期 K 线（每周期最近 60 根）、ticker、资金费和五档盘口，限制并发和 K 线请求速率。限流与临时网络故障只做有限采集重试；缺数保留具体错误，未知账户数据不补零。审计记录采集完整性和 Prompt 大小；超过 1,000,000 字节的全池 Prompt 在启动 CLI 前明确拒绝。
+- AI 开仓决策必须同时提供模型估计胜率和盈亏比：`winRate >= 0.45` 且 `riskRewardRatio >= 2.0` 才能进入下单链路；平仓和撤单不受这两个入场质量门槛阻断。两者是模型估计值，不等同于历史胜率或收益保证。
+- AI 交易限制默认是每日最多开仓 20 单、每日最多 5 个亏损单、每笔保证金 500 USDT、最大杠杆 5x。每次开仓由 AI 在 `1x` 到配置上限之间选择实际杠杆，名义金额按「单笔保证金 × AI 杠杆」计算；达到任一日限额后只拒绝新的 `open`，平仓和撤单仍可执行。每日统计按 UTC 日计算，未知的下单结果会先占用开仓额度，直到订单状态明确。
+- 可交易性与下单规格来自认证账户的 `/account/instruments`，模拟盘只支持部分公开市场合约。每轮快照保留完整固定观察池，同时提供逐币 `tradingAvailability`：不可交易或无法核验的币仍有技术评估，但不能成为开仓对象；服务端和执行前再次检查，不切换交易环境。设置杠杆失败时尚未发送订单 POST，立即释放本次新预留；订单提交后结果未知的预留继续保留。
+- AI 默认关闭，运行模式为 `shadow`、`demo-active` 或人工授权后的 `live-armed`；实盘开关不能由 Codex 修改。状态、决策审计和订单 reservation 位于应用支持目录的 `ai-config.json`、`ai-state.json`、`ai-decisions.jsonl` 和 `order-ledger.json`。
 
 ## 多周期行情缓存
 
@@ -109,7 +117,18 @@ swift test
 ./scripts/build_and_run.sh package    # 额外生成 dist/NovaTrade.dmg
 ```
 
-`build_and_run.sh` 把 `mac-trader` 和 `okx-locald` 打进同一个 `dist/NovaTrade.app`，客户端在后台以 `nohup` 静默启动同目录的 `okx-locald`，退出客户端不会中断运行中的策略。实时链路回归检查：`python3 scripts/test_local_stream.py --live`，使用独立端口和临时状态目录，只订阅 K 线，不启用策略或下单。
+`build_and_run.sh` 把 `mac-trader` 和 FastAPI backend 打进同一个 `dist/NovaTrade.app`。客户端启动 Python 服务；退出客户端不会删除状态目录。依赖可用 `python3 -m pip install -r backend/requirements.txt` 安装。服务回归检查：`python3 scripts/test_fastapi_gateway.py`。
+
+AI worker 的契约和本地测试：
+
+```bash
+python3 scripts/test_ai_gateway.py
+python3 scripts/test_ai_snapshot.py
+python3 scripts/test_ai_execution.py
+python3 scripts/test_ai_market_facts.py
+```
+
+首次接入建议保持 `shadow`，确认 `GET /api/v1/ai/decisions` 的快照、决策和拒绝原因，再启用 OKX 模拟盘。Codex CLI 路径可通过 `NOVATRADE_CODEX_BIN` 配置；每次调用使用临时目录、`--sandbox read-only`、`--ephemeral` 和 `--output-schema`，超时或非法输出按 `hold` 处理。
 
 ## 导出 AI 行情数据
 
@@ -133,7 +152,7 @@ python3 scripts/import_okx_bulk_data.py \
 
 批量导入器会生成相同的 `manifest.json` 和 JSONL 字段；较晚上线的合约只包含上市以来的数据。导入行情后使用 `python3 scripts/build_kline_cache.py --force` 重建多周期缓存。
 
-安装 ATK 后，`okx-locald` 会通过系统 `PATH` 或 `/opt/homebrew/bin/okx`、`/usr/local/bin/okx` 查找 `okx`，也可使用 `OKX_CLI_PATH` 指定绝对路径。诊断时直接运行 `okx` 命令；Swift 适配层使用同一 CLI 的 `--json` 机器输出。未安装或未配置 API Key 时，界面会显示明确错误；公共行情本身不要求 API Key。
+公共行情接口不需要 API Key。账户和下单接口需要在 Python backend 中补充 OKX 私有 REST 凭据后才会启用；未配置时服务返回未认证账户状态，不生成虚构余额或订单。
 
 ## 目录规范
 

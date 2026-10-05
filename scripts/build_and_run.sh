@@ -16,7 +16,7 @@ APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_EXECUTABLE"
 LEGACY_APP_BINARY="$LEGACY_APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE"
-SERVICE_BINARY="$APP_MACOS/okx-locald"
+FASTAPI_DIR="$APP_MACOS/backend"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 ICONSET_DIR="$ROOT_DIR/Sources/MacTraderApp/Resources/NovaTrade.iconset"
 ICON_FILE="$APP_RESOURCES/NovaTrade.icns"
@@ -30,7 +30,15 @@ DMG_FILE="$DIST_DIR/NovaTrade.dmg"
 stop_running() {
   pkill -f "^$APP_BINARY( |$)" >/dev/null 2>&1 || true
   pkill -f "^$LEGACY_APP_BINARY( |$)" >/dev/null 2>&1 || true
-  pkill -f "^$SERVICE_BINARY( |$)" >/dev/null 2>&1 || true
+  # The bundled interpreter is not necessarily named python3 (the current
+  # app uses the Xcode Python runtime), so match the copied backend path.
+  pkill -f "${FASTAPI_DIR}/main.py" >/dev/null 2>&1 || true
+  # Give SIGTERM a moment to release 8787 before the new app checks whether a
+  # backend is already running; otherwise it can attach to an old bundle.
+  for _ in {1..20}; do
+    pgrep -f "${FASTAPI_DIR}/main.py" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
 }
 
 # Older builds used .build/NovaTrade.app. Keeping that bundle beside dist/
@@ -43,15 +51,14 @@ prepare_for_launch() {
 
 cd "$ROOT_DIR"
 swift build --product "$APP_EXECUTABLE"
-swift build --product okx-locald
 
 BUILD_BIN_DIR="$(swift build --show-bin-path)"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp "$BUILD_BIN_DIR/$APP_EXECUTABLE" "$APP_BINARY"
-cp "$BUILD_BIN_DIR/okx-locald" "$SERVICE_BINARY"
+rm -rf "$FASTAPI_DIR"
+cp -R "$ROOT_DIR/backend" "$FASTAPI_DIR"
 chmod +x "$APP_BINARY"
-chmod +x "$SERVICE_BINARY"
 iconutil -c icns "$ICONSET_DIR" -o "$ICON_FILE"
 
 cat > "$INFO_PLIST" <<PLIST

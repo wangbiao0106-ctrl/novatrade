@@ -174,8 +174,19 @@ public struct ATKClient: Sendable {
         // Keep the complete list while tagging ranking buckets for the sidebar.
         // A contract may belong to one visible bucket; the "全部" view always contains every item.
         let volumeIDs = Set(markets.sorted { $0.volume24h > $1.volume24h }.prefix(20).map(\.id))
-        let gainIDs = Set(markets.sorted { $0.changePercent > $1.changePercent }.prefix(20).map(\.id))
-        let lossIDs = Set(markets.sorted { $0.changePercent < $1.changePercent }.prefix(20).map(\.id))
+        // OKX's app labels this board "今日涨跌幅" and ranks it by the
+        // UTC-day move (`sodUtc0`, which resets at 08:00 Asia/Shanghai).
+        // Keep the rolling 24h value separate for strategy filters.
+        let gainIDs = Set(markets.sorted {
+            $0.changePercent == $1.changePercent
+                ? $0.id < $1.id
+                : $0.changePercent > $1.changePercent
+        }.prefix(20).map(\.id))
+        let lossIDs = Set(markets.sorted {
+            $0.changePercent == $1.changePercent
+                ? $0.id < $1.id
+                : $0.changePercent < $1.changePercent
+        }.prefix(20).map(\.id))
         return markets.map { market in
             let category: String
             if volumeIDs.contains(market.id) { category = "热门" }

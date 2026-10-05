@@ -30,6 +30,17 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var accountOverview = AccountOverview()
     @Published private(set) var contracts: [PerpetualContract] = []
     @Published private(set) var favoriteIDs: Set<String> = []
+    @Published private(set) var aiConfig = AIConfig()
+    @Published private(set) var aiStatus = AIStatus()
+    @Published private(set) var aiDecisions: [AIAuditRecord] = []
+    @Published private(set) var aiAudit: [AIAuditRecord] = []
+    @Published private(set) var isUpdatingAI = false
+
+    /// Contracts actually included in the latest AI market snapshot. The
+    /// backend reports this set so the settings UI can verify the fixed
+    /// allowlist that was sent to the worker.
+    var aiObservedInstruments: [String] { aiStatus.observedInstruments }
+    var aiObservationUpdatedAt: Date? { aiStatus.observationUpdatedAt }
 
     private let client = TradingServiceClient()
     private let serviceProcess = LocalServiceProcess()
@@ -41,6 +52,7 @@ final class DashboardModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var marketTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
+    private var startupRetryTask: Task<Void, Never>?
     private var marketSubscriptionID = UUID()
     private var lifecycleGeneration = UUID()
     private var autoStartBackend = true
@@ -76,11 +88,25 @@ final class DashboardModel: ObservableObject {
         case .mainstream:
             return contracts
                 .filter { StrategyUniverseRules.mainstreamSymbols.contains($0.shortName.uppercased()) }
-                .sorted { $0.volume24h > $1.volume24h }
-        case .hot: return Array(contracts.sorted { $0.volume24h > $1.volume24h }.prefix(20))
-        case .gainers: return Array(contracts.sorted { $0.change > $1.change }.prefix(20))
-        case .losers: return Array(contracts.sorted { $0.change < $1.change }.prefix(20))
+                .sorted(by: Self.volumeRank)
+        case .hot: return Array(contracts.sorted(by: Self.volumeRank).prefix(20))
+        case .gainers: return Array(contracts.sorted {
+            $0.change == $1.change
+                ? $0.id < $1.id
+                : $0.change > $1.change
+        }.prefix(20))
+        case .losers: return Array(contracts.sorted {
+            $0.change == $1.change
+                ? $0.id < $1.id
+                : $0.change < $1.change
+        }.prefix(20))
         }
+    }
+
+    /// Keep the OKX turnover ranking deterministic when two contracts have the
+    /// same rounded 24h quote volume.
+    private static func volumeRank(_ lhs: PerpetualContract, _ rhs: PerpetualContract) -> Bool {
+        lhs.volume24h == rhs.volume24h ? lhs.id < rhs.id : lhs.volume24h > rhs.volume24h
     }
 
     func toggleFavorite(_ contract: PerpetualContract) {
@@ -224,13 +250,14 @@ final class DashboardModel: ObservableObject {
         serviceState = .starting
         do {
             if (try? await client.health()) == nil {
-                await serviceProcess.start()
+                await serviceProcess.restart()
                 // A freshly spawned daemon can take a few seconds to bind its
-                // socket, especially on the first launch after a build.
+                // socket, especially on the first launch after a build or
+                // after replacing a stale daemon.
                 var healthy = false
-                for attempt in 0..<20 {
+                for attempt in 0..<40 {
                     if (try? await client.health()) != nil { healthy = true; break }
-                    if attempt < 19 { try? await Task.sleep(for: .milliseconds(250)) }
+                    if attempt < 39 { try? await Task.sleep(for: .milliseconds(250)) }
                 }
                 guard healthy else { throw TradingServiceClientError.disconnected }
             }
@@ -239,11 +266,20 @@ final class DashboardModel: ObservableObject {
             let connectedLog = RuntimeLog(level: "service", message: "前台已连接后台服务")
             runtimeLogs.append(connectedLog)
             _ = try? await client.appendLog(connectedLog)
+            // Start the saved/default contract immediately. Loading the
+            // sidebar's full ticker list can take a network round trip; it
+            // should not delay the selected chart's WSS and history fetch.
+            let startedContract = selectedContract
+            requestMarket()
             let remoteContracts = try await client.contracts()
             guard isCurrent() else { return }
             if !remoteContracts.isEmpty { contracts = remoteContracts.map(PerpetualContract.init(remote:)) }
             restoreSelectedContract()
-            requestMarket()
+            // A persisted contract may have expired. Re-request only when
+            // restoring the list changed the selected instrument.
+            if selectedContract != startedContract {
+                requestMarket()
+            }
             startPolling()
             let account = try await client.account()
             guard isCurrent() else { return }
@@ -255,10 +291,16 @@ final class DashboardModel: ObservableObject {
             strategyCapitals = (try? await client.strategyCapital()) ?? strategyCapitals
             strategyUniverses = (try? await client.strategyTargets()) ?? strategyUniverses
             strategies = (try? await client.strategies()) ?? strategies
+            await refreshAI()
         } catch {
             guard generation == lifecycleGeneration else { return }
-            if serviceState != .running { serviceState = autoStartBackend ? .unavailable : .stopped }
-            errorMessage = "未能读取实时行情。\(error.localizedDescription)"
+            if autoStartBackend {
+                serviceState = .unavailable
+                scheduleStartupRetry()
+            } else {
+                if serviceState != .running { serviceState = .stopped }
+                errorMessage = "未能读取实时行情。\(error.localizedDescription)"
+            }
         }
     }
 
@@ -269,7 +311,61 @@ final class DashboardModel: ObservableObject {
         liveOrders = (try? await client.privateOrders()) ?? liveOrders
         orders = (try? await client.paperOrders()) ?? orders
         fills = (try? await client.paperFills()) ?? fills
+        strategyStatuses = (try? await client.strategyStatuses()) ?? strategyStatuses
+        strategyCapitals = (try? await client.strategyCapital()) ?? strategyCapitals
+        riskSnapshot = (try? await client.risk()) ?? riskSnapshot
         strategyUniverses = (try? await client.strategyTargets()) ?? strategyUniverses
+    }
+
+    /// Refreshes the AI worker's control-plane state.  AI failures are kept
+    /// separate from market/account refreshes so a missing Codex CLI cannot
+    /// make the trading dashboard look disconnected.
+    func refreshAI() async {
+        guard serviceState == .running else { return }
+        if let config = try? await client.aiConfig() { aiConfig = config }
+        if let status = try? await client.aiStatus() { aiStatus = status }
+        if let decisions = try? await client.aiDecisions() { aiDecisions = decisions }
+        if let audit = try? await client.aiAudit() { aiAudit = audit }
+    }
+
+    func updateAI(_ patch: AIPatch) async throws {
+        guard !isUpdatingAI else { return }
+        isUpdatingAI = true
+        defer { isUpdatingAI = false }
+        aiConfig = try await client.updateAIConfig(patch)
+        if let status = try? await client.aiStatus() { aiStatus = status }
+    }
+
+    func enableAI() async throws {
+        guard !isUpdatingAI else { return }
+        isUpdatingAI = true
+        defer { isUpdatingAI = false }
+        aiStatus = try await client.enableAI()
+        if let config = try? await client.aiConfig() { aiConfig = config }
+    }
+
+    func disableAI() async throws {
+        guard !isUpdatingAI else { return }
+        isUpdatingAI = true
+        defer { isUpdatingAI = false }
+        aiStatus = try await client.disableAI()
+        if let config = try? await client.aiConfig() { aiConfig = config }
+    }
+
+    func flattenAI() async throws {
+        guard !isUpdatingAI else { return }
+        isUpdatingAI = true
+        defer { isUpdatingAI = false }
+        _ = try await client.flattenAI()
+        if let status = try? await client.aiStatus() { aiStatus = status }
+        await refreshTradingActivity()
+    }
+
+    func chatAI(message: String, apply: Bool = false, suggestion: AIPatch? = nil) async throws -> AIChatResponse {
+        let response = try await client.chatAI(message: message, apply: apply, suggestion: suggestion)
+        if let config = response.config { aiConfig = config }
+        if response.applied, let status = try? await client.aiStatus() { aiStatus = status }
+        return response
     }
 
     /// The chart stream only covers the selected contract. The sidebar needs
@@ -288,7 +384,20 @@ final class DashboardModel: ObservableObject {
                 }
                 guard generation == lifecycleGeneration else { break }
                 await refreshTradingActivity()
+                await refreshAI()
             }
+        }
+    }
+
+    private func scheduleStartupRetry() {
+        guard autoStartBackend, startupRetryTask == nil else { return }
+        let generation = lifecycleGeneration
+        startupRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, let self else { return }
+            startupRetryTask = nil
+            guard generation == lifecycleGeneration, autoStartBackend, serviceState != .running else { return }
+            await refresh()
         }
     }
 
@@ -303,6 +412,8 @@ final class DashboardModel: ObservableObject {
 
     private func stopBackend() {
         autoStartBackend = false
+        startupRetryTask?.cancel()
+        startupRetryTask = nil
         lifecycleGeneration = UUID()
         let generation = lifecycleGeneration
         isRefreshing = false
@@ -346,6 +457,10 @@ final class DashboardModel: ObservableObject {
 
     func strategyCapital(for config: StrategyConfig) -> StrategyCapitalSnapshot? {
         strategyCapitals.first { $0.strategyID == config.id }
+    }
+
+    func strategyStatus(for config: StrategyConfig) -> StrategyStatus? {
+        strategyStatuses.first { $0.id == config.id }
     }
 
     func strategyUniverse(for config: StrategyConfig) -> StrategyUniverseSnapshot? {

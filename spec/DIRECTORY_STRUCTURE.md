@@ -68,6 +68,7 @@ spec/                               稳定的工程规范和接口约定
 | `strategies/five_minute_surge_waterfall_short/` | 5m 大涨与前 4 小时高点状态组合、开盘/72 根实体顶部限价做空 | 研究候选，未接入运行时 |
 | `strategies/extreme_negative_funding_110_short/` | 独立验证 5m 日内涨幅、+110% 限价做空、极端负资金费率过滤与分段止盈 | 研究候选，资金费历史缺失，未接入运行时 |
 | `strategies/spot_perp_hedged_accumulation/` | 单主流币 1:1 现货多头 + USDT 永续空头的 1h 背离/均线回踩激活与有界再平衡 | 研究候选，名义偏离硬限 20%，资金费/基差缺失，未接入运行时 |
+| `strategies/spot_adaptive_martingale/` | 纯现货 ATR 自适应网格与最多四层递增买入，现金底线和应急退出 | 研究候选，BTC/ETH/OKB 价格层结果，未接入运行时 |
 
 ## 迁移检查
 

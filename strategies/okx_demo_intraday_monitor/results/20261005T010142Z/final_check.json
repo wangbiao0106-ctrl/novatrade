@@ -1,0 +1,27 @@
+{
+  "conditionalHistory": {
+    "env": "demo",
+    "fetchedAtMs": 1791162301642,
+    "data": []
+  },
+  "positions": {
+    "env": "demo",
+    "fetchedAtMs": 1791162302211,
+    "data": []
+  },
+  "orders": {
+    "env": "demo",
+    "fetchedAtMs": 1791162302754,
+    "data": []
+  },
+  "oco": {
+    "env": "demo",
+    "fetchedAtMs": 1791162303307,
+    "data": []
+  },
+  "conditional": {
+    "env": "demo",
+    "fetchedAtMs": 1791162303896,
+    "data": []
+  }
+}

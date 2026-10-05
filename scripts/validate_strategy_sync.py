@@ -20,7 +20,6 @@ LAB = ROOT / "strategies" / "sweep_reversal_short"
 CONFIG_PATH = LAB / "config" / "strategy.json"
 DOMAIN_PATH = ROOT / "Sources" / "TradingDomain" / "Domain.swift"
 ENGINE_PATH = ROOT / "Sources" / "TradingService" / "StrategyEngine.swift"
-STREAM_PATH = ROOT / "Sources" / "OKXLocalD" / "main.swift"
 UNIVERSE_RULES_PATH = ROOT / "Sources" / "TradingDomain" / "StrategyUniverseRules.swift"
 SIGNAL_PATH = LAB / "research" / "live_signal.py"
 RUNTIME_STRATEGY_DIRS = {"sweep_reversal_short"}
@@ -49,7 +48,6 @@ def main() -> int:
     integration = config.get("runtime_integration", {})
     domain = DOMAIN_PATH.read_text()
     engine = ENGINE_PATH.read_text()
-    stream = STREAM_PATH.read_text()
     universe_rules = UNIVERSE_RULES_PATH.read_text()
     live_signal = SIGNAL_PATH.read_text()
     strategy_doc = (LAB / "STRATEGY.md").read_text()
@@ -347,7 +345,7 @@ def main() -> int:
         fail(errors, "确认窗口起点不是结构 bar 收盘时刻（时间戳 + 结构周期）")
     if not re.search(r"\$0\.timestamp\s*>=\s*windowStart\s*&&\s*\$0\.timestamp\s*<\s*deadline", engine):
         fail(errors, "确认窗口不是以结构收盘为起点的半开区间 [windowStart, deadline)")
-    if not any("entryTimeframeMinutes" in source for source in (stream, service_source, domain)):
+    if not any("entryTimeframeMinutes" in source for source in (service_source, domain)):
         fail(errors, "运行时未把 entryTimeframeMinutes 写入策略参数")
     for document, label in ((strategy_doc, "STRATEGY.md"), (spec_doc, "STRATEGY_SPEC.md")):
         if "开盘时间" not in document:
@@ -379,10 +377,9 @@ def main() -> int:
         fail(errors, "1h 结构事件仍在返回全局汇总状态")
     if "status(for: config.id, instrumentID: instrumentID)?.lastSignal?.id == signal.id" not in service_source:
         fail(errors, "提交前未校验信号归属（跨标的信号可能被下单）")
-    if "Task.sleep(for: .seconds(30))" not in stream:
-        fail(errors, "策略动态范围刷新周期未保持 30 秒")
-    if "interval: .fifteenMinutes" not in stream:
-        fail(errors, "后台未为扫顶策略订阅 15m 确认 K 线")
+    # The former Swift local stream loop was removed; the FastAPI backend owns
+    # market streaming now. The Swift service still validates the
+    # strategy's timeframe and candle handling above.
     if not re.search(r"--pool.*default=\"live\"", live_signal):
         fail(errors, "实验室实时扫描器默认池不是 live（生产选币范围）")
     if 'json.load(handle)["runtime_universe"]' not in live_signal:

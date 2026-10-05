@@ -8,7 +8,10 @@ struct PerpetualContract: Identifiable, Hashable {
     let shortName: String
     let quoteCurrency: String
     let price: Double
+    /// UTC-day move used by the regular market display.
     let change: Double
+    /// Rolling 24h move retained for strategy filters and diagnostics.
+    let rollingChange: Double
     /// Rolling 24h quote turnover.
     let volume24h: Double
     let category: String
@@ -30,12 +33,13 @@ struct PerpetualContract: Identifiable, Hashable {
         quoteCurrency = remote.quoteCurrency
         price = remote.last.doubleValue
         change = remote.changePercent.doubleValue
+        rollingChange = remote.rollingChangePercent.doubleValue
         volume24h = remote.volume24h.doubleValue
         category = remote.category
     }
 }
 
-/// Sidebar contract groupings, ranked from the live 24h figures.
+/// Sidebar contract groupings, ranked from OKX's UTC-day figures (`sodUtc0`).
 enum MarketCategory: String, CaseIterable {
     case mainstream = "主流"
     case hot = "热门"

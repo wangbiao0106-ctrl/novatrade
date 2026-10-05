@@ -5,8 +5,7 @@ let package = Package(
     name: "OKXSelfTrader",
     platforms: [.macOS(.v15)],
     products: [
-        .executable(name: "mac-trader", targets: ["MacTraderApp"]),
-        .executable(name: "okx-locald", targets: ["OKXLocalD"])
+        .executable(name: "mac-trader", targets: ["MacTraderApp"])
     ],
     dependencies: [
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", branch: "1.x.x"),
@@ -28,7 +27,6 @@ let package = Package(
             dependencies: ["TradingDomain", "TradingServiceClient"],
             exclude: ["Resources"]
         ),
-        .executableTarget(name: "OKXLocalD", dependencies: ["TradingService"]),
         .testTarget(name: "OKXGatewayTests", dependencies: ["OKXGateway", "ATKGateway", "TradingDomain", "TradingService"])
     ]
 )

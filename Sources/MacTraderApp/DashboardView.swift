@@ -16,8 +16,7 @@ struct DashboardView: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 12) {
                                 MarketHeader(model: model)
-                                ChartPanel(model: model, chartHeight: max(280, geometry.size.height - 180))
-                                MarketInsightStrip(model: model)
+                                ChartPanel(model: model, chartHeight: max(320, geometry.size.height - 96))
                             }.padding(16)
                         }
                     }

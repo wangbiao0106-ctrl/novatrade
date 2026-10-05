@@ -2,6 +2,10 @@
 .swiftpm/
 .DS_Store
 .venv/
+backend/*.env
+.claude/
+strategies/okx_demo_intraday_monitor/results/**/snapshot.json
+strategies/spot_adaptive_martingale/results/*/equity.csv
 __pycache__/
 *.py[cod]
 .cache/

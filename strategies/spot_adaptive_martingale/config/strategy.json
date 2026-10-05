@@ -1,0 +1,39 @@
+{
+  "version": "0.1.0",
+  "strategy_id": "spot_adaptive_martingale",
+  "display_name": "现货自适应有限马丁",
+  "lifecycle": "candidate",
+  "market": {
+    "quote_currency": "USDT",
+    "source_timeframe": "5m",
+    "signal_timeframe": "1h",
+    "confirmed_bar_only": true,
+    "execution": "next_bar_open"
+  },
+  "universe": {"symbols": ["BTC", "ETH", "OKB"], "max_symbols_per_instance": 1, "allow_rotation": false},
+  "portfolio": {"initial_capital_quote": 10000, "initial_spot_fraction": 0.2, "min_inventory_fraction_of_initial": 0.25},
+  "indicators": {"ema_fast": 20, "ema_slow": 120, "atr_period": 14, "trend_slope_bars": 24},
+  "grid": {
+    "min_step_pct": 0.006,
+    "max_step_pct": 0.05,
+    "atr_multiplier": 1.0,
+    "base_order_quote": 200,
+    "multiplier": 1.7,
+    "max_levels": 4,
+    "downtrend_order_fraction": 1.0,
+    "take_profit_pct": 0.007,
+    "sell_fraction": 0.25,
+    "cooldown_bars": 2
+  },
+  "risk": {
+    "reserve_floor_quote": 1000,
+    "max_inventory_fraction": 0.8,
+    "emergency_drawdown_pct": 0.35
+  },
+  "costs": {"fee_rate": 0.0006, "slippage_rate": 0.0002},
+  "research": {
+    "data_source": "data/kline/okx/swap/5m",
+    "benchmarks": ["buy_and_hold"],
+    "promotion_status": "research_only_until_spot_data_and_stress_tests"
+  }
+}

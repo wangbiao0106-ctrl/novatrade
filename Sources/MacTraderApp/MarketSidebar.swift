@@ -133,7 +133,7 @@ struct ContractRow: View {
         HStack(spacing: 6) {
             Button(action: action) {
                 HStack(spacing: 6) {
-                    RoundedRectangle(cornerRadius: 5).fill(contract.accent.opacity(0.2)).frame(width: 24, height: 24).overlay(Text(contract.shortName.prefix(1)).font(.caption.weight(.bold)).foregroundStyle(contract.accent))
+                    ContractIcon(symbol: contract.shortName)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(contract.pairLabel)
                             .font(.system(size: 12, weight: .semibold))

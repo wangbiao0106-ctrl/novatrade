@@ -1,0 +1,71 @@
+{
+  "checkedAt": "2026-10-05T01:02:22.044054+00:00",
+  "auth": "Bearer token held in memory only",
+  "events": [
+    {
+      "type": "connection",
+      "timestamp": "2026-10-05T01:02:22Z",
+      "instrumentID": null,
+      "payload": "connected"
+    },
+    {
+      "type": "connection",
+      "timestamp": "2026-10-05T01:02:22Z",
+      "instrumentID": null,
+      "payload": "subscribed:candle"
+    },
+    {
+      "type": "connection",
+      "timestamp": "2026-10-05T01:02:22Z",
+      "instrumentID": "BTC-USDT-SWAP",
+      "payload": "okx_wss_connecting"
+    },
+    {
+      "type": "candle",
+      "receivedAt": "2026-10-05T01:02:23.503381+00:00",
+      "instrumentID": "BTC-USDT-SWAP",
+      "candle": {
+        "id": 1791162120,
+        "high": 86497.3,
+        "confirmed": false,
+        "volume": 845.33,
+        "open": 86497.2,
+        "close": 86462.7,
+        "low": 86462.7,
+        "timestamp": "2026-10-05T01:02:00Z",
+        "quoteVolume": 731092.79608
+      }
+    },
+    {
+      "type": "connection",
+      "timestamp": "2026-10-05T01:02:23Z",
+      "instrumentID": "BTC-USDT-SWAP",
+      "payload": "okx_wss_subscribed"
+    },
+    {
+      "type": "candle",
+      "receivedAt": "2026-10-05T01:02:24.309216+00:00",
+      "instrumentID": "BTC-USDT-SWAP",
+      "candle": {
+        "id": 1791162120,
+        "high": 86497.3,
+        "confirmed": false,
+        "volume": 975.7,
+        "open": 86497.2,
+        "close": 86471.1,
+        "low": 86462.7,
+        "timestamp": "2026-10-05T01:02:00Z",
+        "quoteVolume": 843816.35093
+      }
+    }
+  ],
+  "health": {
+    "version": "1",
+    "updatedAt": "2026-10-05T01:02:22Z",
+    "mode": "paper",
+    "status": "ok"
+  },
+  "candleFrames": 2,
+  "changing": true,
+  "finishedAt": "2026-10-05T01:02:24.309272+00:00"
+}

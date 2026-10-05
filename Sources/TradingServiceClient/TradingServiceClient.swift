@@ -5,17 +5,19 @@ public enum TradingServiceClientError: LocalizedError, Sendable {
     case invalidResponse
     case server(status: Int)
     case disconnected
+    case timedOut
 
     public var errorDescription: String? {
         switch self {
         case .invalidResponse: return "本地交易服务返回了无法识别的响应"
         case let .server(status): return "本地交易服务错误（HTTP \(status)）"
         case .disconnected: return "本地交易服务连接已断开"
+        case .timedOut: return "AI 响应超时，请缩小标的池或稍后重试"
         }
     }
 }
 
-/// REST + websocket client for the loopback `okx-locald` daemon.
+/// REST + websocket client for the loopback FastAPI backend.
 public actor TradingServiceClient {
     public let baseURL: URL
     private let session: URLSession
@@ -40,7 +42,7 @@ public actor TradingServiceClient {
     public func privatePositions() async throws -> [PositionSnapshot] { try await get(path: "/api/v1/positions") }
     public func privateOrders() async throws -> [OrderSnapshot] { try await get(path: "/api/v1/orders") }
     public func market(instrumentID: String, interval: KlineInterval) async throws -> MarketSnapshot {
-        try await get(path: "/api/v1/market/candles", query: ["instId": instrumentID, "bar": interval.rawValue])
+        try await get(path: "/api/v1/market/candles", query: ["instId": instrumentID, "bar": interval.exchangeBar])
     }
     public func placePaperOrder(_ order: PaperOrderRequest) async throws -> PaperOrder { try await post("/api/v1/paper/orders", body: order) }
     public func paperOrders() async throws -> [PaperOrder] { try await get(path: "/api/v1/paper/orders") }
@@ -55,6 +57,47 @@ public actor TradingServiceClient {
     public func strategyTargets() async throws -> [StrategyUniverseSnapshot] { try await get(path: "/api/v1/strategies/targets") }
     public func risk() async throws -> RiskSnapshot { try await get(path: "/api/v1/risk") }
     public func resetRisk() async throws -> RiskSnapshot { try await request(path: "/api/v1/risk/reset", method: "POST") }
+    // MARK: - AI decision worker
+
+    public func aiStatus() async throws -> AIStatus { try await get(path: "/api/v1/ai/status") }
+    public func aiConfig() async throws -> AIConfig { try await get(path: "/api/v1/ai/config") }
+    public func updateAIConfig(_ patch: AIPatch) async throws -> AIConfig {
+        try await request(path: "/api/v1/ai/config", method: "PATCH", body: patch)
+    }
+    public func enableAI() async throws -> AIStatus {
+        try await request(path: "/api/v1/ai/enable", method: "POST")
+    }
+    public func disableAI() async throws -> AIStatus {
+        try await request(path: "/api/v1/ai/disable", method: "POST")
+    }
+    /// Requests the server-side emergency action.  The gateway owns the
+    /// actual cancellation and reduce-only flattening; the client only
+    /// receives the resulting worker status.
+    public func flattenAI() async throws -> AIFlattenResult {
+        try await request(path: "/api/v1/ai/flatten", method: "POST")
+    }
+    /// Sends a conversational request to the AI control plane. The server may
+    /// return a configuration patch for review; only an explicit apply request
+    /// can persist it, and this endpoint never submits an order.
+    public func chatAI(message: String, apply: Bool = false, suggestion: AIPatch? = nil) async throws -> AIChatResponse {
+        // Model-backed conversations can take longer than the local REST
+        // calls, especially when the worker is assembling a fresh market
+        // snapshot. Keep the longer bound local to chat requests so a stalled
+        // daemon still cannot block the rest of the UI indefinitely.
+        try await post(
+            "/api/v1/ai/chat",
+            body: AIChatRequest(message: message, apply: apply, suggestion: suggestion),
+            timeout: 70
+        )
+    }
+    /// The endpoint returns the append-only decision event rows, including
+    /// rejected decisions and worker errors, rather than bare decisions.
+    public func aiDecisions() async throws -> [AIAuditRecord] {
+        try await get(path: "/api/v1/ai/decisions")
+    }
+    public func aiAudit() async throws -> [AIAuditRecord] {
+        try await get(path: "/api/v1/ai/audit")
+    }
     public func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig { try await post("/api/v1/strategies", body: config) }
     public func deleteStrategy(_ id: UUID) async throws -> StrategyConfig { try await request(path: "/api/v1/strategies/\(id.uuidString)", method: "DELETE") }
     public func startStrategy(_ id: UUID) async throws -> StrategyConfig { try await request(path: "/api/v1/strategies/\(id.uuidString)/start", method: "POST") }
@@ -115,7 +158,13 @@ public actor TradingServiceClient {
         try await request(path: path, method: "GET", body: nil, query: query)
     }
 
-    private func request<T: Decodable>(path: String, method: String, body: (any Encodable)? = nil, query: [String: String] = [:]) async throws -> T {
+    private func request<T: Decodable>(
+        path: String,
+        method: String,
+        body: (any Encodable)? = nil,
+        query: [String: String] = [:],
+        timeout: TimeInterval = 15
+    ) async throws -> T {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
         components.path = path
         components.queryItems = query.isEmpty ? nil : query.map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -123,61 +172,83 @@ public actor TradingServiceClient {
         request.httpMethod = method
         // Every REST call is bounded so a stalled local daemon cannot block
         // the UI actor indefinitely.
-        request.timeoutInterval = 15
+        request.timeoutInterval = timeout.isFinite && timeout > 0 ? timeout : 15
         request.setValue("Bearer \(LocalService.tokenFromEnvironmentOrFile())", forHTTPHeaderField: "Authorization")
         if let body { request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try encoder.encode(body) }
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError where error.code == .timedOut {
+            throw TradingServiceClientError.timedOut
+        }
         guard let http = response as? HTTPURLResponse else { throw TradingServiceClientError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw TradingServiceClientError.server(status: http.statusCode) }
         return try decoder.decode(T.self, from: data)
     }
 
-    private func post<T: Encodable, R: Decodable>(_ path: String, body: T) async throws -> R {
-        try await request(path: path, method: "POST", body: body)
+    private func post<T: Encodable, R: Decodable>(_ path: String, body: T, timeout: TimeInterval = 15) async throws -> R {
+        try await request(path: path, method: "POST", body: body, timeout: timeout)
     }
 }
 
-/// Starts and stops the `okx-locald` daemon. The daemon is launched detached
-/// (`nohup`) so running strategies survive the desktop app quitting.
+/// Starts and stops the direct FastAPI backend.
 public actor LocalServiceProcess {
-    private let executableURL: URL
+    private let gatewayURL: URL
+    private let pythonURL: URL
     private var detachedPID: Int32?
 
-    /// `OKX_LOCALD_PATH` overrides the default, which is the `okx-locald`
-    /// binary next to the running app executable — true both for SwiftPM
-    /// build products and for the `NovaTrade.app` bundle.
+    /// `NOVATRADE_FASTAPI_PATH` overrides the gateway source path. Bundles
+    /// place it beside the app executable under `backend/main.py`.
     public init() {
-        if let configured = ProcessInfo.processInfo.environment["OKX_LOCALD_PATH"] {
-            executableURL = URL(fileURLWithPath: configured)
+        if let configured = ProcessInfo.processInfo.environment["NOVATRADE_FASTAPI_PATH"] {
+            gatewayURL = URL(fileURLWithPath: configured)
         } else {
-            let executableDirectory = Bundle.main.executableURL?.deletingLastPathComponent()
-                ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            executableURL = executableDirectory.appendingPathComponent("okx-locald")
+            let executableCandidates = [
+                Bundle.main.executableURL,
+                CommandLine.arguments.first.map { URL(fileURLWithPath: $0).standardizedFileURL }
+            ].compactMap { $0 }
+            let bundledCandidates = executableCandidates.map {
+                $0.deletingLastPathComponent().appendingPathComponent("backend/main.py")
+            } + [
+                Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/backend/main.py")
+            ]
+            let source = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("backend/main.py")
+            gatewayURL = bundledCandidates.first { FileManager.default.fileExists(atPath: $0.path) } ?? source
         }
+        pythonURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["NOVATRADE_PYTHON"] ?? "/usr/bin/python3")
     }
 
     public func start() {
         guard !isRunning() else { return }
         let launcher = Process()
-        launcher.executableURL = URL(fileURLWithPath: "/bin/sh")
-        let quotedPath = "'" + executableURL.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        launcher.arguments = ["-c", "nohup \(quotedPath) >/dev/null 2>&1 </dev/null & printf '%s' $!"]
+        launcher.executableURL = pythonURL
+        launcher.arguments = [gatewayURL.path]
         var environment = ProcessInfo.processInfo.environment
-        environment[LocalService.portEnvironmentKey] = String(LocalService.defaultPort)
+        environment["NOVATRADE_FASTAPI_PORT"] = String(LocalService.defaultPort)
         let token = LocalService.tokenFromEnvironmentOrFile()
         environment[LocalService.tokenEnvironmentKey] = token
         launcher.environment = environment
-        let output = Pipe()
-        launcher.standardOutput = output
+        launcher.standardOutput = FileHandle.nullDevice
         launcher.standardError = FileHandle.nullDevice
         do {
             try launcher.run()
-            launcher.waitUntilExit()
-            let pidText = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            detachedPID = pidText.flatMap(Int32.init)
+            detachedPID = launcher.processIdentifier
         } catch {
             detachedPID = nil
         }
+    }
+
+    /// Replaces a stale daemon that is still alive but no longer serving the
+    /// current client. This is used after a failed health check so an old
+    /// process cannot block startup forever.
+    public func restart() async {
+        stop()
+        for _ in 0..<20 {
+            if !isRunning() { break }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        start()
     }
 
     public func isRunning() -> Bool {
@@ -195,7 +266,7 @@ public actor LocalServiceProcess {
     private func discoverPID() -> Int32? {
         let lookup = Process()
         lookup.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        lookup.arguments = ["-f", executableURL.path]
+        lookup.arguments = ["-f", gatewayURL.path]
         let output = Pipe()
         lookup.standardOutput = output
         lookup.standardError = FileHandle.nullDevice

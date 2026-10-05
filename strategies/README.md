@@ -38,6 +38,7 @@ git diff --check
 - [`extreme_negative_funding_110_short/`](extreme_negative_funding_110_short/)：独立验证 5m 日内涨幅 >80%、价格触及日内开盘价 +110% 且资金费率达到币种负值上限后挂限价做空，1 倍杠杆、20% 止损、分段止盈；当前行情目录没有历史资金费率，未接入运行时。
 - [`sixty_day_support_retest_failed_breakout_short/`](sixty_day_support_retest_failed_breakout_short/)：最近 60 日暴涨超过 300%、当日冲高后支撑回踩、二次突破失败的 15m 市价做空研究候选；未接入运行时。
 - [`spot_perp_hedged_accumulation/`](spot_perp_hedged_accumulation/)：单一主流币的 1:1 现货多头 + USDT 永续空头对冲研究；1h 背离/EMA20 回踩激活，价格每跨 4% 尝试转移 25% 基础币单位，但名义偏离硬限 20%，资金费和基差尚未建模，研究候选，未接入运行时。
+- [`spot_adaptive_martingale/`](spot_adaptive_martingale/)：纯现货自适应有限马丁；1h ATR 网格在小波动中分批止盈，下跌中最多四层递增买入，带现金底线、库存上限和 35% 应急退出，BTC/ETH/OKB 价格层研究，未接入运行时。
 
 资产类别排除清单（主流币、稳定币、股票/ETF/指数/商品）的唯一真源是 [`sweep_reversal_short/config/universe.json`](sweep_reversal_short/config/universe.json) 的 `exclude`，`Sources/TradingDomain/StrategyUniverseRules.swift`、`research/live_signal.py` 和 `ema_3line_pullback/src/backtest.py` 都只是副本，由 `scripts/validate_strategy_sync.py` 逐一对齐。
 

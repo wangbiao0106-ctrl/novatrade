@@ -5,8 +5,8 @@ struct ChartPanel: View {
     @ObservedObject var model: DashboardModel
     let chartHeight: CGFloat
     @State private var showVolume = true
-    @State private var showEMA = true
-    @State private var showGrid = true
+    @State private var showMA = true
+    @State private var showSupportResistance = true
     @State private var chartResetToken = UUID()
     var body: some View {
         VStack(spacing: 0) {
@@ -27,7 +27,7 @@ struct ChartPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12).padding(.vertical, 9)
             Divider().overlay(Color.white.opacity(0.07))
-            NativeCandleChart(snapshot: model.marketSnapshot, showVolume: showVolume, showEMA: showEMA, showGrid: showGrid)
+            NativeCandleChart(snapshot: model.marketSnapshot, showVolume: showVolume, showMA: showMA, showSupportResistance: showSupportResistance)
                 .id(chartResetToken)
                 .frame(height: chartHeight)
                 .padding(.horizontal, 10)
@@ -75,12 +75,12 @@ struct ChartPanel: View {
 
     private var indicatorControls: some View {
         HStack(spacing: 10) {
-            Toggle(isOn: $showEMA) { Label("EMA", systemImage: "chart.line.uptrend.xyaxis") }
+            Toggle(isOn: $showMA) { Label("MA", systemImage: "chart.line.uptrend.xyaxis") }
                 .toggleStyle(.button).font(.caption2).tint(.orange)
+            Toggle(isOn: $showSupportResistance) { Label("撑压", systemImage: "line.3.horizontal.decrease") }
+                .toggleStyle(.button).font(.caption2).tint(.pink)
             Toggle(isOn: $showVolume) { Label("量", systemImage: "chart.bar.xaxis") }
                 .toggleStyle(.button).font(.caption2).tint(.mint)
-            Toggle(isOn: $showGrid) { Image(systemName: "square.grid.3x3") }
-                .toggleStyle(.button).help("网格")
             Button { chartResetToken = UUID() } label: {
                 Label("自动", systemImage: "arrow.up.left.and.arrow.down.right")
             }
@@ -102,46 +102,5 @@ struct ChartPanel: View {
             }
         }
         .lineLimit(1)
-    }
-}
-
-struct MarketInsightStrip: View {
-    @ObservedObject var model: DashboardModel
-
-    private var candles: [Candle] { Array((model.marketSnapshot?.candles ?? []).suffix(24)) }
-    private var latest: Candle? { candles.last }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            insight("最新收盘", value: latest.map { formatPrice($0.close) } ?? "--", detail: latest?.confirmed == true ? "已收盘" : "当前 K 线")
-            insight("区间高低", value: rangeText, detail: "最近 \(candles.count) 根")
-            insight("成交量", value: volumeText, detail: "K 线累计")
-            insight("K 线状态", value: latest == nil ? "等待数据" : latest?.confirmed == true ? "已确认" : model.candleDataSource.isLive ? "实时更新" : "等待推送", detail: model.candleDataSource.label)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(Color.panelBackground, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.07)))
-    }
-
-    private var rangeText: String {
-        guard let low = candles.map(\.low).min(), let high = candles.map(\.high).max() else { return "--" }
-        return "\(formatPrice(low)) – \(formatPrice(high))"
-    }
-
-    private var volumeText: String {
-        let total = candles.reduce(Decimal.zero) { $0 + $1.volume }
-        return formatCompact(total.doubleValue)
-    }
-
-    private func insight(_ title: String, value: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption2).foregroundStyle(.secondary)
-            Text(value).font(.subheadline.weight(.semibold).monospacedDigit())
-            Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .overlay(alignment: .trailing) { Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1, height: 38) }
     }
 }

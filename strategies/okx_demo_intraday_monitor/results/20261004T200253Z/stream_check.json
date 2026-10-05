@@ -1,0 +1,39 @@
+{
+  "events": [
+    {
+      "timestamp": "2026-10-04T20:03:40Z",
+      "payload": "connected",
+      "type": "connection"
+    },
+    {
+      "timestamp": "2026-10-04T20:03:40Z",
+      "payload": "subscribed:candle",
+      "type": "connection"
+    },
+    {
+      "type": "connection",
+      "timestamp": "2026-10-04T20:03:41Z",
+      "payload": "okx_wss_connecting",
+      "instrumentID": "BTC-USDT-SWAP"
+    },
+    {
+      "instrumentID": "BTC-USDT-SWAP",
+      "type": "connection",
+      "timestamp": "2026-10-04T20:03:42Z",
+      "payload": "okx_wss_subscribed"
+    },
+    {
+      "instrumentID": "BTC-USDT-SWAP",
+      "type": "candle",
+      "timestamp": "2026-10-04T20:03:42Z",
+      "payload": "{\"open\":85410.2,\"volume\":442.65,\"timestamp\":\"2026-10-04T20:03:00Z\",\"high\":85410.3,\"id\":1791144180,\"low\":85385.8,\"quoteVolume\":378051.25619,\"close\":85385.9,\"confirmed\":false}"
+    },
+    {
+      "instrumentID": "BTC-USDT-SWAP",
+      "type": "candle",
+      "timestamp": "2026-10-04T20:03:44Z",
+      "payload": "{\"open\":85410.2,\"volume\":442.74,\"timestamp\":\"2026-10-04T20:03:00Z\",\"high\":85410.3,\"id\":1791144180,\"low\":85385.8,\"quoteVolume\":378128.1035,\"close\":85385.9,\"confirmed\":false}"
+    }
+  ],
+  "checkedAt": "2026-10-04 20:03:44 UTC / 2026-10-05 04:03:44 Asia/Shanghai"
+}

@@ -27,17 +27,33 @@ private struct CandleViewport {
     let capacity: CGFloat
     let offset: CGFloat
     let width: CGFloat
+    let trailingWidth: CGFloat
 
     var count: CGFloat { min(capacity, CGFloat(max(total, 1))) }
+    var dataWidth: CGFloat { max(1, width - trailingWidth) }
+    // Keep the default view inset from the right edge, while preserving the
+    // full canvas spacing when the user pans into history. That lets candles
+    // occupy the transparent price-axis area instead of stopping at its edge.
     var step: CGFloat { width / count }
-    var maximumOffset: CGFloat { max(0, CGFloat(total) - count) }
-    var start: CGFloat { maximumOffset - min(maximumOffset, max(0, offset)) }
-    var indices: Range<Int> {
-        max(0, Int(floor(start)) - 1)..<min(total, Int(ceil(start + count)) + 1)
+    var trailingBars: CGFloat { trailingWidth / max(step, 1) }
+    var maximumOffset: CGFloat {
+        guard total > Int(count) else { return 0 }
+        return max(0, CGFloat(total) - count + trailingBars)
     }
-    func x(_ index: Int) -> CGFloat { (CGFloat(index) - start + 0.5) * step }
+    var start: CGFloat { maximumOffset - min(maximumOffset, max(0, offset)) }
+    var renderStart: CGFloat { min(max(0, start), CGFloat(max(total - 1, 0))) }
+    var dataRight: CGFloat {
+        let trailingGapIsVisible = total > Int(count) && start + count > CGFloat(total)
+        return trailingGapIsVisible ? dataWidth : width
+    }
+    var indices: Range<Int> {
+        let lower = max(0, Int(floor(renderStart)) - 1)
+        let upper = min(total, Int(ceil(renderStart + count)) + 1)
+        return lower..<max(lower, upper)
+    }
+    func x(_ index: Int) -> CGFloat { (CGFloat(index) - renderStart + 0.5) * step }
     func index(at x: CGFloat) -> Int {
-        min(max(0, total - 1), max(0, Int(floor(start + x / step))))
+        min(max(0, total - 1), max(0, Int(floor(renderStart + x / step))))
     }
 }
 
@@ -69,7 +85,11 @@ private struct CandleChartLayout {
     var axisWidth: CGFloat = 80
     let headerHeight: CGFloat = 54
     let timeAxisHeight: CGFloat = 27
-    var plotWidth: CGFloat { max(1, size.width - axisWidth) }
+    // Price labels are drawn over the right edge of the plot. Keep the data
+    // viewport at the full canvas width so the axis does not steal candle
+    // drawing space.
+    var plotWidth: CGFloat { max(1, size.width) }
+    var trailingWidth: CGFloat { max(axisWidth + 16, min(140, size.width * 0.10)) }
     var volumeHeight: CGFloat { showVolume ? max(42, size.height * 0.15) : 0 }
     var priceRect: CGRect {
         CGRect(x: 0, y: headerHeight, width: plotWidth,
@@ -84,8 +104,8 @@ private struct CandleChartLayout {
 struct NativeCandleChart: View {
     let snapshot: MarketSnapshot?
     let showVolume: Bool
-    let showEMA: Bool
-    let showGrid: Bool
+    let showMA: Bool
+    let showSupportResistance: Bool
 
     @State private var visibleCount: CGFloat = 90
     @State private var barOffset: CGFloat = 0
@@ -101,7 +121,8 @@ struct NativeCandleChart: View {
         GeometryReader { geometry in
             let layout = CandleChartLayout(size: geometry.size, showVolume: showVolume,
                                            axisWidth: candles.last.map { abs($0.close.doubleValue) < 0.001 ? 104 : 80 } ?? 80)
-            let viewport = CandleViewport(total: candles.count, capacity: visibleCount, offset: barOffset, width: layout.plotWidth)
+            let viewport = CandleViewport(total: candles.count, capacity: visibleCount, offset: barOffset,
+                                          width: layout.plotWidth, trailingWidth: layout.trailingWidth)
             let scale = dragScale ?? CandlePriceScale(candles: candles, indices: viewport.indices)
             if candles.isEmpty {
                 ContentUnavailableView("等待 OKX K 线", systemImage: "chart.xyaxis.line", description: Text("正在连接 OKX 行情"))
@@ -126,7 +147,7 @@ struct NativeCandleChart: View {
                         }
                         .buttonStyle(.plain)
                         .background(Color(white: 0.15), in: Capsule())
-                        .padding(.trailing, layout.axisWidth + 12)
+                        .padding(.trailing, 12)
                         .padding(.bottom, layout.timeAxisHeight + 8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                     }
@@ -137,7 +158,7 @@ struct NativeCandleChart: View {
                 .onContinuousHover { phase in
                     switch phase {
                     case .active(let location):
-                        if dragOrigin == nil, location.x >= 0, location.x <= layout.plotWidth,
+                        if dragOrigin == nil, location.x >= 0, location.x <= viewport.dataRight,
                            location.y >= layout.priceRect.minY, location.y <= layout.dataBottom {
                             pointer = location
                         } else { pointer = nil }
@@ -158,7 +179,7 @@ struct NativeCandleChart: View {
                 .simultaneousGesture(MagnifyGesture().onChanged { value in
                     if zoomOrigin == nil { zoomOrigin = visibleCount }
                     visibleCount = min(200, max(24, (zoomOrigin ?? 90) / value.magnification))
-                    barOffset = min(max(0, CGFloat(candles.count) - visibleCount), barOffset)
+                    barOffset = min(viewport.maximumOffset, barOffset)
                     pointer = nil
                 }.onEnded { _ in zoomOrigin = nil })
                 .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { _ in resetViewport() })
@@ -214,14 +235,22 @@ struct NativeCandleChart: View {
                 .foregroundStyle(color)
                 .lineLimit(1).minimumScaleFactor(0.75)
                 HStack(spacing: 12) {
-                    if showEMA {
+                    if showMA {
                         let closes = candles.map { $0.close.doubleValue }
-                        Text("EMA20 \(price(ema(closes, period: 20)[selectedIndex]))").foregroundStyle(.orange)
-                        Text("EMA60 \(price(ema(closes, period: 60)[selectedIndex]))").foregroundStyle(.blue)
+                        Text("MA5 \(price(movingAverage(closes, period: 5)[selectedIndex]))").foregroundStyle(.orange)
+                        Text("MA10 \(price(movingAverage(closes, period: 10)[selectedIndex]))").foregroundStyle(.pink)
+                        Text("MA20 \(price(movingAverage(closes, period: 20)[selectedIndex]))").foregroundStyle(.cyan)
                     }
                     Text("VOL \(formatCompact(candle.volume.doubleValue))").foregroundStyle(.secondary)
                 }
                 .lineLimit(1).minimumScaleFactor(0.75)
+                if showSupportResistance, let levels = supportResistance() {
+                    HStack(spacing: 12) {
+                        Text("阻力 \(price(levels.resistance))").foregroundStyle(.pink)
+                        Text("支撑 \(price(levels.support))").foregroundStyle(.orange)
+                    }
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                }
             }
             .font(.system(size: 10, design: .monospaced))
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -234,17 +263,19 @@ struct NativeCandleChart: View {
         let axisFont = Font.system(size: 10, design: .monospaced)
         for tick in 0...4 {
             let y = plot.minY + plot.height * CGFloat(tick) / 4
-            let value = scale.high - scale.range * Double(tick) / 4
-            if showGrid { stroke(&context, from: CGPoint(x: 0, y: y), to: CGPoint(x: plot.maxX, y: y), color: .white.opacity(0.065)) }
-            context.draw(Text(price(value)).font(axisFont).foregroundStyle(.secondary), at: CGPoint(x: plot.maxX + 8, y: y), anchor: .leading)
+            stroke(&context, from: CGPoint(x: 0, y: y), to: CGPoint(x: plot.maxX, y: y), color: .white.opacity(0.065))
         }
         for index in tickIndices {
             let x = viewport.x(index)
-            if showGrid { stroke(&context, from: CGPoint(x: x, y: plot.minY), to: CGPoint(x: x, y: layout.dataBottom), color: .white.opacity(0.045)) }
+            stroke(&context, from: CGPoint(x: x, y: plot.minY), to: CGPoint(x: x, y: layout.dataBottom), color: .white.opacity(0.045))
             context.draw(Text(axisDate(candles[index].timestamp, viewport: viewport)).font(axisFont).foregroundStyle(.secondary), at: CGPoint(x: x, y: layout.dataBottom + 14))
         }
         stroke(&context, from: CGPoint(x: plot.maxX, y: 0), to: CGPoint(x: plot.maxX, y: layout.size.height), color: .white.opacity(0.10))
         stroke(&context, from: CGPoint(x: 0, y: layout.dataBottom), to: CGPoint(x: plot.maxX, y: layout.dataBottom), color: .white.opacity(0.10))
+        // Draw axis tick text beneath market data. The price axis is an
+        // overlay without a backing panel, so candles remain visible when
+        // the viewport is scrolled beneath the axis labels.
+        drawPriceAxis(context: &context, layout: layout, scale: scale, axisFont: axisFont)
 
         var drawing = context
         drawing.clip(to: Path(plot))
@@ -265,41 +296,64 @@ struct NativeCandleChart: View {
                 volumeDrawing.fill(Path(CGRect(x: x - bodyWidth / 2, y: layout.volumeRect.maxY - height, width: bodyWidth, height: height)), with: .color(color.opacity(0.42)))
             }
         }
-        if showEMA {
+        if showMA {
             let closes = candles.map { $0.close.doubleValue }
-            var emaContext = context
-            emaContext.clip(to: Path(plot))
-            for (period, color) in [(20, Color.orange), (60, Color.blue)] {
-                let series = ema(closes, period: period)
-                var path = Path()
-                for (offset, index) in viewport.indices.enumerated() {
-                    let point = CGPoint(x: viewport.x(index), y: scale.y(series[index], in: plot))
-                    if offset == 0 { path.move(to: point) } else { path.addLine(to: point) }
-                }
-                emaContext.stroke(path, with: .color(color.opacity(0.95)), lineWidth: 1.25)
+            var maContext = context
+            maContext.clip(to: Path(plot))
+            for (period, color) in [(5, Color.orange), (10, Color.pink), (20, Color.cyan)] {
+                let series = movingAverage(closes, period: period)
+                drawSeries(&maContext, series: series, viewport: viewport, plot: plot, scale: scale, color: color, lineWidth: period == 5 ? 1.1 : 1.25)
+            }
+        }
+        if showSupportResistance, let levels = supportResistance() {
+            let resistanceY = scale.y(levels.resistance, in: plot)
+            let supportY = scale.y(levels.support, in: plot)
+            if resistanceY >= plot.minY && resistanceY <= plot.maxY {
+                stroke(&context, from: CGPoint(x: 0, y: resistanceY), to: CGPoint(x: plot.maxX, y: resistanceY), color: .pink.opacity(0.9), dash: [5, 4])
+            }
+            if supportY >= plot.minY && supportY <= plot.maxY {
+                stroke(&context, from: CGPoint(x: 0, y: supportY), to: CGPoint(x: plot.maxX, y: supportY), color: .orange.opacity(0.9), dash: [5, 4])
             }
         }
         if showVolume {
             let y = plot.maxY + 9
             stroke(&context, from: CGPoint(x: 0, y: y), to: CGPoint(x: plot.maxX, y: y), color: .white.opacity(0.10))
             context.draw(Text("成交量").font(axisFont).foregroundStyle(.secondary), at: CGPoint(x: 8, y: y + 9), anchor: .leading)
-            context.draw(Text(formatCompact(maxVolume)).font(axisFont).foregroundStyle(.secondary), at: CGPoint(x: plot.maxX + 8, y: layout.volumeRect.minY + 7), anchor: .leading)
+            context.draw(Text(formatCompact(maxVolume)).font(axisFont).foregroundStyle(.secondary), at: CGPoint(x: axisLabelX(layout: layout), y: layout.volumeRect.minY + 7), anchor: .leading)
         }
-        drawLatestPrice(context: &context, layout: layout, scale: scale)
+        drawLatestPrice(context: &context, layout: layout, viewport: viewport, scale: scale)
         drawCrosshair(context: &context, layout: layout, viewport: viewport, scale: scale)
     }
 
-    private func drawLatestPrice(context: inout GraphicsContext, layout: CandleChartLayout, scale: CandlePriceScale) {
+    private func axisLabelX(layout: CandleChartLayout) -> CGFloat {
+        max(4, layout.size.width - layout.axisWidth + 6)
+    }
+
+    private func drawPriceAxis(context: inout GraphicsContext, layout: CandleChartLayout, scale: CandlePriceScale, axisFont: Font) {
+        let plot = layout.priceRect
+        for tick in 0...4 {
+            let y = plot.minY + plot.height * CGFloat(tick) / 4
+            let value = scale.high - scale.range * Double(tick) / 4
+            context.draw(Text(price(value)).font(axisFont).foregroundStyle(.secondary),
+                         at: CGPoint(x: axisLabelX(layout: layout), y: y), anchor: .leading)
+        }
+    }
+
+    private func drawLatestPrice(context: inout GraphicsContext, layout: CandleChartLayout, viewport: CandleViewport, scale: CandlePriceScale) {
         guard let latest = candles.last else { return }
         let rawY = scale.y(latest.close.doubleValue, in: layout.priceRect)
-        let color = latest.close >= latest.open ? Color.marketRise : Color.marketFall
+        let color = Color.white.opacity(0.82)
         let inRange = rawY >= layout.priceRect.minY && rawY <= layout.priceRect.maxY
+        let latestX = viewport.x(candles.count - 1)
+        let latestIsOffRight = latestX > viewport.dataWidth
+        let currentY = min(layout.priceRect.maxY - 9, max(layout.priceRect.minY + 9, rawY))
         if inRange {
-            stroke(&context, from: CGPoint(x: 0, y: rawY), to: CGPoint(x: layout.plotWidth, y: rawY), color: color.opacity(0.7), dash: [4, 3])
+            let startX = latestIsOffRight ? 0 : max(0, latestX)
+            stroke(&context, from: CGPoint(x: startX, y: currentY), to: CGPoint(x: layout.plotWidth, y: currentY), color: color, dash: [4, 3])
         }
-        let y = min(layout.priceRect.maxY - 9, max(layout.priceRect.minY + 9, rawY))
-        let arrow = inRange ? "" : (rawY < layout.priceRect.minY ? "↑ " : "↓ ")
-        axisTag(&context, text: arrow + price(latest.close), center: CGPoint(x: layout.plotWidth + layout.axisWidth / 2, y: y), color: color, maxWidth: layout.axisWidth - 2)
+        let arrow = !inRange ? (rawY < layout.priceRect.minY ? "↑ " : "↓ ") : (latestIsOffRight ? "← " : "")
+        let tagX = layout.plotWidth - layout.axisWidth / 2
+        axisTag(&context, text: arrow + price(latest.close), center: CGPoint(x: tagX, y: currentY), color: Color.white.opacity(0.12), maxWidth: layout.axisWidth - 2)
     }
 
     private func drawCrosshair(context: inout GraphicsContext, layout: CandleChartLayout, viewport: CandleViewport, scale: CandlePriceScale) {
@@ -310,7 +364,7 @@ struct NativeCandleChart: View {
         stroke(&context, from: CGPoint(x: x, y: layout.priceRect.minY), to: CGPoint(x: x, y: layout.dataBottom), color: .white.opacity(0.55), dash: [4, 3])
         if layout.priceRect.contains(pointer) {
             stroke(&context, from: CGPoint(x: 0, y: pointer.y), to: CGPoint(x: layout.plotWidth, y: pointer.y), color: .white.opacity(0.45), dash: [4, 3])
-            axisTag(&context, text: price(scale.value(at: pointer.y, in: layout.priceRect)), center: CGPoint(x: layout.plotWidth + layout.axisWidth / 2, y: pointer.y), color: Color(white: 0.27), maxWidth: layout.axisWidth - 2)
+            axisTag(&context, text: price(scale.value(at: pointer.y, in: layout.priceRect)), center: CGPoint(x: layout.plotWidth - layout.axisWidth / 2, y: pointer.y), color: Color(white: 0.27), maxWidth: layout.axisWidth - 2)
         }
         axisTag(&context, text: ChartDateFormat.full.string(from: candles[index].timestamp), center: CGPoint(x: min(layout.plotWidth - 65, max(65, x)), y: layout.dataBottom + 14), color: Color(white: 0.22), maxWidth: 150)
     }
@@ -331,9 +385,9 @@ struct NativeCandleChart: View {
     }
 
     private func timeTicks(viewport: CandleViewport) -> [Int] {
-        let maximumTicks = max(2, floor(viewport.width / 112))
+        let maximumTicks = max(2, floor(viewport.dataRight / 112))
         let stride = max(1, Int(ceil(viewport.count / maximumTicks)))
-        return viewport.indices.filter { $0 % stride == 0 && viewport.x($0) >= 42 && viewport.x($0) <= viewport.width - 42 }
+        return viewport.indices.filter { $0 % stride == 0 && viewport.x($0) >= 42 && viewport.x($0) <= viewport.dataRight - 42 }
     }
 
     private func axisDate(_ date: Date, viewport: CandleViewport) -> String {
@@ -351,13 +405,59 @@ struct NativeCandleChart: View {
         let decimals = min(16, max(8, Int(ceil(-log10(abs(value)))) + 3))
         return String(format: "%.*f", decimals, value)
     }
-    private func ema(_ values: [Double], period: Int) -> [Double] {
-        guard let first = values.first else { return [] }
-        let alpha = 2.0 / Double(period + 1)
-        var previous = first
-        return values.map { value in
-            previous += alpha * (value - previous)
-            return previous
+    private func movingAverage(_ values: [Double], period: Int) -> [Double] {
+        guard !values.isEmpty else { return [] }
+        var result = Array(repeating: 0.0, count: values.count)
+        var sum = 0.0
+        for index in values.indices {
+            sum += values[index]
+            if index >= period { sum -= values[index - period] }
+            result[index] = sum / Double(min(index + 1, period))
         }
+        return result
+    }
+
+    private func drawSeries(_ context: inout GraphicsContext, series: [Double], viewport: CandleViewport, plot: CGRect, scale: CandlePriceScale, color: Color, lineWidth: CGFloat) {
+        guard series.count == candles.count else { return }
+        var path = Path()
+        for (offset, index) in viewport.indices.enumerated() {
+            let point = CGPoint(x: viewport.x(index), y: scale.y(series[index], in: plot))
+            if offset == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        context.stroke(path, with: .color(color.opacity(0.95)), lineWidth: lineWidth)
+    }
+
+    private func supportResistance() -> (support: Double, resistance: Double)? {
+        guard let latest = candles.last else { return nil }
+        let lookback: TimeInterval = snapshot?.interval == .oneDay ? 30 * 86_400 : 24 * 3_600
+        let start = latest.timestamp.addingTimeInterval(-lookback)
+        let recent = candles.filter { $0.timestamp >= start }
+        guard recent.count >= 3 else { return nil }
+
+        // Use confirmed local swing points from the selected timeframe rather
+        // than the visible viewport's raw extrema. This keeps levels tied to
+        // intraday structure while updating as each new bar is confirmed.
+        let confirmed = recent.filter(\.confirmed)
+        let source = confirmed.count >= 3 ? confirmed : recent
+        let radius = source.count >= 5 ? 2 : 1
+        var supports: [Double] = []
+        var resistances: [Double] = []
+        if source.count > radius * 2 {
+            for index in radius..<(source.count - radius) {
+                let low = source[index].low.doubleValue
+                let high = source[index].high.doubleValue
+                let lows = source[(index - radius)...(index + radius)].map { $0.low.doubleValue }
+                let highs = source[(index - radius)...(index + radius)].map { $0.high.doubleValue }
+                if low <= (lows.min() ?? low) { supports.append(low) }
+                if high >= (highs.max() ?? high) { resistances.append(high) }
+            }
+        }
+        let price = latest.close.doubleValue
+        let fallbackSupport = source.map { $0.low.doubleValue }.min() ?? price
+        let fallbackResistance = source.map { $0.high.doubleValue }.max() ?? price
+        let support = supports.filter { $0 <= price }.max() ?? fallbackSupport
+        let resistance = resistances.filter { $0 >= price }.min() ?? fallbackResistance
+        guard resistance > support else { return nil }
+        return (support, resistance)
     }
 }

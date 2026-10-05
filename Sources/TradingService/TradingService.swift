@@ -170,7 +170,7 @@ public actor PaperTradingStore {
     }
 
     public static func defaultDirectory() -> URL {
-        if let directory = ProcessInfo.processInfo.environment["OKX_LOCALD_STATE_DIR"], !directory.isEmpty {
+        if let directory = ProcessInfo.processInfo.environment["NOVATRADE_STATE_DIR"], !directory.isEmpty {
             return URL(fileURLWithPath: directory, isDirectory: true)
         }
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -2483,8 +2483,16 @@ public actor TradingBackend {
             .sorted { $0.volume24h > $1.volume24h }
             .prefix(20)
             .map(\.id))
-        let gainers = Set(all.sorted { $0.changePercent > $1.changePercent }.prefix(12).map(\.id))
-        let losers = Set(all.sorted { $0.changePercent < $1.changePercent }.prefix(12).map(\.id))
+        let gainers = Set(all.sorted {
+            $0.changePercent == $1.changePercent
+                ? $0.id < $1.id
+                : $0.changePercent > $1.changePercent
+        }.prefix(12).map(\.id))
+        let losers = Set(all.sorted {
+            $0.changePercent == $1.changePercent
+                ? $0.id < $1.id
+                : $0.changePercent < $1.changePercent
+        }.prefix(12).map(\.id))
         let enriched = all.map { item in
             let category = byVolume.contains(item.id) ? "热门" : gainers.contains(item.id) ? "涨幅" : losers.contains(item.id) ? "跌幅" : "全部"
             return ContractMarket(id: item.id, name: item.name, baseCurrency: item.baseCurrency, quoteCurrency: item.quoteCurrency, last: item.last, changePercent: item.changePercent, rollingChangePercent: item.rollingChangePercent, volume24h: item.volume24h, category: category, updatedAt: item.updatedAt)

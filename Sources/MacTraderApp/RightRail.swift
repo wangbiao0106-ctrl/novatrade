@@ -1,5 +1,7 @@
+import Foundation
 import SwiftUI
 import TradingDomain
+import TradingServiceClient
 
 struct RightRail: View {
     @ObservedObject var model: DashboardModel
@@ -21,8 +23,9 @@ struct RightRail: View {
                 if model.riskSnapshot.killSwitch {
                     RiskAlertModule(model: model)
                 }
+                AIControlModule(model: model)
                 ForEach(model.strategies) { config in
-                    StrategyStatusModule(config: config, status: model.strategyStatuses.first { $0.id == config.id }, model: model)
+                    StrategyStatusModule(config: config, status: model.strategyStatus(for: config), model: model)
                 }
                 RailModule(title: "持仓", icon: "chart.bar.xaxis") {
                     if model.livePositions.isEmpty { RailEmpty("暂无\(accountLabel)持仓") }
@@ -72,6 +75,398 @@ struct RightRail: View {
         }
         .frame(width: 350)
         .background(Color.sidebarBackground.opacity(0.7))
+    }
+}
+
+struct AIControlModule: View {
+    @ObservedObject var model: DashboardModel
+    @State private var showingFlattenConfirmation = false
+    @State private var showingAIActivity = false
+    @State private var feedback: String?
+
+    private var active: Bool { model.aiStatus.enabled && model.aiStatus.mode != .disabled && model.aiStatus.mode != .halted }
+    private var statusDotColor: Color {
+        if model.aiStatus.lastError != nil { return .red }
+        if active { return .green }
+        if model.aiStatus.mode == .halted { return .red }
+        return .secondary
+    }
+    private var statusMessage: String {
+        if model.aiStatus.lastError != nil { return "运行异常 · 详情见日志" }
+        if model.aiStatus.mode == .halted { return "已暂停" }
+        return active ? "运行中" : "已停用"
+    }
+    private var statusMessageColor: Color {
+        model.aiStatus.lastError == nil ? .secondary : .red
+    }
+    private var modeLabel: String {
+        switch model.aiStatus.mode {
+        case .disabled: return "已关闭"
+        case .shadow: return "观察"
+        case .demoActive: return "模拟盘"
+        case .liveArmed: return "实盘已授权"
+        case .halted: return "已停止"
+        }
+    }
+    private var latestActionLabel: String {
+        guard let decision = model.aiStatus.lastDecision else { return "等待首次评估" }
+        if decision.reasonCode == "COORDINATOR_FAILED" { return "系统观望" }
+        switch decision.action {
+        case .hold: return "观望"
+        case .open: return "建议开仓"
+        case .close: return "建议平仓"
+        case .cancel: return "建议撤单"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Label("AI 策略", systemImage: "sparkles")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(modeLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(model.aiStatus.mode == .liveArmed ? .orange : active ? .green : .secondary)
+                Button { showingAIActivity = true } label: {
+                    Image(systemName: "list.bullet.rectangle")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .help("查看 AI 运行日志")
+                .accessibilityLabel("AI 运行日志")
+            }
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(statusDotColor)
+                    .frame(width: 7, height: 7)
+                Text(statusMessage)
+                    .font(.caption2)
+                    .foregroundStyle(statusMessageColor)
+                    .lineLimit(2)
+            }
+            HStack {
+                Text("最近：\(latestActionLabel)")
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 4)
+                if let date = model.aiStatus.lastDecisionAt {
+                    Text(formatLocalTime(date)).foregroundStyle(.secondary)
+                }
+            }
+            .font(.caption2)
+            if let decision = model.aiStatus.lastDecision, let instrument = decision.instrumentID {
+                Text(instrument)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            HStack(spacing: 8) {
+                Button {
+                    Task {
+                        do {
+                            if active { try await model.disableAI() } else { try await model.enableAI() }
+                        } catch { feedback = error.localizedDescription }
+                    }
+                } label: {
+                    Label(active ? "停用" : "启用", systemImage: active ? "pause.fill" : "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(model.isUpdatingAI || model.aiStatus.mode == .halted)
+
+                Button { showingFlattenConfirmation = true } label: {
+                    Label("平仓", systemImage: "xmark.octagon")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+                .disabled(model.isUpdatingAI)
+            }
+            if let feedback {
+                Text(feedback).font(.caption2).foregroundStyle(.red).lineLimit(2)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.panelBackground, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(active ? Color.green.opacity(0.34) : Color.white.opacity(0.09), lineWidth: 1)
+        )
+        .sheet(isPresented: $showingAIActivity) {
+            AIActivitySheet(model: model)
+        }
+        .confirmationDialog("撤销挂单并平掉当前仓位？", isPresented: $showingFlattenConfirmation, titleVisibility: .visible) {
+            Button("确认平仓", role: .destructive) {
+                Task {
+                    do { try await model.flattenAI() } catch { feedback = error.localizedDescription }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("服务端将撤销待成交订单，并只使用 reduce-only 订单平仓。")
+        }
+    }
+}
+
+struct AISettingsSheet: View {
+    @ObservedObject var model: DashboardModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var config: AIConfig
+    @State private var selectedInstrumentIDs: Set<String>
+    @State private var instrumentSearch = ""
+    @State private var feedback: String?
+
+    init(model: DashboardModel) {
+        self.model = model
+        _config = State(initialValue: model.aiConfig)
+        let configured = model.aiConfig.allowedInstruments
+        _selectedInstrumentIDs = State(initialValue: Set(configured.isEmpty ? ["BTC-USDT-SWAP"] : configured))
+    }
+
+    /// The AI universe is a fixed allowlist selected by the user. Show the
+    /// pending selection here so the settings preview updates immediately.
+    private var observedInstrumentIDs: [String] {
+        selectedInstrumentIDs.sorted()
+    }
+
+    private var observedInstrumentText: String {
+        if observedInstrumentIDs.isEmpty {
+            return "BTC-USDT-SWAP"
+        }
+        return observedInstrumentIDs.joined(separator: ", ")
+    }
+
+    private var filteredContracts: [PerpetualContract] {
+        let query = instrumentSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let sorted = model.contracts.sorted { $0.id < $1.id }
+        guard !query.isEmpty else { return sorted }
+        return sorted.filter { contract in
+            [contract.id, contract.name, contract.shortName, contract.pairLabel]
+                .contains { $0.lowercased().contains(query) }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("AI 策略设置", systemImage: "slider.horizontal.3")
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                Button("取消") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+
+            Form {
+                Section("运行与标的") {
+                    Picker("运行模式", selection: $config.mode) {
+                        Text("关闭").tag(AIRunMode.disabled)
+                        Text("观察（只记录）").tag(AIRunMode.shadow)
+                        Text("模拟盘自动下单").tag(AIRunMode.demoActive)
+                        Text("实盘授权").tag(AIRunMode.liveArmed)
+                    }
+                    .frame(minWidth: 260)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("固定观察合约")
+                            Spacer()
+                            Text("已选 \(selectedInstrumentIDs.count) 个")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        TextField("搜索合约，例如 BTC-USDT-SWAP", text: $instrumentSearch)
+                            .textFieldStyle(.roundedBorder)
+                        if model.contracts.isEmpty {
+                            Text("正在加载 USDT 线性永续合约…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 2) {
+                                    ForEach(filteredContracts) { contract in
+                                        let selected = selectedInstrumentIDs.contains(contract.id)
+                                        Button {
+                                            if selected {
+                                                selectedInstrumentIDs.remove(contract.id)
+                                            } else {
+                                                selectedInstrumentIDs.insert(contract.id)
+                                            }
+                                        } label: {
+                                            HStack(spacing: 8) {
+                                                Image(systemName: selected ? "checkmark.square.fill" : "square")
+                                                    .foregroundStyle(selected ? .mint : .secondary)
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(contract.id)
+                                                        .font(.caption.monospaced())
+                                                    Text(contract.pairLabel)
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                Spacer()
+                                            }
+                                            .contentShape(Rectangle())
+                                            .padding(.vertical, 4)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(minHeight: 120, maxHeight: 220)
+                            .overlay {
+                                if filteredContracts.isEmpty {
+                                    Text("没有匹配的合约")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        if selectedInstrumentIDs.isEmpty {
+                            Text("至少选择一个合约；AI 不会自动补充未选合约。")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("当前观察标的")
+                            Spacer(minLength: 12)
+                            Text("固定合约池")
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(observedInstrumentText)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text("手动多选固定观察合约，可随时增删标的。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("信号与频率") {
+                    HStack {
+                        Text("最低置信度").frame(width: 120, alignment: .leading)
+                        Spacer()
+                        TextField("0.65", value: $config.minimumConfidence, format: .number.precision(.fractionLength(2)))
+                            .frame(width: 72)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    HStack {
+                        Text("决策间隔（秒）").frame(width: 120, alignment: .leading)
+                        Spacer()
+                        TextField("30", value: $config.decisionIntervalSeconds, format: .number.precision(.fractionLength(1)))
+                            .frame(width: 72)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    HStack {
+                        Text("同标的冷却（秒）").frame(width: 120, alignment: .leading)
+                        Spacer()
+                        TextField("60", value: $config.cooldownSeconds, format: .number.precision(.fractionLength(1)))
+                            .frame(width: 72)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+
+                Section("交易限制") {
+                    HStack {
+                        Text("每日最多开仓单").frame(width: 150, alignment: .leading)
+                        Spacer()
+                        TextField("20", value: $config.maxDailyOrders, format: .number)
+                            .frame(width: 72)
+                            .multilineTextAlignment(.trailing)
+                        Text("单").foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("每日最多亏损单").frame(width: 150, alignment: .leading)
+                        Spacer()
+                        TextField("5", value: $config.maxDailyLosses, format: .number)
+                            .frame(width: 72)
+                            .multilineTextAlignment(.trailing)
+                        Text("单").foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("单笔保证金").frame(width: 150, alignment: .leading)
+                        Spacer()
+                        TextField("500", value: $config.marginPerOrderUSD, format: .number.precision(.fractionLength(2)))
+                            .frame(width: 72)
+                            .multilineTextAlignment(.trailing)
+                        Text("USDT").foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("最大杠杆").frame(width: 150, alignment: .leading)
+                        Spacer()
+                        TextField("5", value: $config.maxLeverage, format: .number.precision(.fractionLength(1)))
+                            .frame(width: 72)
+                            .multilineTextAlignment(.trailing)
+                        Text("x").foregroundStyle(.secondary)
+                    }
+                    Text("每次开仓使用的杠杆由 AI 决定，但不会超过此上限。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("允许的动作") {
+                    Toggle("允许开仓", isOn: $config.allowOpen)
+                    Toggle("允许平仓", isOn: $config.allowClose)
+                    Toggle("允许撤单", isOn: $config.allowCancel)
+                    Toggle("开仓必须带止损", isOn: $config.requireStopLoss)
+                }
+            }
+            .formStyle(.grouped)
+
+            if let feedback {
+                Text(feedback)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer()
+                Button("保存设置") { save() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isUpdatingAI)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 540, height: 720)
+    }
+
+    private func save() {
+        guard !selectedInstrumentIDs.isEmpty else {
+            feedback = "至少选择一个固定观察合约。"
+            return
+        }
+        let patch = AIPatch(
+            enabled: config.mode == .disabled ? false : model.aiConfig.enabled,
+            mode: config.mode,
+            allowedInstruments: selectedInstrumentIDs.sorted(),
+            minimumConfidence: config.minimumConfidence,
+            decisionIntervalSeconds: config.decisionIntervalSeconds,
+            cooldownSeconds: config.cooldownSeconds,
+            allowOpen: config.allowOpen,
+            allowClose: config.allowClose,
+            allowCancel: config.allowCancel,
+            requireStopLoss: config.requireStopLoss,
+            maxDailyOrders: config.maxDailyOrders,
+            maxDailyLosses: config.maxDailyLosses,
+            marginPerOrderUSD: config.marginPerOrderUSD,
+            maxLeverage: config.maxLeverage
+        )
+        Task {
+            do {
+                try await model.updateAI(patch)
+                dismiss()
+            } catch {
+                feedback = error.localizedDescription
+            }
+        }
     }
 }
 
@@ -168,7 +563,7 @@ struct StrategyStatusModule: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingPositionDeleteConfirmation = false
 
-    private var isRunning: Bool { config.enabled }
+    private var isRunning: Bool { status?.state == .running || (status == nil && config.enabled) }
     private var stateColor: Color { isRunning ? .green : .orange }
     private var openPositions: [PositionSnapshot] { model.strategyOpenPositions(for: config) }
     private var capital: StrategyCapitalSnapshot? { model.strategyCapital(for: config) }
@@ -333,16 +728,25 @@ struct StrategyStatusModule: View {
     /// from exchange history. `StrategyStatus.pnl` is never written on the
     /// exchange path and would always read zero here.
     private var pnlRow: some View {
-        let realized = capital?.realizedPnL ?? 0
-        let unrealized = capital?.unrealizedPnL ?? 0
+        guard let capital else {
+            return AnyView(
+                HStack(spacing: 6) {
+                    Text("收益 --")
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+            )
+        }
+        let realized = capital.realizedPnL
+        let unrealized = capital.unrealizedPnL
         let total = realized + unrealized
         let totalColor: Color = {
-            guard capital != nil else { return .secondary }
             if total > 0 { return .green }
             if total < 0 { return .red }
             return .secondary
         }()
-        return VStack(alignment: .leading, spacing: 4) {
+        return AnyView(VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Text("收益 \(formatSigned(total)) USDT")
                     .font(.caption2.monospacedDigit().weight(.semibold))
@@ -358,7 +762,7 @@ struct StrategyStatusModule: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
-        }
+        })
     }
 
     @ViewBuilder

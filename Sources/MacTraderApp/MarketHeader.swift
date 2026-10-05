@@ -35,9 +35,7 @@ struct MarketHeader: View {
         Group {
             if let selected = model.selected {
                 HStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(selected.accent.opacity(0.18)).frame(width: 30, height: 30)
-                        .overlay(Text(selected.shortName.prefix(1)).font(.headline.weight(.bold)).foregroundStyle(selected.accent))
+                    ContractIcon(symbol: selected.shortName, size: 30)
                     Text(selected.pairLabel).font(.title3.weight(.bold))
                     Text("永续").font(.caption2.weight(.semibold)).foregroundStyle(.mint)
                         .padding(.horizontal, 6).padding(.vertical, 3).background(.mint.opacity(0.12), in: Capsule())

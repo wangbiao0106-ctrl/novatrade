@@ -443,6 +443,386 @@ public struct LiveTradingStatus: Codable, Equatable, Sendable {
     }
 }
 
+/// The lifecycle mode of the server-owned AI decision worker.
+public enum AIRunMode: String, Codable, CaseIterable, Sendable {
+    case disabled
+    case shadow
+    case demoActive = "demo-active"
+    case liveArmed = "live-armed"
+    case halted
+}
+
+/// A decision action proposed by Codex.  This is an intent, not an exchange
+/// order: the FastAPI order gateway computes quantity, client IDs and all
+/// exchange-specific fields after validating it.
+public enum AIAction: String, Codable, CaseIterable, Sendable {
+    case hold
+    case open
+    case close
+    case cancel
+}
+
+public enum AIDirection: String, Codable, CaseIterable, Sendable {
+    case long
+    case short
+}
+
+public enum AIOrderType: String, Codable, CaseIterable, Sendable {
+    case market
+    case limit
+}
+
+/// Persisted configuration for the local AI worker.  The same object is used
+/// for GET responses and PATCH requests; the service merges PATCH fields with
+/// its persisted configuration before validating the result.
+public struct AIConfig: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var mode: AIRunMode
+    public var allowedInstruments: [String]
+    public var minimumConfidence: Double
+    public var decisionIntervalSeconds: Double
+    public var cliTimeoutSeconds: Double
+    public var maxOutputBytes: Int
+    public var cooldownSeconds: Double
+    public var maxConsecutiveFailures: Int
+    public var allowOpen: Bool
+    public var allowClose: Bool
+    public var allowCancel: Bool
+    public var requireStopLoss: Bool
+    /// Maximum number of opening orders the AI may submit during one UTC day.
+    public var maxDailyOrders: Int
+    /// Maximum number of losing orders counted by the server during one day.
+    public var maxDailyLosses: Int
+    /// Fixed margin budget, in USDT, assigned to each opening order.
+    public var marginPerOrderUSD: Double
+    /// Upper leverage bound. The AI may request a lower leverage per decision.
+    public var maxLeverage: Double
+
+    public init(enabled: Bool = false, mode: AIRunMode = .disabled, allowedInstruments: [String] = [], minimumConfidence: Double = 0.65, decisionIntervalSeconds: Double = 30, cliTimeoutSeconds: Double = 45, maxOutputBytes: Int = 1_000_000, cooldownSeconds: Double = 60, maxConsecutiveFailures: Int = 3, allowOpen: Bool = true, allowClose: Bool = true, allowCancel: Bool = true, requireStopLoss: Bool = true, maxDailyOrders: Int = 20, maxDailyLosses: Int = 5, marginPerOrderUSD: Double = 500, maxLeverage: Double = 5) {
+        self.enabled = enabled; self.mode = mode; self.allowedInstruments = allowedInstruments
+        self.minimumConfidence = minimumConfidence; self.decisionIntervalSeconds = decisionIntervalSeconds
+        self.cliTimeoutSeconds = cliTimeoutSeconds; self.maxOutputBytes = maxOutputBytes
+        self.cooldownSeconds = cooldownSeconds; self.maxConsecutiveFailures = maxConsecutiveFailures
+        self.allowOpen = allowOpen; self.allowClose = allowClose; self.allowCancel = allowCancel
+        self.requireStopLoss = requireStopLoss
+        self.maxDailyOrders = maxDailyOrders; self.maxDailyLosses = maxDailyLosses
+        self.marginPerOrderUSD = marginPerOrderUSD; self.maxLeverage = maxLeverage
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled, mode, allowedInstruments
+        case minimumConfidence, decisionIntervalSeconds, cliTimeoutSeconds, maxOutputBytes
+        case cooldownSeconds, maxConsecutiveFailures, allowOpen, allowClose, allowCancel
+        case requireStopLoss, maxDailyOrders, maxDailyLosses, marginPerOrderUSD, maxLeverage
+    }
+
+    /// Keep configurations persisted by older clients usable when the service
+    /// adds a new risk limit. Missing fields receive the documented defaults.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            enabled: try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false,
+            mode: try container.decodeIfPresent(AIRunMode.self, forKey: .mode) ?? .disabled,
+            allowedInstruments: try container.decodeIfPresent([String].self, forKey: .allowedInstruments) ?? [],
+            minimumConfidence: try container.decodeIfPresent(Double.self, forKey: .minimumConfidence) ?? 0.65,
+            decisionIntervalSeconds: try container.decodeIfPresent(Double.self, forKey: .decisionIntervalSeconds) ?? 30,
+            cliTimeoutSeconds: try container.decodeIfPresent(Double.self, forKey: .cliTimeoutSeconds) ?? 45,
+            maxOutputBytes: try container.decodeIfPresent(Int.self, forKey: .maxOutputBytes) ?? 1_000_000,
+            cooldownSeconds: try container.decodeIfPresent(Double.self, forKey: .cooldownSeconds) ?? 60,
+            maxConsecutiveFailures: try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveFailures) ?? 3,
+            allowOpen: try container.decodeIfPresent(Bool.self, forKey: .allowOpen) ?? true,
+            allowClose: try container.decodeIfPresent(Bool.self, forKey: .allowClose) ?? true,
+            allowCancel: try container.decodeIfPresent(Bool.self, forKey: .allowCancel) ?? true,
+            requireStopLoss: try container.decodeIfPresent(Bool.self, forKey: .requireStopLoss) ?? true,
+            maxDailyOrders: try container.decodeIfPresent(Int.self, forKey: .maxDailyOrders) ?? 20,
+            maxDailyLosses: try container.decodeIfPresent(Int.self, forKey: .maxDailyLosses) ?? 5,
+            marginPerOrderUSD: try container.decodeIfPresent(Double.self, forKey: .marginPerOrderUSD) ?? 500,
+            maxLeverage: try container.decodeIfPresent(Double.self, forKey: .maxLeverage) ?? 5
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(allowedInstruments, forKey: .allowedInstruments)
+        try container.encode(minimumConfidence, forKey: .minimumConfidence)
+        try container.encode(decisionIntervalSeconds, forKey: .decisionIntervalSeconds)
+        try container.encode(cliTimeoutSeconds, forKey: .cliTimeoutSeconds)
+        try container.encode(maxOutputBytes, forKey: .maxOutputBytes)
+        try container.encode(cooldownSeconds, forKey: .cooldownSeconds)
+        try container.encode(maxConsecutiveFailures, forKey: .maxConsecutiveFailures)
+        try container.encode(allowOpen, forKey: .allowOpen)
+        try container.encode(allowClose, forKey: .allowClose)
+        try container.encode(allowCancel, forKey: .allowCancel)
+        try container.encode(requireStopLoss, forKey: .requireStopLoss)
+        try container.encode(maxDailyOrders, forKey: .maxDailyOrders)
+        try container.encode(maxDailyLosses, forKey: .maxDailyLosses)
+        try container.encode(marginPerOrderUSD, forKey: .marginPerOrderUSD)
+        try container.encode(maxLeverage, forKey: .maxLeverage)
+    }
+}
+
+/// A partial configuration update.  Omitting a field leaves the server's
+/// persisted value unchanged, which keeps PATCH semantics explicit.
+public struct AIPatch: Codable, Equatable, Sendable {
+    public var enabled: Bool?
+    public var mode: AIRunMode?
+    public var allowedInstruments: [String]?
+    public var minimumConfidence: Double?
+    public var decisionIntervalSeconds: Double?
+    public var cliTimeoutSeconds: Double?
+    public var maxOutputBytes: Int?
+    public var cooldownSeconds: Double?
+    public var maxConsecutiveFailures: Int?
+    public var allowOpen: Bool?
+    public var allowClose: Bool?
+    public var allowCancel: Bool?
+    public var requireStopLoss: Bool?
+    public var maxDailyOrders: Int?
+    public var maxDailyLosses: Int?
+    public var marginPerOrderUSD: Double?
+    public var maxLeverage: Double?
+
+    public init(enabled: Bool? = nil, mode: AIRunMode? = nil, allowedInstruments: [String]? = nil, minimumConfidence: Double? = nil, decisionIntervalSeconds: Double? = nil, cliTimeoutSeconds: Double? = nil, maxOutputBytes: Int? = nil, cooldownSeconds: Double? = nil, maxConsecutiveFailures: Int? = nil, allowOpen: Bool? = nil, allowClose: Bool? = nil, allowCancel: Bool? = nil, requireStopLoss: Bool? = nil, maxDailyOrders: Int? = nil, maxDailyLosses: Int? = nil, marginPerOrderUSD: Double? = nil, maxLeverage: Double? = nil) {
+        self.enabled = enabled; self.mode = mode; self.allowedInstruments = allowedInstruments
+        self.minimumConfidence = minimumConfidence; self.decisionIntervalSeconds = decisionIntervalSeconds
+        self.cliTimeoutSeconds = cliTimeoutSeconds; self.maxOutputBytes = maxOutputBytes
+        self.cooldownSeconds = cooldownSeconds; self.maxConsecutiveFailures = maxConsecutiveFailures
+        self.allowOpen = allowOpen; self.allowClose = allowClose; self.allowCancel = allowCancel
+        self.requireStopLoss = requireStopLoss
+        self.maxDailyOrders = maxDailyOrders; self.maxDailyLosses = maxDailyLosses
+        self.marginPerOrderUSD = marginPerOrderUSD; self.maxLeverage = maxLeverage
+    }
+}
+
+/// Server-computed snapshot age when a decision was evaluated.
+public struct AIDecisionFreshness: Codable, Equatable, Sendable {
+    public let capturedAt: Date?
+    public let evaluatedAt: Date?
+    public let ageSeconds: Double?
+    public let maxAgeSeconds: Double?
+    public let isStale: Bool?
+    public let valid: Bool?
+    public let error: String?
+
+    public init(capturedAt: Date? = nil, evaluatedAt: Date? = nil, ageSeconds: Double? = nil, maxAgeSeconds: Double? = nil, isStale: Bool? = nil, valid: Bool? = nil, error: String? = nil) {
+        self.capturedAt = capturedAt; self.evaluatedAt = evaluatedAt
+        self.ageSeconds = ageSeconds; self.maxAgeSeconds = maxAgeSeconds
+        self.isStale = isStale; self.valid = valid; self.error = error
+    }
+}
+
+public struct AIStatus: Codable, Equatable, Sendable {
+    public let state: String
+    public let mode: AIRunMode
+    public let enabled: Bool
+    public let consecutiveFailures: Int
+    public let lastDecisionAt: Date?
+    public let lastError: String?
+    public let lastDecision: AIDecision?
+    public let updatedAt: Date?
+    /// The concrete contracts included in the latest market snapshot. This
+    /// mirrors the user's fixed allowlist and is useful for diagnostics.
+    public let observedInstruments: [String]
+    public let observationUpdatedAt: Date?
+    /// Observation set captured with lastDecision, independent of later
+    /// configuration changes or a newer snapshot that fails to produce a decision.
+    public let lastDecisionInstruments: [String]
+    public let lastDecisionFreshness: AIDecisionFreshness?
+
+    public init(state: String = "stopped", mode: AIRunMode = .disabled, enabled: Bool = false, consecutiveFailures: Int = 0, lastDecisionAt: Date? = nil, lastError: String? = nil, lastDecision: AIDecision? = nil, updatedAt: Date? = nil, observedInstruments: [String] = [], observationUpdatedAt: Date? = nil, lastDecisionInstruments: [String] = [], lastDecisionFreshness: AIDecisionFreshness? = nil) {
+        self.state = state; self.mode = mode; self.enabled = enabled; self.consecutiveFailures = consecutiveFailures
+        self.lastDecisionAt = lastDecisionAt; self.lastError = lastError; self.lastDecision = lastDecision; self.updatedAt = updatedAt
+        self.observedInstruments = observedInstruments
+        self.observationUpdatedAt = observationUpdatedAt
+        self.lastDecisionInstruments = lastDecisionInstruments
+        self.lastDecisionFreshness = lastDecisionFreshness
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case state, mode, enabled, consecutiveFailures, lastDecisionAt, lastError
+        case lastDecision, updatedAt, observedInstruments, observationUpdatedAt, lastDecisionInstruments, lastDecisionFreshness
+    }
+
+    /// Older FastAPI versions did not expose the resolved observation set;
+    /// decode those responses as an empty set so the dashboard can keep
+    /// loading the rest of the status payload.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            state: try container.decodeIfPresent(String.self, forKey: .state) ?? "stopped",
+            mode: try container.decodeIfPresent(AIRunMode.self, forKey: .mode) ?? .disabled,
+            enabled: try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false,
+            consecutiveFailures: try container.decodeIfPresent(Int.self, forKey: .consecutiveFailures) ?? 0,
+            lastDecisionAt: try container.decodeIfPresent(Date.self, forKey: .lastDecisionAt),
+            lastError: try container.decodeIfPresent(String.self, forKey: .lastError),
+            lastDecision: try container.decodeIfPresent(AIDecision.self, forKey: .lastDecision),
+            updatedAt: try container.decodeIfPresent(Date.self, forKey: .updatedAt),
+            observedInstruments: try container.decodeIfPresent([String].self, forKey: .observedInstruments) ?? [],
+            observationUpdatedAt: try container.decodeIfPresent(Date.self, forKey: .observationUpdatedAt),
+            lastDecisionInstruments: try container.decodeIfPresent([String].self, forKey: .lastDecisionInstruments) ?? [],
+            lastDecisionFreshness: try container.decodeIfPresent(AIDecisionFreshness.self, forKey: .lastDecisionFreshness)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(state, forKey: .state)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(consecutiveFailures, forKey: .consecutiveFailures)
+        try container.encodeIfPresent(lastDecisionAt, forKey: .lastDecisionAt)
+        try container.encodeIfPresent(lastError, forKey: .lastError)
+        try container.encodeIfPresent(lastDecision, forKey: .lastDecision)
+        try container.encodeIfPresent(updatedAt, forKey: .updatedAt)
+        try container.encode(observedInstruments, forKey: .observedInstruments)
+        try container.encodeIfPresent(observationUpdatedAt, forKey: .observationUpdatedAt)
+        try container.encode(lastDecisionInstruments, forKey: .lastDecisionInstruments)
+        try container.encodeIfPresent(lastDecisionFreshness, forKey: .lastDecisionFreshness)
+    }
+}
+
+public struct AIDecision: Codable, Equatable, Sendable, Identifiable {
+    public let schemaVersion: Int
+    public let decisionId: String
+    public var id: String { decisionId }
+    public let snapshotId: String
+    public let action: AIAction
+    public let instrumentID: String?
+    public let direction: AIDirection?
+    public let orderType: AIOrderType?
+    public let riskBudgetPercent: Double?
+    public let limitPrice: Decimal?
+    public let stopLossPrice: Decimal?
+    public let takeProfitPrice: Decimal?
+    /// Model's self-reported confidence in its chosen action, not a trade's win rate.
+    public let confidence: Double
+    /// Model-estimated win rate in the range 0...1. Optional for backwards
+    /// compatibility with audit records written before this field existed.
+    public let winRate: Double?
+    /// Model-estimated reward-to-risk ratio for an entry signal.
+    public let riskRewardRatio: Double?
+    /// Optional per-decision leverage suggestion. The server validates it
+    /// against AIConfig.maxLeverage before sending an opening order.
+    public let leverage: Double?
+    public let validUntil: Date
+    public let reasonCode: String
+    public let reason: String
+    public let assessments: [AIInstrumentAssessment]
+
+    public init(schemaVersion: Int = 1, decisionId: String, snapshotId: String, action: AIAction, instrumentID: String? = nil, direction: AIDirection? = nil, orderType: AIOrderType? = nil, riskBudgetPercent: Double? = nil, limitPrice: Decimal? = nil, stopLossPrice: Decimal? = nil, takeProfitPrice: Decimal? = nil, confidence: Double = 0, winRate: Double? = nil, riskRewardRatio: Double? = nil, leverage: Double? = nil, validUntil: Date, reasonCode: String = "", reason: String = "", assessments: [AIInstrumentAssessment] = []) {
+        self.schemaVersion = schemaVersion; self.decisionId = decisionId; self.snapshotId = snapshotId; self.action = action
+        self.instrumentID = instrumentID; self.direction = direction; self.orderType = orderType; self.riskBudgetPercent = riskBudgetPercent
+        self.limitPrice = limitPrice; self.stopLossPrice = stopLossPrice; self.takeProfitPrice = takeProfitPrice
+        self.confidence = confidence; self.winRate = winRate; self.riskRewardRatio = riskRewardRatio; self.leverage = leverage
+        self.validUntil = validUntil; self.reasonCode = reasonCode; self.reason = reason
+        self.assessments = assessments
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, decisionId, snapshotId, action, instrumentID, direction, orderType, riskBudgetPercent
+        case limitPrice, stopLossPrice, takeProfitPrice, confidence, winRate, riskRewardRatio, leverage
+        case validUntil, reasonCode, reason, assessments
+    }
+
+    public init(from decoder: Decoder) throws {
+        let row = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            schemaVersion: try row.decode(Int.self, forKey: .schemaVersion),
+            decisionId: try row.decode(String.self, forKey: .decisionId),
+            snapshotId: try row.decode(String.self, forKey: .snapshotId),
+            action: try row.decode(AIAction.self, forKey: .action),
+            instrumentID: try row.decodeIfPresent(String.self, forKey: .instrumentID),
+            direction: try row.decodeIfPresent(AIDirection.self, forKey: .direction),
+            orderType: try row.decodeIfPresent(AIOrderType.self, forKey: .orderType),
+            riskBudgetPercent: try row.decodeIfPresent(Double.self, forKey: .riskBudgetPercent),
+            limitPrice: try row.decodeIfPresent(Decimal.self, forKey: .limitPrice),
+            stopLossPrice: try row.decodeIfPresent(Decimal.self, forKey: .stopLossPrice),
+            takeProfitPrice: try row.decodeIfPresent(Decimal.self, forKey: .takeProfitPrice),
+            confidence: try row.decode(Double.self, forKey: .confidence),
+            winRate: try row.decodeIfPresent(Double.self, forKey: .winRate),
+            riskRewardRatio: try row.decodeIfPresent(Double.self, forKey: .riskRewardRatio),
+            leverage: try row.decodeIfPresent(Double.self, forKey: .leverage),
+            validUntil: try row.decode(Date.self, forKey: .validUntil),
+            reasonCode: try row.decode(String.self, forKey: .reasonCode),
+            reason: try row.decode(String.self, forKey: .reason),
+            assessments: try row.decodeIfPresent([AIInstrumentAssessment].self, forKey: .assessments) ?? []
+        )
+    }
+}
+
+/// An append-only worker audit row.  Audit fields are intentionally retained
+/// as JSON values because rejected/error rows do not have a uniform shape.
+public struct AIAuditRecord: Codable, Equatable, Sendable, Identifiable {
+    public let at: Date?
+    public let type: String?
+    public let accepted: Bool?
+    public let reason: String?
+    public let decision: AIDecision?
+    /// The original model response before the server accepted or rejected it.
+    public let rawDecision: AIDecision?
+    public let order: LiveOrderResult?
+    public let snapshotId: String?
+    public let instrumentID: String?
+    public let error: String?
+    public let failures: Int?
+
+    public var id: String { "\(at?.timeIntervalSince1970 ?? 0)-\(type ?? "event")-\(snapshotId ?? "")" }
+
+    public init(at: Date? = nil, type: String? = nil, accepted: Bool? = nil, reason: String? = nil, decision: AIDecision? = nil, rawDecision: AIDecision? = nil, order: LiveOrderResult? = nil, snapshotId: String? = nil, instrumentID: String? = nil, error: String? = nil, failures: Int? = nil) {
+        self.at = at; self.type = type; self.accepted = accepted; self.reason = reason; self.decision = decision; self.order = order
+        self.snapshotId = snapshotId; self.instrumentID = instrumentID; self.error = error; self.failures = failures
+        self.rawDecision = rawDecision
+    }
+}
+
+/// Result returned by the emergency flatten endpoint.  The `closed` rows
+/// retain the gateway's exchange response shape, which can vary by account
+/// mode and exchange response version.
+public struct AIFlattenResult: Codable, Equatable, Sendable {
+    public let cancelledOrderIDs: [String]
+    public let closed: [LiveOrderResult]
+    public let updatedAt: Date?
+
+    public init(cancelledOrderIDs: [String] = [], closed: [LiveOrderResult] = [], updatedAt: Date? = nil) {
+        self.cancelledOrderIDs = cancelledOrderIDs; self.closed = closed; self.updatedAt = updatedAt
+    }
+}
+
+/// A conversational request for the AI control plane. Chat may explain the
+/// current strategy or propose a configuration patch; it never submits an
+/// order directly.
+public struct AIChatRequest: Codable, Equatable, Sendable {
+    public let message: String
+    public let apply: Bool
+    public let suggestion: AIPatch?
+
+    public init(message: String, apply: Bool = false, suggestion: AIPatch? = nil) {
+        self.message = message
+        self.apply = apply
+        self.suggestion = suggestion
+    }
+}
+
+/// The server returns a plain-language answer plus an optional, reviewable
+/// patch. A patch is only persisted when the request explicitly sets apply.
+public struct AIChatResponse: Codable, Equatable, Sendable {
+    public let reply: String
+    public let suggestion: AIPatch?
+    public let applied: Bool
+    public let config: AIConfig?
+    public let updatedAt: Date?
+
+    public init(reply: String = "", suggestion: AIPatch? = nil, applied: Bool = false, config: AIConfig? = nil, updatedAt: Date? = nil) {
+        self.reply = reply
+        self.suggestion = suggestion
+        self.applied = applied
+        self.config = config
+        self.updatedAt = updatedAt
+    }
+}
+
 public enum StrategyType: RawRepresentable, Codable, CaseIterable, Hashable, Sendable {
     case sweepReversalShort
     /// Preserve a package identifier when its runtime handler is unavailable.
@@ -1193,15 +1573,14 @@ public struct ServiceHealth: Codable, Equatable, Sendable {
     }
 }
 
-/// The loopback endpoint shared by `okx-locald` and the desktop client.
+/// The loopback endpoint shared by the FastAPI backend and desktop client.
 public enum LocalService {
     public static let defaultPort = 8787
-    public static let portEnvironmentKey = "OKX_LOCALD_PORT"
-    public static let tokenEnvironmentKey = "OKX_LOCALD_AUTH_TOKEN"
+    public static let tokenEnvironmentKey = "NOVATRADE_AUTH_TOKEN"
     public static var defaultBaseURL: URL { URL(string: "http://127.0.0.1:\(defaultPort)")! }
 
     public static var tokenURL: URL {
-        if let directory = ProcessInfo.processInfo.environment["OKX_LOCALD_STATE_DIR"], !directory.isEmpty {
+        if let directory = ProcessInfo.processInfo.environment["NOVATRADE_STATE_DIR"], !directory.isEmpty {
             return URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent("locald.token")
         }
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
