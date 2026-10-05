@@ -407,17 +407,36 @@ func rejectsEmptyOrFailedInstrumentSpecificationEnvelope() async throws {
 @Test
 func positionCarriesMarginModeAndCloseRepeatsIt() async throws {
     let runner = StubATKRunner(outputs: [
-        "swap positions --json": ATKCommandResult(stdout: #"[{"posId":"p1","instId":"BTC-USDT-SWAP","pos":"2","avgPx":"100","posSide":"net","mgnMode":"isolated"},{"posId":"p2","instId":"ETH-USDT-SWAP","pos":"1","avgPx":"10","posSide":"net","mgnMode":"weird"}]"#),
+        "swap positions --json": ATKCommandResult(stdout: #"[{"posId":"p1","instId":"BTC-USDT-SWAP","pos":"2","avgPx":"100","markPx":"105","upl":"10","posSide":"net","mgnMode":"isolated","imr":"40","lever":"5","tpTriggerPx":"110","slTriggerPx":"95"},{"posId":"p2","instId":"ETH-USDT-SWAP","pos":"1","avgPx":"10","posSide":"net","mgnMode":"weird"}]"#),
         "config show --json": ATKCommandResult(stdout: #"{"default_profile":"live","profiles":{"live":{"site":"global","api_key":"key","demo":false}}}"#),
         "--live swap close --instId BTC-USDT-SWAP --mgnMode isolated --autoCxl --json": ATKCommandResult(stdout: #"{"code":"0","data":[{"instId":"BTC-USDT-SWAP"}]}"#)
     ])
     let client = ATKClient(runner: runner)
     let positions = try await client.swapPositions()
     #expect(positions.first(where: { $0.id == "p1" })?.marginMode == "isolated")
+    #expect(positions.first(where: { $0.id == "p1" })?.margin == 40)
+    #expect(positions.first(where: { $0.id == "p1" })?.leverage == 5)
+    #expect(positions.first(where: { $0.id == "p1" })?.takeProfitPrice == 110)
+    #expect(positions.first(where: { $0.id == "p1" })?.stopLossPrice == 95)
     // An unrecognized mode keeps the position visible and falls back to cross.
     #expect(positions.first(where: { $0.id == "p2" })?.marginMode == nil)
     try await client.closeLiveSwapPosition(instrumentID: "BTC-USDT-SWAP", positionSide: "net", marginMode: "isolated")
     await #expect(throws: ATKError.invalidOrder("保证金模式必须是 cross 或 isolated")) {
         try await client.closeLiveSwapPosition(instrumentID: "BTC-USDT-SWAP", marginMode: "portfolio")
     }
+}
+
+@Test
+func orderCarriesPricesMarginAndProtectionLevels() async throws {
+    let runner = StubATKRunner(outputs: [
+        "swap orders --json": ATKCommandResult(stdout: #"[{"ordId":"o1","instId":"BTC-USDT-SWAP","side":"buy","state":"live","sz":"2","px":"100","cTime":"1700000000000","accFillSz":"1","avgPx":"99","imr":"40","lever":"5","tdMode":"isolated","attachAlgoOrds":[{"tpTriggerPx":"110","slTriggerPx":"95"}]}]"#)
+    ])
+    let order = try #require(try await ATKClient(runner: runner).swapOrders().first)
+    #expect(order.price == 100)
+    #expect(order.averageFillPrice == 99)
+    #expect(order.margin == 40)
+    #expect(order.leverage == 5)
+    #expect(order.marginMode == "isolated")
+    #expect(order.takeProfitPrice == 110)
+    #expect(order.stopLossPrice == 95)
 }

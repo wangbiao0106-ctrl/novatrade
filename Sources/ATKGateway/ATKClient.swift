@@ -583,11 +583,19 @@ public struct ATKClient: Sendable {
             }
             unrealizedPnL = value
         } else { unrealizedPnL = nil }
+        let margin = Self.decimal(row["margin"] ?? row["imr"]).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        let leverage = Self.decimal(row["lever"]).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let attached = row["attachAlgoOrds"] as? [[String: Any]] ?? []
+        let takeProfitRaw = row["tpTriggerPx"] ?? attached.compactMap { $0["tpTriggerPx"] }.first
+        let stopLossRaw = row["slTriggerPx"] ?? attached.compactMap { $0["slTriggerPx"] }.first
+        let takeProfit = Self.decimal(takeProfitRaw).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let stopLoss = Self.decimal(stopLossRaw).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         // An unrecognized mode must not hide the position from risk checks;
         // it is dropped and the close falls back to the cross default.
         let marginMode = (row["mgnMode"] as? String)?.lowercased()
         return PositionSnapshot(id: positionID, instrumentID: instrument, side: side.lowercased(), quantity: quantity, entryPrice: entryPrice, markPrice: markPrice, unrealizedPnL: unrealizedPnL,
-                                marginMode: marginMode.flatMap { ["cross", "isolated"].contains($0) ? $0 : nil })
+                                marginMode: marginMode.flatMap { ["cross", "isolated"].contains($0) ? $0 : nil }, margin: margin, leverage: leverage,
+                                takeProfitPrice: takeProfit, stopLossPrice: stopLoss)
     }
 
     private static func decodeOrder(_ row: [String: Any]) throws -> OrderSnapshot? {
@@ -616,7 +624,17 @@ public struct ATKClient: Sendable {
         // Parsed leniently: a missing or malformed fill size only makes the
         // fill unknown, and callers treat unknown as possibly filled.
         let filled = Self.decimal(row["accFillSz"]).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
-        return OrderSnapshot(id: orderID, instrumentID: instrument, side: side.lowercased(), status: state.lowercased(), quantity: quantity, price: price, createdAt: created, filledQuantity: filled)
+        let averageFillPrice = Self.decimal(row["avgPx"] ?? row["fillPx"]).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let margin = Self.decimal(row["margin"] ?? row["imr"]).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        let leverage = Self.decimal(row["lever"]).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let marginMode = (row["tdMode"] ?? row["mgnMode"]) as? String
+        let attached = row["attachAlgoOrds"] as? [[String: Any]] ?? []
+        let takeProfitRaw = row["tpTriggerPx"] ?? attached.compactMap { $0["tpTriggerPx"] }.first
+        let stopLossRaw = row["slTriggerPx"] ?? attached.compactMap { $0["slTriggerPx"] }.first
+        let takeProfit = Self.decimal(takeProfitRaw).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let stopLoss = Self.decimal(stopLossRaw).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        return OrderSnapshot(id: orderID, instrumentID: instrument, side: side.lowercased(), status: state.lowercased(), quantity: quantity, price: price, createdAt: created, filledQuantity: filled, averageFillPrice: averageFillPrice, margin: margin, leverage: leverage,
+                             marginMode: marginMode.flatMap { ["cross", "isolated"].contains($0.lowercased()) ? $0.lowercased() : nil }, takeProfitPrice: takeProfit, stopLossPrice: stopLoss)
     }
 
     private static func decodeCandle(_ row: [Any]) -> Candle? {

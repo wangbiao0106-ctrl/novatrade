@@ -31,31 +31,66 @@ struct RightRail: View {
                     if model.livePositions.isEmpty { RailEmpty("暂无\(accountLabel)持仓") }
                     ForEach(model.livePositions) { position in
                         let pnl = position.unrealizedPnL ?? 0
-                        RailRow {
-                            Text(position.instrumentID).font(.caption.monospaced())
-                            Spacer()
-                            Text(formatQuantity(position.quantity)).font(.caption.monospacedDigit())
-                            Text(position.side.uppercased()).foregroundStyle(.secondary)
-                            Text(formatSigned(pnl)).foregroundStyle(pnl >= 0 ? .green : .red)
+                        let protection = protectionPrices(for: position)
+                        VStack(alignment: .leading, spacing: 5) {
+                            RailRow {
+                                Text(position.instrumentID).font(.caption.monospaced())
+                                Spacer(minLength: 4)
+                                Text(formatContracts(abs(position.quantity))).font(.caption.monospacedDigit())
+                                Text(position.side.uppercased()).foregroundStyle(.secondary)
+                                Text(formatSigned(pnl)).foregroundStyle(pnl >= 0 ? .green : .red)
+                            }
+                            HStack(spacing: 10) {
+                                RailMetric(title: "保证金", value: position.margin.map(formatUSD) ?? "--")
+                                RailMetric(title: "成交", value: formatPrice(position.entryPrice))
+                                RailMetric(title: "标记", value: position.markPrice.map(formatPrice) ?? "--")
+                            }
+                            HStack(spacing: 10) {
+                                RailMetric(title: "止盈", value: protection.takeProfit.map(formatPrice) ?? "--")
+                                RailMetric(title: "止损", value: protection.stopLoss.map(formatPrice) ?? "--")
+                                if let leverage = position.leverage {
+                                    RailMetric(title: "杠杆", value: "\(formatPrice(leverage))x")
+                                }
+                            }
                         }
+                        .padding(.vertical, 2)
                     }
                 }
                 RailModule(title: "挂单", icon: "list.bullet.rectangle") {
                     if model.liveOrders.isEmpty { RailEmpty("暂无\(accountLabel)挂单") }
                     ForEach(model.liveOrders) { order in
-                        RailRow {
-                            Text(order.instrumentID).font(.caption.monospaced())
-                            Spacer()
-                            Text(order.side.uppercased()).font(.caption2.weight(.semibold))
-                            Text(order.status).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 5) {
+                            RailRow {
+                                Text(order.instrumentID).font(.caption.monospaced())
+                                Spacer(minLength: 4)
+                                Text(order.side.uppercased()).font(.caption2.weight(.semibold))
+                                Text(order.status).foregroundStyle(.secondary)
+                            }
+                            HStack(spacing: 10) {
+                                RailMetric(title: "保证金", value: order.margin.map(formatUSD) ?? "--")
+                                RailMetric(title: "挂单", value: order.price.map(formatPrice) ?? "--")
+                                RailMetric(title: "成交", value: order.averageFillPrice.map(formatPrice) ?? "--")
+                            }
+                            HStack(spacing: 10) {
+                                RailMetric(title: "止盈", value: order.takeProfitPrice.map(formatPrice) ?? "--")
+                                RailMetric(title: "止损", value: order.stopLossPrice.map(formatPrice) ?? "--")
+                                if let leverage = order.leverage {
+                                    RailMetric(title: "杠杆", value: "\(formatPrice(leverage))x")
+                                }
+                            }
                         }
+                        .padding(.vertical, 2)
                     }
                 }
                 RailModule(title: "交易流水", icon: "arrow.left.arrow.right") {
                     if model.fills.isEmpty { RailEmpty("暂无\(accountLabel)成交记录") }
                     ForEach(model.fills.prefix(8)) { fill in
                         RailRow {
-                            Text(formatLocalTime(fill.timestamp)).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(formatLocalTime(fill.timestamp)).foregroundStyle(.secondary)
+                                Text("成交 \(formatPrice(fill.price))")
+                                    .font(.caption2.monospacedDigit())
+                            }
                             Spacer()
                             Text(formatQuantity(fill.quantity)).monospacedDigit()
                             Text("费 \(formatQuantity(fill.fee))").foregroundStyle(.secondary)
@@ -75,6 +110,26 @@ struct RightRail: View {
         }
         .frame(width: 350)
         .background(Color.sidebarBackground.opacity(0.7))
+    }
+
+    /// A position's protection may be represented either directly on the
+    /// position snapshot or by an attached pending reduce-only order. Prefer
+    /// the former and fill any missing side from the latter.
+    private func protectionPrices(for position: PositionSnapshot) -> (takeProfit: Decimal?, stopLoss: Decimal?) {
+        var takeProfit = position.takeProfitPrice
+        var stopLoss = position.stopLossPrice
+        let sides: Set<String>
+        switch position.side.lowercased() {
+        case "short": sides = ["buy"]
+        case "long": sides = ["sell"]
+        default: sides = ["buy", "sell"]
+        }
+        for order in model.liveOrders where order.instrumentID == position.instrumentID && sides.contains(order.side.lowercased()) {
+            takeProfit = takeProfit ?? order.takeProfitPrice
+            stopLoss = stopLoss ?? order.stopLossPrice
+            if takeProfit != nil && stopLoss != nil { break }
+        }
+        return (takeProfit, stopLoss)
     }
 }
 
@@ -888,6 +943,24 @@ struct RailRow<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View { HStack(spacing: 6) { content() }.font(.caption2).padding(.vertical, 3) }
+}
+
+private struct RailMetric: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption2.monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
 struct RailEmpty: View {

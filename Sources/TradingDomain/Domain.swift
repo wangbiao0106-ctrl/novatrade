@@ -349,10 +349,56 @@ public struct PositionSnapshot: Codable, Equatable, Sendable, Identifiable {
     /// OKX `mgnMode` (`cross` or `isolated`). Closing a position must repeat
     /// its own margin mode; nil means the exchange row did not report one.
     public let marginMode: String?
+    /// Initial/maintenance margin reported by OKX, in the settlement
+    /// currency. Older responses may omit it.
+    public let margin: Decimal?
+    /// Account leverage for this position when the exchange reports it.
+    public let leverage: Decimal?
+    /// Protection prices attached to the position, when available from the
+    /// account/order snapshot.
+    public let takeProfitPrice: Decimal?
+    public let stopLossPrice: Decimal?
 
-    public init(id: String = UUID().uuidString, instrumentID: String, side: String, quantity: Decimal, entryPrice: Decimal, markPrice: Decimal? = nil, unrealizedPnL: Decimal? = nil, marginMode: String? = nil) {
+    public init(id: String = UUID().uuidString, instrumentID: String, side: String, quantity: Decimal, entryPrice: Decimal, markPrice: Decimal? = nil, unrealizedPnL: Decimal? = nil, marginMode: String? = nil, margin: Decimal? = nil, leverage: Decimal? = nil, takeProfitPrice: Decimal? = nil, stopLossPrice: Decimal? = nil) {
         self.id = id; self.instrumentID = instrumentID; self.side = side; self.quantity = quantity; self.entryPrice = entryPrice
         self.markPrice = markPrice; self.unrealizedPnL = unrealizedPnL; self.marginMode = marginMode
+        self.margin = margin; self.leverage = leverage; self.takeProfitPrice = takeProfitPrice; self.stopLossPrice = stopLossPrice
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, instrumentID, side, quantity, entryPrice, markPrice, unrealizedPnL, marginMode, margin, leverage, takeProfitPrice, stopLossPrice
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        instrumentID = try container.decode(String.self, forKey: .instrumentID)
+        side = try container.decode(String.self, forKey: .side)
+        quantity = try container.decode(Decimal.self, forKey: .quantity)
+        entryPrice = try container.decode(Decimal.self, forKey: .entryPrice)
+        markPrice = try container.decodeIfPresent(Decimal.self, forKey: .markPrice)
+        unrealizedPnL = try container.decodeIfPresent(Decimal.self, forKey: .unrealizedPnL)
+        marginMode = try container.decodeIfPresent(String.self, forKey: .marginMode)
+        margin = try container.decodeIfPresent(Decimal.self, forKey: .margin)
+        leverage = try container.decodeIfPresent(Decimal.self, forKey: .leverage)
+        takeProfitPrice = try container.decodeIfPresent(Decimal.self, forKey: .takeProfitPrice)
+        stopLossPrice = try container.decodeIfPresent(Decimal.self, forKey: .stopLossPrice)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(instrumentID, forKey: .instrumentID)
+        try container.encode(side, forKey: .side)
+        try container.encode(quantity, forKey: .quantity)
+        try container.encode(entryPrice, forKey: .entryPrice)
+        try container.encodeIfPresent(markPrice, forKey: .markPrice)
+        try container.encodeIfPresent(unrealizedPnL, forKey: .unrealizedPnL)
+        try container.encodeIfPresent(marginMode, forKey: .marginMode)
+        try container.encodeIfPresent(margin, forKey: .margin)
+        try container.encodeIfPresent(leverage, forKey: .leverage)
+        try container.encodeIfPresent(takeProfitPrice, forKey: .takeProfitPrice)
+        try container.encodeIfPresent(stopLossPrice, forKey: .stopLossPrice)
     }
 }
 
@@ -368,10 +414,61 @@ public struct OrderSnapshot: Codable, Equatable, Sendable, Identifiable {
     /// have filled partly, so terminal state alone does not prove that an
     /// order left no position. Nil when the exchange row did not report it.
     public let filledQuantity: Decimal?
+    /// Average execution price when an order has already filled partially or
+    /// fully. Pending orders normally leave this nil.
+    public let averageFillPrice: Decimal?
+    /// Margin and leverage reported by the exchange for this order, when
+    /// available. Margin is expressed in the settlement currency.
+    public let margin: Decimal?
+    public let leverage: Decimal?
+    public let marginMode: String?
+    public let takeProfitPrice: Decimal?
+    public let stopLossPrice: Decimal?
 
-    public init(id: String = UUID().uuidString, instrumentID: String, side: String, status: String, quantity: Decimal, price: Decimal? = nil, createdAt: Date = .now, filledQuantity: Decimal? = nil) {
+    public init(id: String = UUID().uuidString, instrumentID: String, side: String, status: String, quantity: Decimal, price: Decimal? = nil, createdAt: Date = .now, filledQuantity: Decimal? = nil, averageFillPrice: Decimal? = nil, margin: Decimal? = nil, leverage: Decimal? = nil, marginMode: String? = nil, takeProfitPrice: Decimal? = nil, stopLossPrice: Decimal? = nil) {
         self.id = id; self.instrumentID = instrumentID; self.side = side; self.status = status; self.quantity = quantity; self.price = price; self.createdAt = createdAt
-        self.filledQuantity = filledQuantity
+        self.filledQuantity = filledQuantity; self.averageFillPrice = averageFillPrice; self.margin = margin; self.leverage = leverage; self.marginMode = marginMode
+        self.takeProfitPrice = takeProfitPrice; self.stopLossPrice = stopLossPrice
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, instrumentID, side, status, quantity, price, createdAt, filledQuantity, averageFillPrice, margin, leverage, marginMode, takeProfitPrice, stopLossPrice
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        instrumentID = try container.decode(String.self, forKey: .instrumentID)
+        side = try container.decode(String.self, forKey: .side)
+        status = try container.decode(String.self, forKey: .status)
+        quantity = try container.decode(Decimal.self, forKey: .quantity)
+        price = try container.decodeIfPresent(Decimal.self, forKey: .price)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        filledQuantity = try container.decodeIfPresent(Decimal.self, forKey: .filledQuantity)
+        averageFillPrice = try container.decodeIfPresent(Decimal.self, forKey: .averageFillPrice)
+        margin = try container.decodeIfPresent(Decimal.self, forKey: .margin)
+        leverage = try container.decodeIfPresent(Decimal.self, forKey: .leverage)
+        marginMode = try container.decodeIfPresent(String.self, forKey: .marginMode)
+        takeProfitPrice = try container.decodeIfPresent(Decimal.self, forKey: .takeProfitPrice)
+        stopLossPrice = try container.decodeIfPresent(Decimal.self, forKey: .stopLossPrice)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(instrumentID, forKey: .instrumentID)
+        try container.encode(side, forKey: .side)
+        try container.encode(status, forKey: .status)
+        try container.encode(quantity, forKey: .quantity)
+        try container.encodeIfPresent(price, forKey: .price)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(filledQuantity, forKey: .filledQuantity)
+        try container.encodeIfPresent(averageFillPrice, forKey: .averageFillPrice)
+        try container.encodeIfPresent(margin, forKey: .margin)
+        try container.encodeIfPresent(leverage, forKey: .leverage)
+        try container.encodeIfPresent(marginMode, forKey: .marginMode)
+        try container.encodeIfPresent(takeProfitPrice, forKey: .takeProfitPrice)
+        try container.encodeIfPresent(stopLossPrice, forKey: .stopLossPrice)
     }
 }
 

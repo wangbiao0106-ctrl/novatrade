@@ -121,6 +121,31 @@ class GatewayContractTests(unittest.TestCase):
         self.assertEqual(day, 0)
         self.assertEqual(rolling, 0)
 
+    def test_position_snapshot_keeps_margin_leverage_and_protection_prices(self):
+        snapshot = main.position_snapshot({
+            "posId": "position-1", "instId": "BTC-USDT-SWAP", "posSide": "long",
+            "pos": "2", "avgPx": "100", "markPx": "105", "upl": "10",
+            "mgnMode": "isolated", "imr": "40", "lever": "5",
+            "attachAlgoOrds": [{"tpTriggerPx": "110", "slTriggerPx": "95"}],
+        })
+        self.assertEqual(snapshot["margin"], 40)
+        self.assertEqual(snapshot["leverage"], 5)
+        self.assertEqual(snapshot["takeProfitPrice"], 110)
+        self.assertEqual(snapshot["stopLossPrice"], 95)
+
+    def test_order_snapshot_calculates_margin_from_contract_spec(self):
+        snapshot = main.order_snapshot({
+            "ordId": "order-1", "instId": "BTC-USDT-SWAP", "side": "buy",
+            "state": "live", "sz": "2", "px": "100", "cTime": "1700000000000",
+            "accFillSz": "1", "avgPx": "99", "lever": "5", "tdMode": "isolated",
+            "attachAlgoOrds": [{"tpTriggerPx": "110", "slTriggerPx": "95"}],
+        }, instrument={"ctVal": "1", "ctMult": "1"})
+        self.assertEqual(snapshot["margin"], 40)
+        self.assertEqual(snapshot["averageFillPrice"], 99)
+        self.assertEqual(snapshot["takeProfitPrice"], 110)
+        self.assertEqual(snapshot["stopLossPrice"], 95)
+        self.assertEqual(snapshot["marginMode"], "isolated")
+
     def test_loopback_host_parsing(self):
         self.assertTrue(main.is_loopback("127.0.0.1:8787"))
         self.assertTrue(main.is_loopback("[::1]:8787"))

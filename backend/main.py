@@ -581,7 +581,64 @@ async def account() -> dict[str, Any]:
             "assets": assets, "positions": [item for item in positions if item], "updatedAt": now_iso()}
 
 
-def position_snapshot(row: dict[str, Any]) -> dict[str, Any] | None:
+def _positive_field(row: dict[str, Any], *names: str) -> float | None:
+    for name in names:
+        value = as_float(row.get(name))
+        if value > 0:
+            return value
+    return None
+
+
+def _protection_prices(row: dict[str, Any]) -> tuple[float | None, float | None]:
+    """Extract attached take-profit and stop-loss trigger prices.
+
+    OKX returns these directly on some order variants and inside
+    ``attachAlgoOrds`` for orders submitted with attached protection.
+    """
+    take_profit = _positive_field(row, "takeProfitPrice", "tpTriggerPx", "takeProfitTriggerPrice")
+    stop_loss = _positive_field(row, "stopLossPrice", "slTriggerPx", "stopLossTriggerPrice")
+    attached = row.get("attachAlgoOrds") or row.get("attachAlgoOrders") or []
+    if isinstance(attached, dict):
+        attached = [attached]
+    if isinstance(attached, list):
+        for item in attached:
+            if not isinstance(item, dict):
+                continue
+            take_profit = take_profit or _positive_field(item, "takeProfitPrice", "tpTriggerPx", "takeProfitTriggerPrice")
+            stop_loss = stop_loss or _positive_field(item, "stopLossPrice", "slTriggerPx", "stopLossTriggerPrice")
+    return take_profit, stop_loss
+
+
+def _position_protection_key(row: dict[str, Any]) -> str:
+    return f"{row.get('instId', '')}|{str(row.get('posSide') or 'net').lower()}"
+
+
+async def _pending_position_protections() -> dict[str, dict[str, float | None]]:
+    """Best-effort lookup of standalone position protection algorithms."""
+    try:
+        payload = await okx_private_request("GET", "/trade/orders-algo-pending", params={"instType": "SWAP"})
+    except Exception:
+        return {}
+    result: dict[str, dict[str, float | None]] = {}
+    for row in payload.get("data", []):
+        if not isinstance(row, dict) or not row.get("instId"):
+            continue
+        take_profit, stop_loss = _protection_prices(row)
+        if take_profit is None and stop_loss is None:
+            continue
+        key = _position_protection_key(row)
+        current = result.setdefault(key, {"takeProfitPrice": None, "stopLossPrice": None})
+        current["takeProfitPrice"] = current["takeProfitPrice"] or take_profit
+        current["stopLossPrice"] = current["stopLossPrice"] or stop_loss
+        # A missing posSide is common for net-mode algorithms. Keep an
+        # instrument-only fallback for the corresponding position row.
+        fallback = result.setdefault(f"{row.get('instId')}|net", {"takeProfitPrice": None, "stopLossPrice": None})
+        fallback["takeProfitPrice"] = fallback["takeProfitPrice"] or take_profit
+        fallback["stopLossPrice"] = fallback["stopLossPrice"] or stop_loss
+    return result
+
+
+def position_snapshot(row: dict[str, Any], *, protection: dict[str, float | None] | None = None) -> dict[str, Any] | None:
     quantity = as_float(row.get("pos"))
     entry = as_float(row.get("avgPx"))
     identifier = row.get("posId")
@@ -593,13 +650,25 @@ def position_snapshot(row: dict[str, Any]) -> dict[str, Any] | None:
     margin = str(row.get("mgnMode") or "").lower()
     mark_price = as_float(row.get("markPx")) if row.get("markPx") else 0
     unrealized = as_float(row.get("upl")) if row.get("upl") is not None else None
+    leverage = _positive_field(row, "lever", "leverage")
+    margin_value = _positive_field(row, "margin", "imr", "initialMargin")
+    if margin_value is None:
+        notional = _positive_field(row, "notionalUsd", "notional")
+        if notional is not None and leverage is not None:
+            margin_value = notional / leverage
+    take_profit, stop_loss = _protection_prices(row)
+    if protection:
+        take_profit = take_profit or protection.get("takeProfitPrice")
+        stop_loss = stop_loss or protection.get("stopLossPrice")
     return {"id": identifier, "instrumentID": row["instId"], "side": side, "quantity": quantity,
             "entryPrice": entry, "markPrice": mark_price if mark_price > 0 else None,
             "unrealizedPnL": unrealized,
-            "marginMode": margin if margin in {"cross", "isolated"} else None}
+            "marginMode": margin if margin in {"cross", "isolated"} else None,
+            "margin": margin_value, "leverage": leverage,
+            "takeProfitPrice": take_profit, "stopLossPrice": stop_loss}
 
 
-def order_snapshot(row: dict[str, Any]) -> dict[str, Any] | None:
+def order_snapshot(row: dict[str, Any], *, instrument: dict[str, Any] | None = None) -> dict[str, Any] | None:
     identifier = row.get("ordId")
     quantity = as_float(row.get("sz"))
     created = as_float(row.get("cTime") or row.get("uTime"))
@@ -614,9 +683,26 @@ def order_snapshot(row: dict[str, Any]) -> dict[str, Any] | None:
     if not status:
         return None
     filled = as_float(row.get("accFillSz")) if row.get("accFillSz") is not None else None
+    fill_price = _positive_field(row, "averageFillPrice", "avgPx", "fillPx")
+    leverage = _positive_field(row, "lever", "leverage")
+    margin_value = _positive_field(row, "margin", "imr", "initialMargin")
+    notional = _positive_field(row, "notionalUsd", "notional")
+    if notional is None and instrument:
+        contract_value = as_float(instrument.get("ctVal"))
+        contract_multiplier = as_float(instrument.get("ctMult"), 1)
+        reference_price = price or fill_price or 0
+        if contract_value > 0 and contract_multiplier > 0 and reference_price > 0:
+            notional = quantity * contract_value * contract_multiplier * reference_price
+    if margin_value is None and notional is not None and leverage is not None:
+        margin_value = notional / leverage
+    take_profit, stop_loss = _protection_prices(row)
+    margin_mode = str(row.get("tdMode") or row.get("mgnMode") or "").lower()
     return {"id": identifier, "instrumentID": row["instId"], "side": side,
             "status": status, "quantity": quantity, "price": price,
-            "createdAt": timestamp, "filledQuantity": filled if filled is not None and filled >= 0 else None}
+            "createdAt": timestamp, "filledQuantity": filled if filled is not None and filled >= 0 else None,
+            "averageFillPrice": fill_price, "margin": margin_value, "leverage": leverage,
+            "marginMode": margin_mode if margin_mode in {"cross", "isolated"} else None,
+            "takeProfitPrice": take_profit, "stopLossPrice": stop_loss}
 
 
 def _assert_ai_entry_current(request: dict[str, Any]) -> None:
@@ -1527,7 +1613,8 @@ async def positions() -> list[dict[str, Any]]:
     if not private_ready():
         raise HTTPException(status_code=503, detail="OKX private REST credentials are not configured")
     payload = await okx_private_request("GET", "/account/positions", params={"instType": "SWAP"})
-    return [item for item in (position_snapshot(row) for row in payload.get("data", [])) if item]
+    protections = await _pending_position_protections()
+    return [item for item in (position_snapshot(row, protection=protections.get(_position_protection_key(row))) for row in payload.get("data", [])) if item]
 
 
 @app.get("/api/v1/orders")
@@ -1535,7 +1622,11 @@ async def orders() -> list[dict[str, Any]]:
     if not private_ready():
         raise HTTPException(status_code=503, detail="OKX private REST credentials are not configured")
     payload = await okx_private_request("GET", "/trade/orders-pending", params={"instType": "SWAP"})
-    return [item for item in (order_snapshot(row) for row in payload.get("data", [])) if item]
+    try:
+        instruments = await _account_swap_instruments()
+    except Exception:
+        instruments = {}
+    return [item for item in (order_snapshot(row, instrument=instruments.get(row.get("instId"))) for row in payload.get("data", [])) if item]
 
 
 @app.websocket("/api/v1/stream")
