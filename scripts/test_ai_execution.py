@@ -308,19 +308,31 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
 
     async def test_leverage_failure_is_definitely_unsubmitted_and_never_posts_order(self):
         for error in (exchange_error("51001", "Unknown contract"), httpx.ReadTimeout("Leverage timed out")):
-            writes = AsyncMock(side_effect=error)
+            writes = AsyncMock(side_effect=[{"data": []}, {"data": []}, error])
             with self.subTest(error=type(error).__name__), patch.object(main, "private_ready", return_value=True), \
                  patch.object(main, "OKX_DEMO", True), patch.object(main, "okx_private_request", new=writes):
                 with self.assertRaises(OrderNotSubmittedError) as context:
                     await main.submit_order(entry_request(), demo=True)
             self.assertIs(context.exception.__cause__, error)
             self.assertIn("订单未提交", str(context.exception))
-            self.assertEqual([call.args[1] for call in writes.await_args_list], ["/account/set-leverage"])
+            self.assertEqual([call.args[1] for call in writes.await_args_list], ["/account/positions", "/trade/orders-pending", "/account/set-leverage"])
+
+    async def test_ai_entry_cannot_change_leverage_with_existing_cross_exposure(self):
+        writes = AsyncMock(side_effect=[
+            {"data": [{"instId": BTC, "pos": "1.75", "lever": "3"}]},
+            {"data": []},
+        ])
+        with patch.object(main, "private_ready", return_value=True), \
+             patch.object(main, "OKX_DEMO", True), patch.object(main, "okx_private_request", new=writes):
+            with self.assertRaises(OrderNotSubmittedError) as context:
+                await main.submit_order(entry_request(), demo=True)
+        self.assertIn("不能切换为 1x", str(context.exception))
+        self.assertEqual([call.args[1] for call in writes.await_args_list], ["/account/positions", "/trade/orders-pending"])
 
     async def test_leverage_failure_releases_new_durable_reservation_and_daily_allowance(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(main, "private_ready", return_value=True), \
              patch.object(main, "OKX_DEMO", True), \
-             patch.object(main, "okx_private_request", new=AsyncMock(side_effect=httpx.ReadTimeout("Leverage timed out"))):
+             patch.object(main, "okx_private_request", new=AsyncMock(side_effect=[{"data": []}, {"data": []}, httpx.ReadTimeout("Leverage timed out")])):
             path = Path(directory) / "orders.json"
             gateway = self.gateway(path)
             with self.assertRaises(OrderNotSubmittedError):
@@ -337,7 +349,7 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
 
     async def test_order_post_timeout_remains_unknown_and_counts_after_restart(self):
         timeout = httpx.ReadTimeout("Order result unknown")
-        writes = AsyncMock(side_effect=[{"data": [{}]}, timeout])
+        writes = AsyncMock(side_effect=[{"data": []}, {"data": []}, {"data": [{}]}, timeout])
         with tempfile.TemporaryDirectory() as directory, patch.object(main, "private_ready", return_value=True), \
              patch.object(main, "OKX_DEMO", True), patch.object(main, "okx_private_request", new=writes):
             path = Path(directory) / "orders.json"
@@ -345,7 +357,7 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
             with self.assertRaises(httpx.ReadTimeout) as context:
                 await self.submit(gateway)
             self.assertIs(context.exception, timeout)
-            self.assertEqual([call.args[1] for call in writes.await_args_list], ["/account/set-leverage", "/trade/order"])
+            self.assertEqual([call.args[1] for call in writes.await_args_list], ["/account/positions", "/trade/orders-pending", "/account/set-leverage", "/trade/order"])
             reservation = gateway.reservations["unresolved-aiexecution1"]
             self.assertFalse(reservation["inFlight"])
             self.assertEqual(gateway.daily_order_count(), 1)
@@ -354,7 +366,7 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
             self.assertEqual(restored.daily_order_count(), 1)
 
     async def test_failed_retry_preserves_previous_unknown_reservation(self):
-        writes = AsyncMock(side_effect=[{"data": [{}]}, httpx.ReadTimeout("Order result unknown")])
+        writes = AsyncMock(side_effect=[{"data": []}, {"data": []}, {"data": [{}]}, httpx.ReadTimeout("Order result unknown")])
         with tempfile.TemporaryDirectory() as directory, patch.object(main, "private_ready", return_value=True), \
              patch.object(main, "OKX_DEMO", True), patch.object(main, "okx_private_request", new=writes):
             path = Path(directory) / "orders.json"
@@ -404,7 +416,7 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
     async def test_unverifiable_success_keeps_durable_unknown_reservation_during_reconciliation(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(main, "private_ready", return_value=True), \
              patch.object(main, "OKX_DEMO", True), \
-             patch.object(main, "okx_private_request", new=AsyncMock(side_effect=[{"data": [{}]}, httpx.ReadTimeout("unknown")])):
+             patch.object(main, "okx_private_request", new=AsyncMock(side_effect=[{"data": []}, {"data": []}, {"data": [{}]}, httpx.ReadTimeout("unknown")])):
             path = Path(directory) / "orders.json"
             gateway = self.gateway(path, lookup=main._lookup_order)
             with self.assertRaises(httpx.ReadTimeout):
@@ -425,7 +437,7 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
     async def test_reconcile_keeps_unknown_contract_error_but_releases_explicit_absence(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(main, "private_ready", return_value=True), \
              patch.object(main, "OKX_DEMO", True), \
-             patch.object(main, "okx_private_request", new=AsyncMock(side_effect=[{"data": [{}]}, httpx.ReadTimeout("unknown")])):
+             patch.object(main, "okx_private_request", new=AsyncMock(side_effect=[{"data": []}, {"data": []}, {"data": [{}]}, httpx.ReadTimeout("unknown")])):
             path = Path(directory) / "orders.json"
             gateway = self.gateway(path, lookup=main._lookup_order)
             with self.assertRaises(httpx.ReadTimeout):

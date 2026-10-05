@@ -1875,6 +1875,40 @@ class AIGatewayTests(unittest.TestCase):
         self.assertEqual(result["marginUSD"], 500)
         self.assertEqual(calls[0]["quantity"], 25)
 
+    def test_gateway_sizes_limit_orders_at_limit_price_and_rejects_margin_overrun(self):
+        calls = []
+
+        async def submit(payload, demo):
+            calls.append(payload)
+            return {"orderID": "ord-limit-margin", "status": "submitted"}
+
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                gateway = OrderGateway(Path(directory) / "ledger.json", submit=submit)
+                spec = InstrumentSpec("BTC-USDT-SWAP", ctVal=1, lotSize=1, minSize=1)
+                result = await gateway.submit_intent(
+                    {"instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "limit",
+                     "price": 120, "targetNotional": 1000, "marginUSD": 500,
+                     "source": "ai", "leverage": 2, "clientOrderID": "ailimitmargin"},
+                    demo=True, instrument=spec, price=100, available_equity=3000,
+                    daily_order_limit=20,
+                )
+                with self.assertRaises(OrderGatewayError):
+                    await gateway.submit_intent(
+                        {"instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "limit",
+                         "price": 120, "quantity": 9, "marginUSD": 500,
+                         "source": "ai", "leverage": 2, "clientOrderID": "aioversized"},
+                        demo=True, instrument=spec, price=100, available_equity=3000,
+                        daily_order_limit=20,
+                    )
+                return result
+
+        result = asyncio.run(run())
+        self.assertEqual(result["quantity"], 8)
+        self.assertEqual(result["notional"], 960)
+        self.assertEqual(result["marginUSD"], 480)
+        self.assertEqual(calls[0]["quantity"], 8)
+
 
 if __name__ == "__main__":
     unittest.main()

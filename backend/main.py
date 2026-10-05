@@ -716,6 +716,44 @@ def _assert_ai_entry_current(request: dict[str, Any]) -> None:
         raise OrderNotSubmittedError("AI entry expired before order submission")
 
 
+async def _guard_ai_leverage_change(request: dict[str, Any]) -> None:
+    """Keep cross-margin positions and pending orders on one instrument leverage.
+
+    OKX applies ``set-leverage`` to the instrument/margin-mode scope. Changing
+    it before a new AI order would therefore reprice existing net positions and
+    pending orders, making their reported margin exceed the fixed entry budget.
+    """
+    if request.get("source") != "ai" or request.get("reduceOnly") or request.get("leverage") is None:
+        return
+    instrument = str(request.get("instrumentID") or "")
+    requested = _positive_field({"value": request.get("leverage")}, "value")
+    if requested is None:
+        raise OrderNotSubmittedError("AI leverage is unavailable or invalid")
+    try:
+        positions, pending = await asyncio.gather(
+            okx_private_request("GET", "/account/positions", params={"instType": "SWAP"}),
+            okx_private_request("GET", "/trade/orders-pending", params={"instType": "SWAP"}),
+        )
+    except Exception as error:
+        raise OrderNotSubmittedError(f"核验当前合约杠杆失败，订单未提交：{error}") from error
+
+    rows: list[tuple[str, dict[str, Any]]] = []
+    for row in positions.get("data", []) if isinstance(positions, dict) else []:
+        if isinstance(row, dict) and row.get("instId") == instrument and as_float(row.get("pos")) != 0:
+            rows.append(("position", row))
+    for row in pending.get("data", []) if isinstance(pending, dict) else []:
+        if isinstance(row, dict) and row.get("instId") == instrument and as_float(row.get("sz")) > 0:
+            rows.append(("pending order", row))
+    for label, row in rows:
+        current = _positive_field(row, "lever", "leverage")
+        if current is None:
+            raise OrderNotSubmittedError(f"无法核验现有{label}的杠杆，订单未提交")
+        if not math.isclose(current, requested, rel_tol=0, abs_tol=1e-9):
+            raise OrderNotSubmittedError(
+                f"当前合约已有{label}使用 {current:g}x，不能切换为 {requested:g}x；请先处理现有暴露后再开仓"
+            )
+
+
 async def submit_order(request: dict[str, Any], *, demo: bool) -> dict[str, Any]:
     if not private_ready():
         raise HTTPException(status_code=503, detail="OKX private REST credentials are not configured")
@@ -742,6 +780,7 @@ async def submit_order(request: dict[str, Any], *, demo: bool) -> dict[str, Any]
         body["reduceOnly"] = "true"
     _assert_ai_entry_current(request)
     if request.get("leverage") is not None and not request.get("reduceOnly"):
+        await _guard_ai_leverage_change(request)
         leverage_body = {"instId": instrument, "lever": request["leverage"], "mgnMode": margin_mode}
         if request.get("positionSide"):
             leverage_body["posSide"] = request["positionSide"]

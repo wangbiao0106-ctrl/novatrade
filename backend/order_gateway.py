@@ -219,21 +219,31 @@ class OrderGateway:
             order_type = str(request.get("orderType") or "market").lower()
             if order_type not in {"market", "limit"}:
                 raise OrderGatewayError("orderType must be market or limit")
-            quantity = request.get("quantity")
-            if quantity is None:
-                quantity = instrument.quantity_for_notional(request.get("targetNotional"), price)
-            quantity = _number(quantity, "quantity", positive=True)
-            quantity = math.floor(quantity / instrument.lotSize) * instrument.lotSize
-            if quantity < instrument.minSize or quantity <= 0:
-                raise OrderGatewayError("quantity is below instrument minimum or not lot aligned")
             order_price = instrument.aligned_price(request.get("price"))
             if order_type == "limit" and order_price is None:
                 raise OrderGatewayError("limit orders require a positive price")
             if order_price is None:
                 order_price = price
+            quantity = request.get("quantity")
+            if quantity is None:
+                # A limit order's notional is determined by its limit price,
+                # which can differ from the latest ticker used for admission.
+                # Size against the actual order price so the fixed margin cap
+                # cannot be exceeded when the limit is above the ticker.
+                quantity = instrument.quantity_for_notional(request.get("targetNotional"), order_price)
+            quantity = _number(quantity, "quantity", positive=True)
+            quantity = math.floor(quantity / instrument.lotSize) * instrument.lotSize
+            if quantity < instrument.minSize or quantity <= 0:
+                raise OrderGatewayError("quantity is below instrument minimum or not lot aligned")
             notional = abs(quantity * instrument.ctVal * instrument.ctMult * order_price)
             reduce_only = bool(request.get("reduceOnly") or force_reduce_only)
             leverage = _number(request.get("leverage", 1), "leverage", positive=True)
+            margin_budget = request.get("marginUSD")
+            if margin_budget is not None and not reduce_only:
+                margin_budget = _number(margin_budget, "marginUSD", positive=True)
+                actual_margin = notional / leverage
+                if actual_margin > margin_budget + max(1e-9, margin_budget * 1e-9):
+                    raise OrderGatewayError("order margin exceeds configured per-order margin")
             if not reduce_only and notional > self.limits["maxInstrumentNotional"]:
                 raise OrderGatewayError("instrument notional limit exceeded")
             current_total = sum(_number(row.get("notional", 0), "reservation notional") for row in self.reservations.values())

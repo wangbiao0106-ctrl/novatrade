@@ -251,8 +251,8 @@ class AISubmissionFreshnessTests(unittest.IsolatedAsyncioTestCase):
              patch.object(main, "okx_private_request", new=writes):
             result = await main.submit_order(request, demo=True)
         self.assertEqual(result["orderID"], "order-1")
-        self.assertEqual([call.args[1] for call in writes.await_args_list], ["/account/set-leverage", "/trade/order"])
-        self.assertTrue(all("_aiEntryDeadline" not in call.kwargs["body"] for call in writes.await_args_list))
+        self.assertEqual([call.args[1] for call in writes.await_args_list], ["/account/positions", "/trade/orders-pending", "/account/set-leverage", "/trade/order"])
+        self.assertTrue(all("_aiEntryDeadline" not in call.kwargs.get("body", {}) for call in writes.await_args_list))
 
     async def test_expired_or_invalid_deadline_never_starts_a_write(self):
         captured, _, clock_type = self.fake_clock()
@@ -289,7 +289,7 @@ class AISubmissionFreshnessTests(unittest.IsolatedAsyncioTestCase):
                 )
             self.assertEqual(gateway.reservations, {})
             self.assertEqual(gateway.daily_order_count(), 0)
-        self.assertEqual(writes, ["/account/set-leverage"])
+        self.assertEqual(writes, ["/account/positions", "/trade/orders-pending", "/account/set-leverage"])
 
     async def test_entry_expires_while_waiting_for_gateway_lock(self):
         captured, clock, clock_type = self.fake_clock()
