@@ -107,12 +107,14 @@ struct RightRail: View {
                 VStack(alignment: .leading, spacing: 5) {
                     PositionSummaryHeader(position: position)
                     HStack(spacing: 8) {
-                        RailMetric(title: "保证金", value: position.margin.map(formatUSD) ?? "--", emphasized: true)
                         RailMetric(title: "开仓均价", value: formatPrice(position.entryPrice), emphasized: true)
-                        RailMetric(
-                            title: "止盈 / 止损",
-                            value: "\(protection.takeProfit.map(formatPrice) ?? "--") / \(protection.stopLoss.map(formatPrice) ?? "--")"
-                        )
+                        RailMetric(title: "止盈", value: protection.takeProfit.map(formatPrice) ?? "--")
+                        RailMetric(title: "止损", value: protection.stopLoss.map(formatPrice) ?? "--")
+                    }
+                    HStack(spacing: 8) {
+                        RailMetric(title: "标记价格", value: position.markPrice.map(formatPrice) ?? "--")
+                        RailMetric(title: "保证金", value: position.margin.map(formatUSD) ?? "--", emphasized: true)
+                        PositionPnLMetric(position: position)
                     }
                 }
                 .padding(.vertical, 4)
@@ -224,45 +226,49 @@ private struct PositionSummaryHeader: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 5) {
-                    Text(position.instrumentID)
-                        .font(.caption.monospaced())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    Text(position.markPrice.map(formatPrice) ?? "--")
-                        .font(.caption.monospacedDigit().weight(.medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+            HStack(spacing: 5) {
+                Text(position.instrumentID)
+                    .font(.caption.monospaced())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                PositionTag(direction.label, color: direction.color)
+                if let leverage = position.leverage {
+                    PositionTag("\(formatPrice(leverage))x", color: .secondary)
                 }
-                HStack(spacing: 5) {
-                    PositionTag(direction.label, color: direction.color)
-                    if let leverage = position.leverage {
-                        PositionTag("\(formatPrice(leverage))x", color: .secondary)
-                    }
-                    if let marginModeLabel {
-                        PositionTag(marginModeLabel, color: .secondary)
-                    }
+                if let marginModeLabel {
+                    PositionTag(marginModeLabel, color: .secondary)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .trailing, spacing: 1) {
-                Text("持仓收益")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(position.unrealizedPnL.map(formatSignedUSD) ?? "--")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(pnlColor)
-                if let returnPercent = positionReturnPercent(for: position) {
-                    Text(formatSignedPercent(returnPercent))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(pnlColor)
-                }
-            }
-            .fixedSize(horizontal: true, vertical: false)
         }
+    }
+}
+
+private struct PositionPnLMetric: View {
+    let position: PositionSnapshot
+
+    private var color: Color {
+        position.unrealizedPnL.map { $0 >= 0 ? .green : .red } ?? .secondary
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("持仓收益")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(position.unrealizedPnL.map(formatSignedUSD) ?? "--")
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            if let returnPercent = positionReturnPercent(for: position) {
+                Text(formatSignedPercent(returnPercent))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
