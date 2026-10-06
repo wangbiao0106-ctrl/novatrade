@@ -116,7 +116,7 @@ struct RightRail: View {
                         Spacer(minLength: 4)
                         PositionTag(isBuy ? "买入" : "卖出", color: isBuy ? .green : .red)
                         if let leverage = order.leverage {
-                            PositionTag("\(formatPrice(leverage))x", color: .secondary)
+                            PositionTag("\(formatLeverage(leverage.doubleValue))x", color: .secondary)
                         }
                         if let marginMode = order.marginMode?.lowercased() {
                             switch marginMode {
@@ -125,9 +125,6 @@ struct RightRail: View {
                             default: EmptyView()
                             }
                         }
-                        Text(order.status)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
                     }
                     HStack(spacing: 8) {
                         RailMetric(title: "保证金", value: order.margin.map(formatUSD) ?? "--", emphasized: true)
@@ -209,7 +206,7 @@ private struct PositionSummaryHeader: View {
                     .minimumScaleFactor(0.75)
                 PositionTag(direction.label, color: direction.color)
                 if let leverage = position.leverage {
-                    PositionTag("\(formatPrice(leverage))x", color: .secondary)
+                    PositionTag("\(formatLeverage(leverage.doubleValue))x", color: .secondary)
                 }
                 if let marginModeLabel {
                     PositionTag(marginModeLabel, color: .secondary)
