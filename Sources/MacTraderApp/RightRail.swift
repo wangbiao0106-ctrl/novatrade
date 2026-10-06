@@ -7,6 +7,13 @@ struct RightRail: View {
     @ObservedObject var model: DashboardModel
     @Binding var showingNewStrategy: Bool
 
+    private enum TradingTab: Hashable {
+        case positions
+        case orders
+    }
+
+    @State private var tradingTab: TradingTab = .positions
+
     private var accountLabel: String { model.accountOverview.mode == .paper ? "OKX 模拟" : "实盘" }
 
     var body: some View {
@@ -27,50 +34,7 @@ struct RightRail: View {
                 ForEach(model.strategies) { config in
                     StrategyStatusModule(config: config, status: model.strategyStatus(for: config), model: model)
                 }
-                RailModule(title: "持仓", icon: "chart.bar.xaxis") {
-                    if model.livePositions.isEmpty { RailEmpty("暂无\(accountLabel)持仓") }
-                    ForEach(model.livePositions) { position in
-                        let protection = protectionPrices(for: position)
-                        VStack(alignment: .leading, spacing: 5) {
-                            PositionSummaryHeader(position: position)
-                            HStack(spacing: 10) {
-                                RailMetric(title: "开仓均价", value: formatPrice(position.entryPrice), emphasized: true)
-                                RailMetric(title: "标记价格", value: position.markPrice.map(formatPrice) ?? "--")
-                            }
-                            HStack(spacing: 10) {
-                                RailMetric(title: "止盈", value: protection.takeProfit.map(formatPrice) ?? "--")
-                                RailMetric(title: "止损", value: protection.stopLoss.map(formatPrice) ?? "--")
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-                RailModule(title: "挂单", icon: "list.bullet.rectangle") {
-                    if model.liveOrders.isEmpty { RailEmpty("暂无\(accountLabel)挂单") }
-                    ForEach(model.liveOrders) { order in
-                        VStack(alignment: .leading, spacing: 5) {
-                            RailRow {
-                                Text(order.instrumentID).font(.caption.monospaced())
-                                Spacer(minLength: 4)
-                                Text(order.side.uppercased()).font(.caption2.weight(.semibold))
-                                Text(order.status).foregroundStyle(.secondary)
-                            }
-                            HStack(spacing: 10) {
-                                RailMetric(title: "保证金", value: order.margin.map(formatUSD) ?? "--")
-                                RailMetric(title: "挂单", value: order.price.map(formatPrice) ?? "--")
-                                RailMetric(title: "成交", value: order.averageFillPrice.map(formatPrice) ?? "--")
-                            }
-                            HStack(spacing: 10) {
-                                RailMetric(title: "止盈", value: order.takeProfitPrice.map(formatPrice) ?? "--")
-                                RailMetric(title: "止损", value: order.stopLossPrice.map(formatPrice) ?? "--")
-                                if let leverage = order.leverage {
-                                    RailMetric(title: "杠杆", value: "\(formatPrice(leverage))x")
-                                }
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
+                tradingModule
                 RailModule(title: "交易流水", icon: "arrow.left.arrow.right") {
                     if model.fills.isEmpty { RailEmpty("暂无\(accountLabel)成交记录") }
                     ForEach(model.fills.prefix(8)) { fill in
@@ -99,6 +63,112 @@ struct RightRail: View {
         }
         .frame(width: 350)
         .background(Color.sidebarBackground.opacity(0.7))
+    }
+
+    @ViewBuilder
+    private var tradingModule: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Label("交易", systemImage: tradingTab == .positions ? "chart.bar.xaxis" : "list.bullet.rectangle")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 6)
+                Picker("交易视图", selection: $tradingTab) {
+                    Text("持仓 \(model.livePositions.count)").tag(TradingTab.positions)
+                    Text("挂单 \(model.liveOrders.count)").tag(TradingTab.orders)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.mini)
+                .frame(width: 158)
+            }
+            Divider().overlay(Color.white.opacity(0.07))
+            if tradingTab == .positions {
+                positionsContent
+            } else {
+                ordersContent
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.panelBackground, in: RoundedRectangle(cornerRadius: 9))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(Color.white.opacity(0.045), lineWidth: 1)
+        }
+    }
+
+    @ViewBuilder
+    private var positionsContent: some View {
+        if model.livePositions.isEmpty {
+            RailEmpty("暂无\(accountLabel)持仓")
+        } else {
+            ForEach(Array(model.livePositions.enumerated()), id: \.element.id) { index, position in
+                let protection = protectionPrices(for: position)
+                VStack(alignment: .leading, spacing: 5) {
+                    PositionSummaryHeader(position: position)
+                    HStack(spacing: 8) {
+                        RailMetric(title: "保证金", value: position.margin.map(formatUSD) ?? "--", emphasized: true)
+                        RailMetric(title: "开仓均价", value: formatPrice(position.entryPrice), emphasized: true)
+                        RailMetric(title: "标记价格", value: position.markPrice.map(formatPrice) ?? "--")
+                    }
+                    HStack(spacing: 12) {
+                        RailInlineMetric(title: "止盈", value: protection.takeProfit.map(formatPrice) ?? "--")
+                        RailInlineMetric(title: "止损", value: protection.stopLoss.map(formatPrice) ?? "--")
+                    }
+                }
+                .padding(.vertical, 4)
+                if index < model.livePositions.count - 1 {
+                    Divider().overlay(Color.white.opacity(0.07))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var ordersContent: some View {
+        if model.liveOrders.isEmpty {
+            RailEmpty("暂无\(accountLabel)挂单")
+        } else {
+            ForEach(Array(model.liveOrders.enumerated()), id: \.element.id) { index, order in
+                let isBuy = ["buy", "long"].contains(order.side.lowercased())
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 5) {
+                        Text(order.instrumentID)
+                            .font(.caption.monospaced())
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        PositionTag(isBuy ? "买入" : "卖出", color: isBuy ? .green : .red)
+                        if let leverage = order.leverage {
+                            PositionTag("\(formatPrice(leverage))x", color: .secondary)
+                        }
+                        if let marginMode = order.marginMode?.lowercased() {
+                            switch marginMode {
+                            case "cross": PositionTag("全仓", color: .secondary)
+                            case "isolated": PositionTag("逐仓", color: .secondary)
+                            default: EmptyView()
+                            }
+                        }
+                        Text(order.status)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 8) {
+                        RailMetric(title: "保证金", value: order.margin.map(formatUSD) ?? "--", emphasized: true)
+                        RailMetric(title: "挂单价", value: order.price.map(formatPrice) ?? "--", emphasized: true)
+                        RailMetric(title: "成交价", value: order.averageFillPrice.map(formatPrice) ?? "--")
+                    }
+                    HStack(spacing: 12) {
+                        RailInlineMetric(title: "止盈", value: order.takeProfitPrice.map(formatPrice) ?? "--")
+                        RailInlineMetric(title: "止损", value: order.stopLossPrice.map(formatPrice) ?? "--")
+                        RailInlineMetric(title: "数量", value: formatContracts(abs(order.quantity)))
+                    }
+                }
+                .padding(.vertical, 4)
+                if index < model.liveOrders.count - 1 {
+                    Divider().overlay(Color.white.opacity(0.07))
+                }
+            }
+        }
     }
 
     /// A position's protection may be represented either directly on the
@@ -154,44 +224,37 @@ private struct PositionSummaryHeader: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
-                Text(position.instrumentID)
-                    .font(.caption.monospaced())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                PositionTag(direction.label, color: direction.color)
-                if let leverage = position.leverage {
-                    PositionTag("\(formatPrice(leverage))x", color: .secondary)
-                }
-                if let marginModeLabel {
-                    PositionTag(marginModeLabel, color: .secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            HStack(alignment: .top, spacing: 6) {
-                HStack(spacing: 4) {
-                    Text("保证金").foregroundStyle(.secondary)
-                    Text(position.margin.map(formatUSD) ?? "--")
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.primary)
-                }
-                .font(.caption2.monospacedDigit())
-                Spacer(minLength: 4)
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text("持仓收益")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(position.unrealizedPnL.map(formatSignedUSD) ?? "--")
-                        .font(.caption.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(pnlColor)
-                    if let returnPercent = positionReturnPercent(for: position) {
-                        Text(formatSignedPercent(returnPercent))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(pnlColor)
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    Text(position.instrumentID)
+                        .font(.caption.monospaced())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    PositionTag(direction.label, color: direction.color)
+                    if let leverage = position.leverage {
+                        PositionTag("\(formatPrice(leverage))x", color: .secondary)
+                    }
+                    if let marginModeLabel {
+                        PositionTag(marginModeLabel, color: .secondary)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            VStack(alignment: .trailing, spacing: 1) {
+                Text("持仓收益")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(position.unrealizedPnL.map(formatSignedUSD) ?? "--")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(pnlColor)
+                if let returnPercent = positionReturnPercent(for: position) {
+                    Text(formatSignedPercent(returnPercent))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(pnlColor)
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 }
@@ -1020,10 +1083,19 @@ struct RailModule<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: icon).font(.headline)
+        VStack(alignment: .leading, spacing: 9) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
             content()
-        }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Color.panelBackground, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.panelBackground, in: RoundedRectangle(cornerRadius: 9))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(Color.white.opacity(0.045), lineWidth: 1)
+        }
     }
 }
 
@@ -1054,6 +1126,22 @@ private struct RailMetric: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct RailInlineMetric: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(title).foregroundStyle(.secondary)
+            Text(value).foregroundStyle(.primary)
+        }
+        .font(.caption2.monospacedDigit())
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
