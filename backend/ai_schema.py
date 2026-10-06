@@ -22,6 +22,11 @@ RunMode = Literal["disabled", "shadow", "demo-active", "live-armed", "halted"]
 _CONTRACT_ID_RE = re.compile(r"^[A-Z0-9]+-USDT-SWAP$")
 FIXED_AI_MODEL = "gpt-6-luna"
 FIXED_AI_REASONING_EFFORT = "medium"
+# AI entries on one contract stay blocked for twelve hours after an order is
+# accepted. The order ledger enforces this durably; the config value mirrors
+# the rule in prompts and API responses so the model cannot assume a shorter
+# interval.
+AI_ENTRY_COOLDOWN_SECONDS = 12 * 60 * 60
 
 
 class SchemaError(ValueError):
@@ -377,7 +382,7 @@ class AIConfig:
     decisionIntervalSeconds: float = 30.0
     cliTimeoutSeconds: float = 45.0
     maxOutputBytes: int = 1_000_000
-    cooldownSeconds: float = 60.0
+    cooldownSeconds: float = float(AI_ENTRY_COOLDOWN_SECONDS)
     maxConsecutiveFailures: int = 3
     allowOpen: bool = True
     allowClose: bool = True
@@ -433,7 +438,10 @@ class AIConfig:
             decisionIntervalSeconds=_number(row.get("decisionIntervalSeconds", 30), "config.decisionIntervalSeconds", minimum=.1),
             cliTimeoutSeconds=_number(row.get("cliTimeoutSeconds", 45), "config.cliTimeoutSeconds", minimum=.1),
             maxOutputBytes=int(_number(row.get("maxOutputBytes", 1_000_000), "config.maxOutputBytes", minimum=1024, maximum=10_000_000)),
-            cooldownSeconds=_number(row.get("cooldownSeconds", 60), "config.cooldownSeconds", minimum=0),
+            cooldownSeconds=max(
+                _number(row.get("cooldownSeconds", AI_ENTRY_COOLDOWN_SECONDS), "config.cooldownSeconds", minimum=0),
+                AI_ENTRY_COOLDOWN_SECONDS,
+            ),
             maxConsecutiveFailures=int(_number(row.get("maxConsecutiveFailures", 3), "config.maxConsecutiveFailures", minimum=1, maximum=100)),
             allowOpen=bools["allowOpen"], allowClose=bools["allowClose"], allowCancel=bools["allowCancel"], requireStopLoss=bools["requireStopLoss"],
             maxDailyOrders=_integer(row.get("maxDailyOrders", 20), "config.maxDailyOrders", minimum=1, maximum=10000),
@@ -504,6 +512,8 @@ def normalize_ai_chat_patch(value: Mapping[str, Any] | None) -> dict[str, Any]:
     for key in ("decisionIntervalSeconds", "cooldownSeconds"):
         if key in row:
             row[key] = _number(row[key], f"chat.suggestion.{key}", minimum=0.0 if key == "cooldownSeconds" else 0.1)
+    if "cooldownSeconds" in row:
+        row["cooldownSeconds"] = max(row["cooldownSeconds"], AI_ENTRY_COOLDOWN_SECONDS)
     for key in ("maxDailyOrders", "maxDailyLosses"):
         if key in row:
             value = row[key]

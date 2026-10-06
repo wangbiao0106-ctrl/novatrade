@@ -717,11 +717,11 @@ def _assert_ai_entry_current(request: dict[str, Any]) -> None:
 
 
 async def _guard_ai_leverage_change(request: dict[str, Any]) -> None:
-    """Keep cross-margin positions and pending orders on one instrument leverage.
+    """Keep positions and pending orders on one instrument leverage.
 
     OKX applies ``set-leverage`` to the instrument/margin-mode scope. Changing
-    it before a new AI order would therefore reprice existing net positions and
-    pending orders, making their reported margin exceed the fixed entry budget.
+    it before a new AI order could reprice existing exposure and make its
+    reported margin exceed the fixed entry budget.
     """
     if request.get("source") != "ai" or request.get("reduceOnly") or request.get("leverage") is None:
         return
@@ -1203,6 +1203,7 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot) -> dict[str, A
         raise HTTPException(status_code=409, detail="available account equity is unavailable")
     reduce_only = decision.action == "close"
     leverage = as_float(decision.leverage, 0) if not reduce_only else 1
+    position_margin_mode = "isolated"
     if not reduce_only:
         if leverage < 1 or leverage > config.maxLeverage:
             raise HTTPException(status_code=422, detail="AI leverage exceeds configured maximum")
@@ -1215,6 +1216,9 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot) -> dict[str, A
         for position in snapshot.account.get("positions", []) if isinstance(snapshot.account.get("positions"), list) else []:
             if isinstance(position, dict) and position.get("instrumentID") == decision.instrumentID:
                 position_quantity = abs(as_float(position.get("quantity")))
+                mode = str(position.get("marginMode") or "").lower()
+                if mode in {"cross", "isolated"}:
+                    position_margin_mode = mode
                 break
         risk_percent = as_float(decision.riskBudgetPercent)
         target_notional = equity * min(risk_percent, 100) / 100 if risk_percent > 0 else config.marginPerOrderUSD
@@ -1225,7 +1229,11 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot) -> dict[str, A
         "instrumentID": decision.instrumentID, "side": side, "orderType": decision.orderType or "market",
         "targetNotional": target_notional, "price": decision.limitPrice,
         "takeProfitTriggerPrice": decision.takeProfitPrice, "stopLossTriggerPrice": decision.stopLossPrice,
-        "marginMode": "cross", "reduceOnly": reduce_only, "source": "ai",
+        # AI entries are always isolated. A reduce-only close follows the
+        # existing position's mode so an older cross position can still be
+        # closed safely while new AI exposure stays isolated.
+        "marginMode": position_margin_mode if reduce_only else "isolated",
+        "reduceOnly": reduce_only, "source": "ai",
         "clientOrderID": ("ai" + decision.decisionId.replace("-", ""))[:32],
     }
     if not reduce_only:

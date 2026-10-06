@@ -816,6 +816,8 @@ class AIGatewayTests(unittest.TestCase):
         self.assertEqual(defaults.maxDailyLosses, 5)
         self.assertEqual(defaults.marginPerOrderUSD, 500)
         self.assertEqual(defaults.maxLeverage, 5)
+        self.assertEqual(defaults.cooldownSeconds, 43_200)
+        self.assertEqual(AIConfig.from_dict({"cooldownSeconds": 60}).cooldownSeconds, 43_200)
         with self.assertRaises(SchemaError):
             AIConfig.from_dict({"allowedInstruments": ["BTC"]})
         with self.assertRaises(SchemaError):
@@ -1847,6 +1849,36 @@ class AIGatewayTests(unittest.TestCase):
                     await gateway.submit_intent({**request, "clientOrderID": "aitwo"}, demo=True, instrument=spec, price=100, available_equity=1000, daily_order_limit=1)
                 # Reduce-only exits are not counted against the entry quota.
                 await gateway.submit_intent({"instrumentID": "BTC-USDT-SWAP", "side": "sell", "orderType": "market", "quantity": 1, "source": "ai", "reduceOnly": True, "clientOrderID": "aiclose"}, demo=True, instrument=spec, price=100, available_equity=1000, daily_order_limit=1)
+
+        asyncio.run(run())
+
+    def test_gateway_blocks_same_ai_instrument_for_twelve_hours_but_allows_close(self):
+        calls = []
+
+        async def submit(payload, demo):
+            calls.append(payload)
+            return {"orderID": f"ord-{len(calls)}", "status": "submitted"}
+
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                ledger = Path(directory) / "ledger.json"
+                spec = InstrumentSpec("BTC-USDT-SWAP", ctVal=1, lotSize=1, minSize=1)
+                request = {
+                    "instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "market",
+                    "quantity": 1, "source": "ai", "leverage": 1,
+                }
+                gateway = OrderGateway(ledger, submit=submit)
+                await gateway.submit_intent({**request, "clientOrderID": "aitwelve1"}, demo=True, instrument=spec, price=100)
+                with self.assertRaisesRegex(OrderGatewayError, "12 小时"):
+                    await gateway.submit_intent({**request, "clientOrderID": "aitwelve2"}, demo=True, instrument=spec, price=100)
+                restored = OrderGateway(ledger, submit=submit)
+                with self.assertRaisesRegex(OrderGatewayError, "12 小时"):
+                    await restored.submit_intent({**request, "clientOrderID": "aitwelve3"}, demo=True, instrument=spec, price=100)
+                await restored.submit_intent(
+                    {"instrumentID": "BTC-USDT-SWAP", "side": "sell", "orderType": "market", "quantity": 1,
+                     "source": "ai", "reduceOnly": True, "clientOrderID": "aitwelveclose"},
+                    demo=True, instrument=spec, price=100,
+                )
 
         asyncio.run(run())
 

@@ -429,6 +429,7 @@ struct AIControlModule: View {
 struct AISettingsSheet: View {
     @ObservedObject var model: DashboardModel
     @Environment(\.dismiss) private var dismiss
+    private let fixedInstrumentCooldownSeconds = 12.0 * 60.0 * 60.0
     @State private var config: AIConfig
     @State private var selectedInstrumentIDs: Set<String>
     @State private var instrumentSearch = ""
@@ -578,11 +579,10 @@ struct AISettingsSheet: View {
                             .multilineTextAlignment(.trailing)
                     }
                     HStack {
-                        Text("同标的冷却（秒）").frame(width: 120, alignment: .leading)
+                        Text("同币种重复下单").frame(width: 120, alignment: .leading)
                         Spacer()
-                        TextField("60", value: $config.cooldownSeconds, format: .number.precision(.fractionLength(1)))
-                            .frame(width: 72)
-                            .multilineTextAlignment(.trailing)
+                        Text("12 小时（固定）")
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -629,6 +629,9 @@ struct AISettingsSheet: View {
                     Toggle("允许平仓", isOn: $config.allowClose)
                     Toggle("允许撤单", isOn: $config.allowCancel)
                     Toggle("开仓必须带止损", isOn: $config.requireStopLoss)
+                    Text("允许平仓时，AI 可根据最新行情提前平仓；12 小时限制只约束新开仓。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)
@@ -663,7 +666,7 @@ struct AISettingsSheet: View {
             allowedInstruments: selectedInstrumentIDs.sorted(),
             minimumConfidence: config.minimumConfidence,
             decisionIntervalSeconds: config.decisionIntervalSeconds,
-            cooldownSeconds: config.cooldownSeconds,
+            cooldownSeconds: max(config.cooldownSeconds, fixedInstrumentCooldownSeconds),
             allowOpen: config.allowOpen,
             allowClose: config.allowClose,
             allowCancel: config.allowCancel,

@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
+try:
+    from .ai_schema import AI_ENTRY_COOLDOWN_SECONDS
+except ImportError:  # bundled backend modules are launched as scripts
+    from ai_schema import AI_ENTRY_COOLDOWN_SECONDS
+
 class OrderGatewayError(ValueError):
     pass
 
@@ -156,6 +161,38 @@ class OrderGateway:
                 count += 1
         return count
 
+    def _recent_ai_entry(self, instrument_id: str, now: datetime, client_order_id: str) -> bool:
+        """Return whether this contract has an AI entry inside the fixed window.
+
+        Accepted and unresolved reservations both remain in the ledger. That
+        makes an unknown exchange response consume the same duplicate-entry
+        protection as a confirmed order, while a definitely unsubmitted order
+        is removed before this check can see it.
+        """
+        cutoff = now.timestamp() - AI_ENTRY_COOLDOWN_SECONDS
+        for reservation in self.reservations.values():
+            if not isinstance(reservation, dict):
+                continue
+            if (reservation.get("source") != "ai"
+                    or reservation.get("reduceOnly")
+                    or reservation.get("instrumentID") != instrument_id):
+                continue
+            # Retrying an unresolved submission with the same client ID is
+            # idempotent and must reach reconciliation rather than creating a
+            # second order or being mistaken for a new entry.
+            if reservation.get("clientOrderID") == client_order_id:
+                continue
+            created_at = reservation.get("createdAt")
+            if not isinstance(created_at, str):
+                continue
+            try:
+                timestamp = datetime.fromisoformat(created_at.replace("Z", "+00:00")).timestamp()
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if timestamp >= cutoff:
+                return True
+        return False
+
     def _record_ai_order(self, reservation: dict[str, Any], *, day: str | None = None) -> None:
         if reservation.get("source") != "ai" or reservation.get("reduceOnly") or reservation.get("dailyCountRecorded"):
             return
@@ -262,6 +299,8 @@ class OrderGateway:
                 return self._state["clientOrderIDs"][client_id]
             now = datetime.now(timezone.utc)
             source = str(request.get("source") or "manual")
+            if source == "ai" and not reduce_only and self._recent_ai_entry(instrument_id, now, client_id):
+                raise OrderGatewayError("AI 同一合约 12 小时内不允许重复开仓")
             if not reduce_only and source == "ai" and daily_order_limit is not None:
                 if daily_order_limit < 1:
                     raise OrderGatewayError("maximum daily AI orders is zero")

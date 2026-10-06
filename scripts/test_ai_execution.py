@@ -201,6 +201,51 @@ class AccountExecutionUniverseTests(NoNetworkTests):
         gateway_factory.assert_not_called()
         private.assert_not_awaited()
 
+    async def test_ai_entries_use_isolated_and_market_close_remains_reduce_only(self):
+        now = datetime.now(timezone.utc)
+        snapshot = AISnapshot(
+            snapshotId="margin-mode-snapshot", capturedAt=iso(now),
+            instruments=[{"id": BTC}],
+            account={
+                "availableEquityUSD": 1000, "todayLossCount": 0,
+                "positions": [{"instrumentID": BTC, "quantity": 2, "marginMode": "isolated"}],
+            },
+            dataFreshness={"maxAgeSeconds": 90},
+        )
+        entry = AIDecision(
+            1, "isolated-entry", snapshot.snapshotId, "open", instrumentID=BTC,
+            direction="long", orderType="market", stopLossPrice=90, takeProfitPrice=120,
+            leverage=2, winRate=.5, riskRewardRatio=2, confidence=.9,
+            validUntil=iso(now + timedelta(minutes=1)),
+        )
+        close = AIDecision(
+            1, "early-close", snapshot.snapshotId, "close", instrumentID=BTC,
+            direction="long", orderType="market", validUntil=iso(now + timedelta(minutes=1)),
+        )
+
+        class Gateway:
+            def __init__(self):
+                self.requests = []
+
+            async def submit_intent(self, request, **kwargs):
+                self.requests.append(request)
+                return {"orderID": "test-order"}
+
+        gateway = Gateway()
+        with patch.object(main, "ai_worker", SimpleNamespace(config=AIConfig(enabled=True, mode="demo-active", maxLeverage=5))), \
+             patch.object(main, "OKX_DEMO", True), \
+             patch.object(main, "_instrument_spec", new=AsyncMock(return_value=InstrumentSpec(BTC, ctVal=1))), \
+             patch.object(main, "_ticker_last", new=AsyncMock(return_value=100)), \
+             patch.object(main, "_get_order_gateway", return_value=gateway):
+            await main._ai_execute(entry, snapshot)
+            await main._ai_execute(close, snapshot)
+
+        self.assertEqual(gateway.requests[0]["marginMode"], "isolated")
+        self.assertFalse(gateway.requests[0]["reduceOnly"])
+        self.assertEqual(gateway.requests[1]["marginMode"], "isolated")
+        self.assertTrue(gateway.requests[1]["reduceOnly"])
+        self.assertEqual(gateway.requests[1]["quantity"], 2)
+
 
 class AIExecutionPolicyTests(unittest.TestCase):
     def setUp(self):
