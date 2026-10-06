@@ -55,6 +55,7 @@ cp backend/.env.example "$HOME/Library/Application Support/NovaTrade/backend.env
 - AI 交易限制默认是每日最多开仓 20 单、每日最多 5 个亏损单、每笔保证金上限 500 USDT、最大杠杆 5x。每次开仓由 AI 在 `1x` 到配置上限之间选择实际杠杆，名义金额按「单笔保证金 × AI 杠杆」计算，并按实际限价向下取整，因此单笔实际保证金不会超过配置值。OKX `cross` 模式的杠杆按合约和保证金模式生效；同一合约已有持仓或挂单时，服务端禁止切换杠杆，避免交易所重算既有暴露的保证金。达到任一日限额后只拒绝新的 `open`，平仓和撤单仍可执行。每日统计按 UTC 日计算，未知的下单结果会先占用开仓额度，直到订单状态明确。
 - 可交易性与下单规格来自认证账户的 `/account/instruments`，模拟盘只支持部分公开市场合约。每轮快照保留完整固定观察池，同时提供逐币 `tradingAvailability`：不可交易或无法核验的币仍有技术评估，但不能成为开仓对象；服务端和执行前再次检查，不切换交易环境。设置杠杆失败时尚未发送订单 POST，立即释放本次新预留；订单提交后结果未知的预留继续保留。
 - AI 默认关闭，运行模式为 `shadow`、`demo-active` 或人工授权后的 `live-armed`；实盘开关不能由 Codex 修改。状态、决策审计和订单 reservation 位于应用支持目录的 `ai-config.json`、`ai-state.json`、`ai-decisions.jsonl` 和 `order-ledger.json`。
+- AI 配置中心同时提供 `codex` 与 `deepseek` 两个独立策略；对应实验室规则分别见 [`strategies/codex_ai_decision/STRATEGY.md`](strategies/codex_ai_decision/STRATEGY.md) 和 [`strategies/deepseek_ai_decision/STRATEGY.md`](strategies/deepseek_ai_decision/STRATEGY.md)。目录文件只用于研究、版本和验收，运行时通过 `/api/v1/ai/strategies` 的 package/source/runtime/liveGate 元数据管理。
 
 ## 多周期行情缓存
 
@@ -127,11 +128,13 @@ python3 scripts/test_ai_snapshot.py
 python3 scripts/test_ai_execution.py
 python3 scripts/test_ai_market_facts.py
 python3 scripts/test_ai_deepseek_profile.py
+python3 -m unittest discover -s strategies/codex_ai_decision/tests -p 'test_*.py'
+python3 -m unittest discover -s strategies/deepseek_ai_decision/tests -p 'test_*.py'
 ```
 
 首次接入建议保持 `shadow`，确认 `GET /api/v1/ai/decisions` 的快照、决策和拒绝原因，再启用 OKX 模拟盘。Codex CLI 路径可通过 `NOVATRADE_CODEX_BIN` 配置；每次调用使用临时目录、`--sandbox read-only`、`--ephemeral` 和 `--output-schema`，超时或非法输出按 `hold` 处理。
 
-DeepSeek 策略默认使用已安装的 `acp` profile，并通过 `backend/deepseek_profile.py` 的 overlay（`--profile acp --patch <overlay>`）去掉决策不会使用的工具和工作区上下文。厂商 `acp` profile 会随每次请求下发 24 个工具 schema、工作区指令、skill 目录和运行时样板，合计约 19 KB / 请求，而决策提示词明确禁止调用工具；overlay 不改动观察池、开仓闸门、提示词、schema、校验与下单路径。overlay 会以内容寻址文件名写入 `$DSH_HOME/novatrade-deepseek/`，无法写入时仍显式使用厂商 `acp` profile 而不阻塞决策。`NOVATRADE_DEEPSEEK_PROFILE=0` 可关闭 overlay；`NOVATRADE_DEEPSEEK_ENCODING=raw|compact20|compact10` 可实验性调整模型收到的 K 线窗口，默认 `compact60`，本地指标仍使用完整采集数据；`ai-decisions.jsonl` 中的 `analysis-workflow.profile` 字段记录本次实际生效的 profile。
+DeepSeek 策略默认使用已安装的 `acp` profile，并通过 `backend/deepseek_profile.py` 的 overlay（`--profile acp --patch <overlay>`）去掉决策不会使用的工具、工作区上下文和会话持久化。厂商 `acp` profile 会随每次请求下发 24 个工具 schema、工作区指令、skill 目录和运行时样板，合计约 19 KB / 请求，而决策提示词明确禁止调用工具；overlay 不改动观察池、开仓闸门、提示词、schema、校验与下单路径。overlay 会以内容寻址文件名写入 `$DSH_HOME/novatrade-deepseek/`；优化 overlay 无法应用时自动使用只关闭工具与持久化的 safety overlay，只有显式设置 `NOVATRADE_DEEPSEEK_PROFILE=0` 才允许使用原厂 profile。`NOVATRADE_DEEPSEEK_ENCODING=raw|compact20|compact10` 可实验性调整模型收到的 K 线窗口，默认 `compact60`，本地指标仍使用完整采集数据；`ai-decisions.jsonl` 中的 `analysis-workflow.profile` 字段记录本次实际生效的 profile。
 
 事件预筛默认关闭。设置 `NOVATRADE_AI_EVENT_MODE=shadow` 可只记录潜在跳过、不改变模型调用；设置 `NOVATRADE_AI_EVENT_DRIVEN=1` 或 `NOVATRADE_AI_EVENT_MODE=on` 后，首次运行、确认 K 线或关键行情分箱变化、资金/账户/风险/可交易性/路由变化，以及持仓或挂单管理状态都会调用模型；指纹不变时生成服务端安全 hold 并跳过模型，最长连续跳过时间由 `NOVATRADE_AI_EVENT_MAX_SKIP_SECONDS` 控制（默认 900 秒）。模型失败、网关失败、账户或挂单数据未知时不会推进成功指纹。该开关只减少 DeepSeek/Codex 请求和模型 token，当前 REST 行情采集仍按原轮询周期执行。
 

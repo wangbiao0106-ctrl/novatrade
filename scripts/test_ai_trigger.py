@@ -80,6 +80,11 @@ class FingerprintTests(unittest.TestCase):
     def test_account_risk_and_pending_order_changes_are_decision_events(self) -> None:
         baseline = decision_fingerprint(snapshot(), self.config)
         variants = {
+            "daily_order_count": snapshot(account={
+                "authenticated": True, "todayLossCount": 0,
+                "todayAIOrderCount": 1,
+                "pendingOrders": [], "pendingOrdersKnown": True,
+            }),
             "equity": snapshot(account={
                 "authenticated": True, "todayLossCount": 0,
                 "todayAIOrderCount": 0, "equityUSD": 10_000,
@@ -140,6 +145,23 @@ class FingerprintTests(unittest.TestCase):
             )
             self.assertNotEqual(baseline, decision_fingerprint(snapshot(), deepseek_config))
 
+        deepseek_config = AIConfig(
+            enabled=True, mode="shadow", provider="deepseek-harness",
+            allowedInstruments=(BTC,),
+        )
+        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "compact10"}, clear=False):
+            compact = decision_fingerprint(snapshot(), deepseek_config)
+        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "raw"}, clear=False):
+            raw = decision_fingerprint(snapshot(), deepseek_config)
+        self.assertNotEqual(compact, raw)
+
+        codex_config = AIConfig(enabled=True, mode="shadow", provider="codex", allowedInstruments=(BTC,))
+        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "compact10", "NOVATRADE_DEEPSEEK_PROFILE": "stock"}, clear=False):
+            codex_compact = decision_fingerprint(snapshot(), codex_config)
+        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "raw", "NOVATRADE_DEEPSEEK_PROFILE": "optimized"}, clear=False):
+            codex_raw = decision_fingerprint(snapshot(), codex_config)
+        self.assertEqual(codex_compact, codex_raw)
+
     def test_managed_and_data_quality_states_are_fail_closed(self) -> None:
         self.assertFalse(managed_state(snapshot()))
         self.assertTrue(managed_state(snapshot(account={
@@ -172,6 +194,30 @@ class _CountingRunner:
         if self.fail:
             raise RuntimeError("runner unavailable")
         return AIDecision.hold(current.snapshotId, "no setup")
+
+
+class _RejectingRunner(_CountingRunner):
+    async def run(self, current: AISnapshot, config: AIConfig) -> AIDecision:
+        self.calls += 1
+        valid_until = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+        return AIDecision(
+            schemaVersion=1,
+            decisionId=f"open-{self.calls}",
+            snapshotId=current.snapshotId,
+            action="open",
+            instrumentID=BTC,
+            direction="long",
+            orderType="market",
+            stopLossPrice=99,
+            takeProfitPrice=103,
+            winRate=.6,
+            riskRewardRatio=2,
+            leverage=1,
+            confidence=.8,
+            validUntil=valid_until,
+            reasonCode="candidate",
+            reason="candidate",
+        )
 
 
 class WorkerEventDrivenTests(unittest.TestCase):
@@ -224,6 +270,24 @@ class WorkerEventDrivenTests(unittest.TestCase):
         calls, fingerprint = asyncio.run(run())
         self.assertEqual(calls, 2)
         self.assertIsNone(fingerprint)
+
+    def test_policy_rejection_advances_fingerprint_and_does_not_repeat_static_call(self) -> None:
+        async def run() -> tuple[int, str | None]:
+            runner = _RejectingRunner()
+            config = AIConfig(
+                enabled=True, mode="shadow", allowedInstruments=(BTC,), allowOpen=False,
+            )
+            with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"NOVATRADE_AI_EVENT_DRIVEN": "1"}, clear=False):
+                worker = AIWorker(config=config, runner=runner, state_dir=Path(directory))
+                first = await worker.run_once(snapshot())
+                second = await worker.run_once(snapshot(snapshotId="snap-2"))
+                self.assertFalse(first.accepted)
+                self.assertTrue(second.accepted)
+                return runner.calls, worker._last_event_fingerprint
+
+        calls, fingerprint = asyncio.run(run())
+        self.assertEqual(calls, 1)
+        self.assertIsNotNone(fingerprint)
 
     def test_open_position_forces_evaluation_even_when_market_fingerprint_is_same(self) -> None:
         async def run() -> int:

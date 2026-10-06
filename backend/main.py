@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import hashlib
 import hmac
 import json
 import math
@@ -28,14 +30,16 @@ import uvicorn
 import websockets
 
 try:
-    from .ai_policy import parse_time, snapshot_freshness
+    from .ai_policy import _check_protection_geometry, parse_time, snapshot_freshness
     from .ai_schema import AIDecision, AIChatRequest, AIConfig, AISnapshot, SchemaError, normalize_contract_ids
     from .ai_worker import AIWorker, CodexError
+    from .exit_audit import sync_native_protection_exits
     from .order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError
 except ImportError:  # bundled backend/main.py is launched as a script
-    from ai_policy import parse_time, snapshot_freshness
+    from ai_policy import _check_protection_geometry, parse_time, snapshot_freshness
     from ai_schema import AIDecision, AIChatRequest, AIConfig, AISnapshot, SchemaError, normalize_contract_ids
     from ai_worker import AIWorker, CodexError
+    from exit_audit import sync_native_protection_exits
     from order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError
 
 
@@ -63,6 +67,7 @@ PORT = int(os.getenv("NOVATRADE_FASTAPI_PORT", "8787"))
 OKX_REST = os.getenv("OKX_REST_URL", "https://www.okx.com/api/v5").rstrip("/")
 OKX_WS = os.getenv("OKX_WS_URL", "wss://ws.okx.com:8443/ws/v5/business")
 MAX_CANDLES = 300
+AI_SNAPSHOT_MAX_AGE_SECONDS = 90.0
 OKX_API_KEY = os.getenv("OKX_API_KEY", "")
 OKX_SECRET_KEY = os.getenv("OKX_SECRET_KEY", "")
 OKX_PASSPHRASE = os.getenv("OKX_PASSPHRASE", "")
@@ -144,10 +149,56 @@ ai_worker: AIWorker | None = None
 # keep provider config, lifecycle state and audit ledgers independent.
 ai_workers: dict[str, AIWorker] = {}
 order_gateway: OrderGateway | None = None
+native_exit_task: asyncio.Task | None = None
+native_exit_sync_lock = asyncio.Lock()
+
+# The API configuration center owns the two decision providers.  Keep this
+# catalog explicit so the UI can show where a strategy is defined and which
+# runtime/live gates apply without inferring them from a worker's current
+# mutable config.  The source paths are documentation/package metadata only;
+# runtime execution never reads the repository's strategies directory.
+AI_STRATEGY_CATALOG: dict[str, dict[str, Any]] = {
+    "codex": {
+        "packageID": "codex_ai_decision",
+        "sourceOfTruth": "strategies/codex_ai_decision/STRATEGY.md",
+        "runtime": {
+            "handler": "backend.ai_worker.CodexRunner",
+            "decisionEndpoint": "/api/v1/ai/strategies/codex",
+            "eventFingerprint": "market-facts-v1",
+        },
+        "liveGate": {
+            "requiresManualEnable": True,
+            "requiresLiveTradingSwitch": True,
+            "demoMode": "demo-active",
+            "liveMode": "live-armed",
+        },
+    },
+    "deepseek": {
+        "packageID": "deepseek_ai_decision",
+        "sourceOfTruth": "strategies/deepseek_ai_decision/STRATEGY.md",
+        "runtime": {
+            "handler": "backend.ai_worker.DeepSeekHarnessRunner",
+            "decisionEndpoint": "/api/v1/ai/strategies/deepseek",
+            "eventFingerprint": "market-facts-v1",
+        },
+        "liveGate": {
+            "requiresManualEnable": True,
+            "requiresLiveTradingSwitch": True,
+            "demoMode": "demo-active",
+            "liveMode": "live-armed",
+        },
+    },
+}
 
 
 @app.on_event("shutdown")
 async def close_okx_http_client() -> None:
+    global native_exit_task
+    if native_exit_task is not None:
+        native_exit_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await native_exit_task
+        native_exit_task = None
     for worker in {id(item): item for item in ai_workers.values()}.values():
         await worker.stop()
     if ai_worker is not None and "codex" not in ai_workers:
@@ -215,6 +266,38 @@ def _daily_loss_count(rows: list[dict[str, Any]], day: Any) -> int:
         identifiers.add(identifier)
         count += 1
     return count
+
+
+async def _account_bills_today(day: Any, *, limit: int = 100, max_pages: int = 20) -> tuple[list[dict[str, Any]], bool]:
+    """Read enough OKX bill pages to establish the complete UTC-day set.
+
+    OKX returns the newest bills first. A short page or an older-than-today
+    row proves the boundary was reached. If a full page needs another cursor
+    but the cursor is missing/repeated, the result is deliberately marked
+    incomplete so callers cannot mistake a partial loss count for zero.
+    """
+    rows: list[dict[str, Any]] = []
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    for _ in range(max_pages):
+        params: dict[str, str] = {"instType": "SWAP", "limit": str(limit)}
+        if cursor is not None:
+            params["after"] = cursor
+        payload = await okx_private_request("GET", "/account/bills", params=params)
+        page = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(page, list) or not all(isinstance(row, dict) for row in page):
+            raise ValueError("OKX bills response is invalid")
+        rows.extend(page)
+        if len(page) < limit or not page:
+            return rows, True
+        if any(not _bill_is_today(row, day) and as_float(row.get("ts")) > 0 for row in page):
+            return rows, True
+        next_cursor = str(page[-1].get("billId") or page[-1].get("id") or "").strip()
+        if not next_cursor or next_cursor in seen_cursors:
+            return rows, False
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    return rows, False
 
 
 def quote_volume_24h(ticker: dict[str, Any], instrument: dict[str, Any], last: float) -> float:
@@ -400,6 +483,31 @@ def write_state(name: str, value: Any) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
     temporary.replace(path)
+
+
+def append_runtime_event(level: str, message: str, fields: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Append a stable, scan-friendly event to the bounded runtime log."""
+    event: dict[str, Any] = {
+        "timestamp": now_iso(),
+        "level": str(level).lower(),
+        "message": str(message),
+    }
+    if isinstance(fields, dict):
+        event.update(fields)
+    values = read_state("runtime-log.json", [])
+    if not isinstance(values, list):
+        values = []
+    values.append(event)
+    write_state("runtime-log.json", values[-1000:])
+    return event
+
+
+async def _gateway_runtime_sink(value: dict[str, Any]) -> None:
+    append_runtime_event(
+        str(value.get("level") or "info"),
+        str(value.get("message") or value.get("type") or "gateway event"),
+        value,
+    )
 
 
 def runtime_state() -> dict[str, Any]:
@@ -588,14 +696,16 @@ async def account() -> dict[str, Any]:
     today_loss_count = None
     daily_bills_error = None
     daily_bills_retryable = False
+    daily_bills_complete = False
     try:
-        bills = await okx_private_request("GET", "/account/bills", params={"instType": "SWAP", "limit": "100"})
         today = datetime.now(timezone.utc).date()
-        rows = [row for row in bills.get("data", []) if isinstance(row, dict)]
+        rows, daily_bills_complete = await _account_bills_today(today)
+        if not daily_bills_complete:
+            raise ValueError("OKX bills pagination is incomplete")
         today_rows = [row for row in rows if _bill_is_today(row, today)]
         today_pnl = sum(as_float(row.get("pnl")) for row in today_rows)
         today_loss_count = _daily_loss_count(rows, today)
-    except (HTTPException, httpx.HTTPError) as error:
+    except (HTTPException, httpx.HTTPError, ValueError, TypeError) as error:
         daily_bills_error = _ai_collection_error(error)
         daily_bills_retryable = _AIDataCollector._retryable(error)
     return {"mode": "paper" if OKX_DEMO else "live", "profile": OKX_PROFILE, "site": OKX_SITE,
@@ -606,6 +716,7 @@ async def account() -> dict[str, Any]:
                 "dailyBillsAvailable": today_loss_count is not None,
                 "dailyBillsError": daily_bills_error,
                 "dailyBillsRetryable": daily_bills_retryable,
+                "dailyBillsPaginationComplete": daily_bills_complete,
                 "pendingOrdersAvailable": pending_orders is not None,
                 "pendingOrdersError": pending_orders_error,
                 "pendingOrdersRetryable": pending_orders_retryable,
@@ -928,10 +1039,37 @@ async def _gateway_submit(request: dict[str, Any], demo: bool) -> dict[str, Any]
     return await submit_order(request, demo=demo)
 
 
+async def _sync_native_protection_once() -> list[dict[str, Any]]:
+    """Reconcile native OCO exits without delaying account/order requests."""
+    if not private_ready():
+        return []
+    async with native_exit_sync_lock:
+        try:
+            return await sync_native_protection_exits(
+                _get_order_gateway(), demo=OKX_DEMO, private_request=okx_private_request,
+            )
+        except Exception as error:
+            append_runtime_event(
+                "error", "原生 OCO 对账失败：未标记止盈/止损，请检查 OKX 历史接口和凭据",
+                {"type": "native-protection-sync-error", "source": "exchange-native-oco", "error": str(error)},
+            )
+            return []
+
+
+async def _native_protection_loop() -> None:
+    """Low-frequency native exit sync; the persisted audit performs dedupe."""
+    while True:
+        await _sync_native_protection_once()
+        await asyncio.sleep(60)
+
+
 def _get_order_gateway() -> OrderGateway:
     global order_gateway
     if order_gateway is None:
-        order_gateway = OrderGateway(state_dir() / "order-ledger.json", submit=_gateway_submit, lookup=_lookup_order)
+        order_gateway = OrderGateway(
+            state_dir() / "order-ledger.json", submit=_gateway_submit, lookup=_lookup_order,
+            runtime_sink=_gateway_runtime_sink,
+        )
     return order_gateway
 
 
@@ -1194,7 +1332,10 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
             "tradingAvailability": trading_availability,
         },
         dataFreshness={
-            "capturedAt": captured, "maxAgeSeconds": config.decisionIntervalSeconds,
+            # Polling cadence and order-admission freshness are separate
+            # controls. A slower decision interval must not make a snapshot
+            # stale while its model call is still being evaluated.
+            "capturedAt": captured, "maxAgeSeconds": AI_SNAPSHOT_MAX_AGE_SECONDS,
             "collectionStartedAt": collection_started, "collectionCompletedAt": collection_completed,
             "collectionDurationSeconds": round(asyncio.get_running_loop().time() - collection_clock, 3),
             "availability": availability, "errors": collector.errors,
@@ -1202,23 +1343,90 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
     )
 
 
-async def _ai_cancel(decision: AIDecision, *, demo: bool) -> dict[str, Any]:
+def _pending_order_for_cancel(snapshot: AISnapshot, decision: AIDecision) -> dict[str, Any]:
+    account = snapshot.account if isinstance(snapshot.account, dict) else {}
+    current_snapshot = any(key in account for key in ("authenticated", "pendingOrdersKnown")) or (
+        isinstance(snapshot.dataFreshness, dict) and "availability" in snapshot.dataFreshness
+    )
+    if not current_snapshot and "pendingOrdersKnown" not in account:
+        # Compatibility for credential-free callers that predate the account
+        # execution map. Runtime snapshots always carry pendingOrdersKnown.
+        return {}
+    if account.get("pendingOrdersKnown") is not True or not isinstance(account.get("pendingOrders"), list):
+        raise HTTPException(status_code=409, detail="pending order state is unavailable")
+    for row in account["pendingOrders"]:
+        if not isinstance(row, dict):
+            continue
+        order_id = str(row.get("id") or row.get("orderID") or row.get("ordId") or "")
+        if order_id != str(decision.orderID):
+            continue
+        instrument = str(row.get("instrumentID") or row.get("instId") or "")
+        if instrument != str(decision.instrumentID):
+            raise HTTPException(status_code=409, detail="cancel order does not belong to the selected instrument")
+        status = str(row.get("status") or row.get("state") or "").lower()
+        if status not in {"live", "partially_filled", "waiting", "pending", "open", "queued"}:
+            raise HTTPException(status_code=409, detail="cancel order is no longer cancellable")
+        return row
+    raise HTTPException(status_code=409, detail="cancel order is not a current pending order")
+
+
+async def _ai_cancel(decision: AIDecision, snapshot: AISnapshot, *, demo: bool) -> dict[str, Any]:
     if not decision.instrumentID:
         raise HTTPException(status_code=422, detail="cancel requires instrumentID")
     if not decision.orderID:
         raise HTTPException(status_code=422, detail="cancel requires orderID")
-    await okx_private_request("POST", "/trade/cancel-order", body={"instId": decision.instrumentID, "ordId": decision.orderID})
+    current_snapshot = any(key in snapshot.account for key in ("authenticated", "pendingOrdersKnown")) or (
+        isinstance(snapshot.dataFreshness, dict) and "availability" in snapshot.dataFreshness
+    )
+    if current_snapshot:
+        try:
+            snapshot = replace(snapshot, account=await account())
+        except (HTTPException, httpx.HTTPError, ValueError, TypeError) as error:
+            raise HTTPException(status_code=409, detail="无法刷新挂单状态，撤单已拒绝") from error
+    _pending_order_for_cancel(snapshot, decision)
+    gateway = _get_order_gateway()
+    cancel = getattr(gateway, "cancel_order", None)
+    if cancel is not None:
+        await cancel(
+            instrument_id=decision.instrumentID, order_id=decision.orderID, demo=demo,
+            cancel=lambda: okx_private_request(
+                "POST", "/trade/cancel-order",
+                body={"instId": decision.instrumentID, "ordId": decision.orderID},
+            ),
+        )
+    else:
+        # Compatibility for injected test gateways created before the shared
+        # cancellation path existed. The snapshot ownership check above still
+        # applies in every path.
+        await okx_private_request("POST", "/trade/cancel-order", body={"instId": decision.instrumentID, "ordId": decision.orderID})
     return {"action": "cancel", "orderID": decision.orderID, "instrumentID": decision.instrumentID, "status": "cancelled", "submittedAt": now_iso()}
 
 
 async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: str = "codex") -> dict[str, Any]:
     """Apply current account/risk state immediately before submitting an AI intent."""
     if decision.action == "cancel":
-        return await _ai_cancel(decision, demo=OKX_DEMO)
+        return await _ai_cancel(decision, snapshot, demo=OKX_DEMO)
     if not decision.instrumentID or decision.direction not in {"long", "short"}:
         raise HTTPException(status_code=422, detail="AI action requires an instrument and direction")
-    if decision.action == "open" and (snapshot.risk.get("killSwitch") or as_float(snapshot.risk.get("dailyPnLPercent")) <= -5):
-        raise HTTPException(status_code=409, detail="risk kill switch is active")
+    if decision.action == "open":
+        account = snapshot.account if isinstance(snapshot.account, dict) else {}
+        current_snapshot = any(key in account for key in ("authenticated", "pendingOrdersKnown")) or (
+            isinstance(snapshot.dataFreshness, dict) and "availability" in snapshot.dataFreshness
+        )
+        if current_snapshot:
+            try:
+                snapshot = replace(snapshot, account=await account(), risk=await risk())
+            except (HTTPException, httpx.HTTPError, ValueError, TypeError) as error:
+                raise HTTPException(status_code=409, detail="无法刷新账户或风险状态，开仓已拒绝") from error
+            account = snapshot.account if isinstance(snapshot.account, dict) else {}
+            risk_quality = snapshot.risk.get("dataQuality") if isinstance(snapshot.risk, dict) else None
+            daily_pnl = as_float(snapshot.risk.get("dailyPnLPercent"), math.nan) if isinstance(snapshot.risk, dict) else math.nan
+            if not isinstance(risk_quality, dict) or risk_quality.get("equitySource") != "okx" or risk_quality.get("accountRefreshError") or risk_quality.get("accountRefreshRetryable"):
+                raise HTTPException(status_code=409, detail="risk account refresh is unavailable")
+            if not isinstance(snapshot.risk.get("killSwitch"), bool) or not math.isfinite(daily_pnl):
+                raise HTTPException(status_code=409, detail="risk state is unavailable")
+            if snapshot.risk.get("killSwitch") or daily_pnl <= -5:
+                raise HTTPException(status_code=409, detail="risk kill switch is active")
     worker = ai_workers.get(strategy_id) or (ai_worker if strategy_id == "codex" else None)
     config = worker.config if worker is not None else AIConfig()
     entry_deadline = None
@@ -1250,8 +1458,17 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
     # or setting leverage. The public price feed alone cannot authorize it.
     spec = await _instrument_spec(decision.instrumentID)
     last = await _ticker_last(decision.instrumentID)
+    if decision.action == "open":
+        entry_price = decision.limitPrice if decision.orderType == "limit" else last
+        geometry_error = _check_protection_geometry(
+            instrument_id=decision.instrumentID, direction=decision.direction,
+            entry=entry_price, stop_loss=decision.stopLossPrice,
+            take_profit=decision.takeProfitPrice,
+        )
+        if geometry_error:
+            raise HTTPException(status_code=422, detail=geometry_error)
     equity = as_float(snapshot.account.get("availableEquityUSD"), 0)
-    if equity <= 0:
+    if decision.action == "open" and equity <= 0:
         raise HTTPException(status_code=409, detail="available account equity is unavailable")
     reduce_only = decision.action == "close"
     leverage = as_float(decision.leverage, 0) if not reduce_only else 1
@@ -1265,15 +1482,36 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
         # depend on an entry-only risk budget. Fall back to the configured
         # margin size if a position is not present in the snapshot.
         position_quantity = 0.0
-        for position in snapshot.account.get("positions", []) if isinstance(snapshot.account.get("positions"), list) else []:
-            if isinstance(position, dict) and position.get("instrumentID") == decision.instrumentID:
-                position_quantity = abs(as_float(position.get("quantity")))
-                mode = str(position.get("marginMode") or "").lower()
-                if mode in {"cross", "isolated"}:
-                    position_margin_mode = mode
-                break
-        risk_percent = as_float(decision.riskBudgetPercent)
-        target_notional = equity * min(risk_percent, 100) / 100 if risk_percent > 0 else config.marginPerOrderUSD
+        matching_positions: list[dict[str, Any]] = []
+        positions = snapshot.account.get("positions", []) if isinstance(snapshot.account.get("positions"), list) else []
+        for position in positions:
+            if not isinstance(position, dict) or position.get("instrumentID") != decision.instrumentID:
+                continue
+            position_side = str(position.get("side") or position.get("positionSide") or position.get("posSide") or "net").lower()
+            if position_side in {"long", "short"} and position_side != decision.direction:
+                continue
+            matching_positions.append(position)
+        current_snapshot = any(key in snapshot.account for key in ("authenticated", "pendingOrdersKnown")) or (
+            isinstance(snapshot.dataFreshness, dict) and "availability" in snapshot.dataFreshness
+        )
+        if len(matching_positions) != 1 and current_snapshot:
+            raise HTTPException(status_code=409, detail="当前合约没有可按方向核验的持仓")
+        position = matching_positions[0] if matching_positions else {}
+        position_quantity = abs(as_float(position.get("quantity")))
+        if position_quantity <= 0 and current_snapshot:
+            raise HTTPException(status_code=409, detail="当前持仓数量不可用")
+        position_side = str(position.get("side") or position.get("positionSide") or position.get("posSide") or "net").lower()
+        if current_snapshot and position_side not in {"net", "long", "short"}:
+            raise HTTPException(status_code=409, detail="当前持仓方向不可用")
+        if position_side in {"long", "short"}:
+            position_margin_mode = str(position.get("marginMode") or "").lower()
+            if position_margin_mode not in {"cross", "isolated"}:
+                position_margin_mode = "isolated"
+        else:
+            position_margin_mode = str(position.get("marginMode") or "").lower()
+            if position_margin_mode not in {"cross", "isolated"}:
+                position_margin_mode = "isolated"
+        target_notional = max(config.marginPerOrderUSD, 1.0)
     side = "buy" if decision.direction == "long" else "sell"
     if reduce_only:
         side = "sell" if decision.direction == "long" else "buy"
@@ -1286,7 +1524,16 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
         # closed safely while new AI exposure stays isolated.
         "marginMode": position_margin_mode if reduce_only else "isolated",
         "reduceOnly": reduce_only, "source": "ai",
-        "clientOrderID": ("ai" + decision.decisionId.replace("-", ""))[:32],
+        "decisionID": decision.decisionId,
+        "strategyID": strategy_id,
+        # Include strategy and action in the deterministic id. Providers can
+        # legitimately emit the same decisionId, while an exit must never be
+        # mistaken for a retried entry by the shared gateway ledger.
+        "clientOrderID": (
+            "ai" + hashlib.sha256(
+                f"{strategy_id}:{config.provider}:{snapshot.snapshotId}:{decision.action}:{decision.decisionId}".encode("utf-8")
+            ).hexdigest()
+        )[:32],
     }
     if not reduce_only:
         request["leverage"] = leverage
@@ -1294,6 +1541,8 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
         request["_aiEntryDeadline"] = entry_deadline
     elif position_quantity > 0:
         request["quantity"] = position_quantity
+        if position_side in {"long", "short"}:
+            request["positionSide"] = position_side
     try:
         return await _get_order_gateway().submit_intent(
             request, demo=demo, instrument=spec, price=last,
@@ -1327,9 +1576,13 @@ async def _ensure_ai_worker(strategy_id: str = "codex") -> AIWorker:
             if config_path.exists():
                 config = None
             else:
-                # Keep every risk/timing/observation setting identical. The
-                # provider is the only field that changes in the clone.
-                config = codex.config.clone_for_provider("deepseek-harness")
+                # Copy risk/timing/observation settings, but keep a newly
+                # discovered provider disabled until a human explicitly arms
+                # it. Cloning Codex's enabled/live mode would start a second
+                # entry worker on first launch without a separate opt-in.
+                values = codex.config.to_dict()
+                values.update({"provider": "deepseek-harness", "enabled": False, "mode": "disabled"})
+                config = AIConfig.from_dict(values)
             existing = AIWorker(
                 snapshot_provider=lambda: _ai_snapshot("deepseek"),
                 order_gateway=lambda decision, snapshot: _ai_execute(decision, snapshot, "deepseek"),
@@ -1348,6 +1601,7 @@ async def _ensure_ai_worker(strategy_id: str = "codex") -> AIWorker:
 
 @app.on_event("startup")
 async def start_ai_worker() -> None:
+    global native_exit_task
     await _ensure_ai_worker("codex")
     # Initialize the cloned strategy on first launch. A persisted DeepSeek
     # file always wins on later launches, so user changes are preserved.
@@ -1355,6 +1609,8 @@ async def start_ai_worker() -> None:
     if private_ready():
         with contextlib.suppress(Exception):
             await _get_order_gateway().reconcile(demo=OKX_DEMO)
+    if native_exit_task is None or native_exit_task.done():
+        native_exit_task = asyncio.create_task(_native_protection_loop())
 
 
 @app.get("/api/v1/live/trading-status")
@@ -1422,12 +1678,17 @@ async def ai_strategies() -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for strategy_id in ("codex", "deepseek"):
         worker = await _ensure_ai_worker(strategy_id)
+        catalog = AI_STRATEGY_CATALOG[strategy_id]
         result.append({
             "id": strategy_id,
             "name": "DeepSeek Harness AI 策略" if strategy_id == "deepseek" else "Codex AI 策略",
             "provider": worker.config.provider,
             "config": worker.get_config(),
             "status": worker.get_status(),
+            "package": {"id": catalog["packageID"], "lifecycle": "candidate"},
+            "source": {"ofTruth": catalog["sourceOfTruth"]},
+            "runtime": dict(catalog["runtime"]),
+            "liveGate": dict(catalog["liveGate"]),
         })
     return result
 
@@ -1625,9 +1886,21 @@ async def disable_strategy_ai(strategy_id: str) -> dict[str, Any]:
 
 @app.post("/api/v1/ai/flatten")
 async def flatten_ai(strategy_id: str = "codex") -> dict[str, Any]:
-    """Cancel pending orders and close current positions using reduce-only orders."""
-    worker = await _ensure_ai_worker(strategy_id)
-    await worker.disable()
+    """Flatten the whole OKX account and stop every AI entry worker.
+
+    Orders and positions currently have no reliable strategy ownership field,
+    so a strategy-specific flatten cannot safely target only one provider.
+    The endpoint therefore has explicit account-wide semantics.
+    """
+    _strategy_id(strategy_id)
+    workers = {id(item): item for item in ai_workers.values()}
+    if ai_worker is not None:
+        workers[id(ai_worker)] = ai_worker
+    if not workers:
+        await _ensure_ai_worker(strategy_id)
+        workers = {id(item): item for item in ai_workers.values()}
+    for worker in workers.values():
+        await worker.disable()
     if not private_ready():
         raise HTTPException(status_code=503, detail="OKX private REST credentials are not configured")
     if not OKX_DEMO and not read_state("live-trading.json", {}).get("enabled", False):
@@ -1644,21 +1917,29 @@ async def flatten_ai(strategy_id: str = "codex") -> dict[str, Any]:
     closed: list[dict[str, Any]] = []
     positions_payload = await okx_private_request("GET", "/account/positions", params={"instType": "SWAP"})
     for row in positions_payload.get("data", []):
-        quantity = as_float(row.get("pos"))
+        quantity = abs(as_float(row.get("pos")))
         instrument_id = str(row.get("instId") or "")
         if quantity <= 0 or not instrument_id:
             continue
         spec = await _instrument_spec(instrument_id)
         mark = as_float(row.get("markPx"), as_float(row.get("avgPx")))
-        side = "sell" if str(row.get("posSide") or "net").lower() == "long" else "buy"
-        if str(row.get("posSide") or "net").lower() == "net":
+        position_side = str(row.get("posSide") or "net").lower()
+        side = "sell" if position_side == "long" else "buy"
+        if position_side == "net":
             side = "sell" if str(row.get("side") or "long").lower() == "long" else "buy"
+        request = {
+            "instrumentID": instrument_id, "side": side, "orderType": "market",
+            "quantity": quantity, "marginMode": str(row.get("mgnMode") or "cross"),
+            "reduceOnly": True,
+        }
+        if position_side in {"long", "short"}:
+            request["positionSide"] = position_side
         try:
-            result = await _get_order_gateway().submit_intent({"instrumentID": instrument_id, "side": side, "orderType": "market", "quantity": quantity, "marginMode": str(row.get("mgnMode") or "cross"), "reduceOnly": True}, demo=OKX_DEMO, instrument=spec, price=mark, force_reduce_only=True)
+            result = await _get_order_gateway().submit_intent(request, demo=OKX_DEMO, instrument=spec, price=mark, force_reduce_only=True)
             closed.append(result)
         except (OrderGatewayError, HTTPException) as error:
             await _get_order_gateway().record_audit({"type": "flatten-error", "instrumentID": instrument_id, "error": str(error)})
-    return {"cancelledOrderIDs": cancelled, "closed": closed, "updatedAt": now_iso()}
+    return {"strategyID": strategy_id, "scope": "account", "cancelledOrderIDs": cancelled, "closed": closed, "updatedAt": now_iso()}
 
 
 @app.post("/api/v1/ai/strategies/{strategy_id}/flatten")

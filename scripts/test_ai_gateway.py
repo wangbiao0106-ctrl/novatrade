@@ -778,6 +778,18 @@ class AIGatewayTests(unittest.TestCase):
             raw = _prompt_snapshot(snapshot)
         self.assertIsInstance(raw["candles"]["BTC-USDT-SWAP/5m"], list)
 
+    def test_deepseek_encoding_does_not_change_codex_prompt(self):
+        snapshot = self.grouped_snapshot(count=1)
+        codex = AIConfig(provider="codex")
+        deepseek = AIConfig(provider="deepseek-harness")
+        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "compact10"}, clear=False):
+            codex_prompt = CodexRunner._decision_prompt(snapshot, codex)
+            deepseek_prompt = CodexRunner._decision_prompt(snapshot, deepseek)
+        codex_snapshot = json.loads(codex_prompt.split("SNAPSHOT:\n", 1)[1])
+        deepseek_snapshot = json.loads(deepseek_prompt.split("SNAPSHOT:\n", 1)[1])
+        self.assertEqual(len(codex_snapshot["candles"]["COIN0-USDT-SWAP/5m"]["rows"]), 60)
+        self.assertEqual(len(deepseek_snapshot["candles"]["COIN0-USDT-SWAP/5m"]["rows"]), 11)
+
     def test_production_runner_rejects_missing_duplicate_extra_and_omitted_rows(self):
         valid = self.decision(action="hold", instrumentID=None, assessments=[self.assessment()])
         variants = [
@@ -1672,6 +1684,7 @@ class AIGatewayTests(unittest.TestCase):
         self.assertNotIn("unexpected-metadata-must-not-be-persisted", serialized)
         self.assertEqual(event["model"], "gpt-6-luna")
         self.assertEqual(event["reasoningEffort"], "medium")
+        self.assertEqual(quality["promptEncoding"], "compact60")
 
     def test_codex_runner_reports_timeout(self):
         async def run():

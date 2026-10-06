@@ -188,6 +188,9 @@ def _account_view(account: Mapping[str, Any]) -> dict[str, Any]:
         "totalAssetValueUSD": account.get("totalAssetValueUSD"),
         "todayPnLUSD": account.get("todayPnLUSD"),
         "todayLossCount": account.get("todayLossCount"),
+        # The daily order counter is an entry gate.  Leaving it out means a
+        # static market snapshot can be prescreened forever after the quota is
+        # reached, even though the admissible action has changed.
         "todayAIOrderCount": account.get("todayAIOrderCount"),
         "pendingOrdersKnown": account.get("pendingOrdersKnown"),
         "positions": sorted(position_view, key=lambda item: (str(item.get("instrumentID")), str(item.get("id")))),
@@ -234,6 +237,19 @@ def decision_fingerprint(snapshot: AISnapshot, config: AIConfig) -> str:
     facts_payload = market_facts(snapshot)
     methodology = facts_payload.get("methodology") if isinstance(facts_payload, Mapping) else None
     structure_hash = sha256(json.dumps(methodology, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    route = {
+        "model": os.getenv("NOVATRADE_DEEPSEEK_MODEL", "deepseek-v4-pro")
+        if config.provider == "deepseek-harness" else config.routineModel,
+        "reasoningEffort": os.getenv("NOVATRADE_DEEPSEEK_REASONING_EFFORT", "low")
+        if config.provider == "deepseek-harness" else config.routineReasoningEffort,
+    }
+    if config.provider == "deepseek-harness":
+        # DeepSeek-only prompt controls must not perturb Codex/GPT event
+        # semantics or trigger extra model calls in the other worker.
+        route.update({
+            "profile": os.getenv("NOVATRADE_DEEPSEEK_PROFILE", "optimized").strip().lower(),
+            "encoding": os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60").strip().lower(),
+        })
     payload = {
         "version": FINGERPRINT_VERSION,
         "observedInstruments": snapshot.observed_instruments(),
@@ -257,13 +273,7 @@ def decision_fingerprint(snapshot: AISnapshot, config: AIConfig) -> str:
             "maxLeverage": config.maxLeverage,
             "cooldownSeconds": config.cooldownSeconds,
         },
-        "route": {
-            "model": os.getenv("NOVATRADE_DEEPSEEK_MODEL", "deepseek-v4-pro")
-            if config.provider == "deepseek-harness" else config.routineModel,
-            "reasoningEffort": os.getenv("NOVATRADE_DEEPSEEK_REASONING_EFFORT", "low")
-            if config.provider == "deepseek-harness" else config.routineReasoningEffort,
-            "profile": os.getenv("NOVATRADE_DEEPSEEK_PROFILE", "optimized").strip().lower(),
-        },
+        "route": route,
         "structure": {
             "version": ai.get("structureVersion") or "market-facts-v1",
             "rulesHash": ai.get("structureRulesHash") or structure_hash,

@@ -99,11 +99,13 @@ class OrderGateway:
         *,
         submit: Callable[[dict[str, Any], bool], Awaitable[dict[str, Any]]],
         lookup: Callable[[str, str, bool], Awaitable[dict[str, Any] | None]] | None = None,
+        runtime_sink: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         limits: dict[str, float] | None = None,
     ) -> None:
         self.state_path = state_path
         self.submit = submit
         self.lookup = lookup
+        self.runtime_sink = runtime_sink
         self.limits = {
             "maxInstrumentNotional": 25_000.0,
             "maxTotalNotional": 100_000.0,
@@ -127,6 +129,17 @@ class OrderGateway:
         temporary = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
         temporary.write_text(json.dumps(self._state, ensure_ascii=False), encoding="utf-8")
         temporary.replace(self.state_path)
+
+    async def _emit_runtime(self, value: dict[str, Any]) -> None:
+        """Best-effort human-readable runtime log; never block order state."""
+        if self.runtime_sink is None:
+            return
+        try:
+            await self.runtime_sink(value)
+        except Exception:
+            # The durable gateway audit is authoritative. A log-file failure
+            # must not turn an accepted exchange order into an unknown result.
+            return
 
     @property
     def reservations(self) -> dict[str, dict[str, Any]]:
@@ -193,6 +206,32 @@ class OrderGateway:
                 return True
         return False
 
+    def _prune_expired_entries(self, now: datetime) -> None:
+        """Drop terminal AI entry reservations after the shared cooldown.
+
+        Accepted orders remain in the ledger long enough to enforce the
+        cross-provider cooldown. Keeping them forever would make
+        ``maxTotalNotional`` eventually reject every new entry even after the
+        old order is no longer relevant to that protection window.
+        Unknown submissions stay until reconciliation because they may still
+        have reached the exchange.
+        """
+        cutoff = now.timestamp() - AI_ENTRY_COOLDOWN_SECONDS
+        for key, reservation in list(self.reservations.items()):
+            if not isinstance(reservation, dict) or key.startswith("unresolved-"):
+                continue
+            if reservation.get("source") != "ai" or reservation.get("reduceOnly"):
+                continue
+            created_at = reservation.get("createdAt")
+            if not isinstance(created_at, str):
+                continue
+            try:
+                timestamp = datetime.fromisoformat(created_at.replace("Z", "+00:00")).timestamp()
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if timestamp < cutoff:
+                self.reservations.pop(key, None)
+
     def _record_ai_order(self, reservation: dict[str, Any], *, day: str | None = None) -> None:
         if reservation.get("source") != "ai" or reservation.get("reduceOnly") or reservation.get("dailyCountRecorded"):
             return
@@ -247,6 +286,8 @@ class OrderGateway:
     ) -> dict[str, Any]:
         """Convert a validated intent into one exchange order."""
         async with self._lock:
+            now = datetime.now(timezone.utc)
+            self._prune_expired_entries(now)
             instrument_id = str(request.get("instrumentID") or "")
             if instrument_id != instrument.instrumentID:
                 raise OrderGatewayError("instrument specification does not match request")
@@ -283,7 +324,11 @@ class OrderGateway:
                     raise OrderGatewayError("order margin exceeds configured per-order margin")
             if not reduce_only and notional > self.limits["maxInstrumentNotional"]:
                 raise OrderGatewayError("instrument notional limit exceeded")
-            current_total = sum(_number(row.get("notional", 0), "reservation notional") for row in self.reservations.values())
+            current_total = sum(
+                _number(row.get("notional", 0), "reservation notional")
+                for row in self.reservations.values()
+                if isinstance(row, dict)
+            )
             if not reduce_only and current_total + notional > self.limits["maxTotalNotional"]:
                 raise OrderGatewayError("total notional limit exceeded")
             if not reduce_only and available_equity is not None and available_equity > 0:
@@ -297,7 +342,6 @@ class OrderGateway:
                 raise OrderGatewayError("clientOrderID must be 1-32 ASCII letters or digits")
             if client_id in self._state.setdefault("clientOrderIDs", {}):
                 return self._state["clientOrderIDs"][client_id]
-            now = datetime.now(timezone.utc)
             source = str(request.get("source") or "manual")
             if source == "ai" and not reduce_only and self._recent_ai_entry(instrument_id, now, client_id):
                 raise OrderGatewayError("AI 同一合约 12 小时内不允许重复开仓")
@@ -316,6 +360,13 @@ class OrderGateway:
             token = "unresolved-" + client_id
             previous_reservation = self.reservations.get(token)
             reservation = {"instrumentID": instrument_id, "notional": notional, "clientOrderID": client_id, "demo": demo, "inFlight": True, "createdAt": _now(), "createdDay": _utc_day(now), "reduceOnly": reduce_only, "source": source, "leverage": leverage, "dailyCountRecorded": False}
+            reservation.update({
+                "decisionID": request.get("decisionID") or request.get("decisionId"),
+                "strategyID": request.get("strategyID") or request.get("strategyId"),
+                "takeProfitTriggerPrice": instrument.aligned_price(request.get("takeProfitTriggerPrice")),
+                "stopLossTriggerPrice": instrument.aligned_price(request.get("stopLossTriggerPrice")),
+                "triggerPriceType": "mark" if request.get("takeProfitTriggerPrice") is not None or request.get("stopLossTriggerPrice") is not None else None,
+            })
             if not reduce_only:
                 self.reservations[token] = reservation
             self._state["updatedAt"] = _now()
@@ -362,16 +413,37 @@ class OrderGateway:
                 # check.
                 self._record_ai_order(reservation)
                 self.reservations[order_id] = {**reservation, "orderID": order_id, "inFlight": False}
-            output = {**result, "clientOrderID": client_id, "quantity": quantity, "notional": notional}
+            output = {**result, "clientOrderID": client_id, "quantity": quantity, "notional": notional,
+                      "decisionID": reservation.get("decisionID"), "strategyID": reservation.get("strategyID"),
+                      "takeProfitTriggerPrice": reservation.get("takeProfitTriggerPrice"),
+                      "stopLossTriggerPrice": reservation.get("stopLossTriggerPrice"),
+                      "triggerPriceType": reservation.get("triggerPriceType")}
             output["leverage"] = leverage
             output["marginUSD"] = notional / leverage
             self._state["clientOrderIDs"][client_id] = output
             if not reduce_only:
                 submission_times.append(now.timestamp())
                 self._state["submissionTimes"] = submission_times[-int(self.limits["maxOrdersPerHour"]):]
-            self._state.setdefault("audit", []).append({"at": _now(), "type": "submitted", "order": output})
+            reason = "AI 开仓已提交，原生 OCO 已挂载" if source == "ai" and not reduce_only else "订单已提交"
+            output["message"] = (
+                f"{reason} instrument={instrument_id} orderID={order_id} clientOrderID={client_id} "
+                f"tp={output.get('takeProfitTriggerPrice') or 'none'} "
+                f"sl={output.get('stopLossTriggerPrice') or 'none'} "
+                f"trigger={output.get('triggerPriceType') or 'none'}"
+            )
+            self._state.setdefault("audit", []).append({"at": _now(), "type": "submitted", "reason": "entry-submitted" if not reduce_only else "close-submitted", "order": output})
             self._state["audit"] = self._state["audit"][-1000:]
             self._write()
+            await self._emit_runtime({
+                "level": "info", "type": "order-submitted",
+                "reason": "entry-submitted" if not reduce_only else "close-submitted",
+                "message": output["message"], "instrumentID": instrument_id,
+                "orderID": order_id, "clientOrderID": client_id,
+                "decisionID": output.get("decisionID"), "strategyID": output.get("strategyID"),
+                "takeProfitTriggerPrice": output.get("takeProfitTriggerPrice"),
+                "stopLossTriggerPrice": output.get("stopLossTriggerPrice"),
+                "triggerPriceType": output.get("triggerPriceType"),
+            })
             return output
 
     async def record_audit(self, value: dict[str, Any]) -> None:
@@ -379,6 +451,67 @@ class OrderGateway:
             self._state.setdefault("audit", []).append({"at": _now(), **value})
             self._state["audit"] = self._state["audit"][-1000:]
             self._write()
+
+    async def tracked_entries(self, *, demo: bool) -> list[dict[str, Any]]:
+        async with self._lock:
+            return [dict(row) for row in self.reservations.values()
+                    if isinstance(row, dict) and row.get("demo") == demo
+                    and not row.get("reduceOnly") and row.get("orderID")]
+
+    async def record_event(self, value: dict[str, Any], *, event_key: str) -> bool:
+        async with self._lock:
+            keys = self._state.setdefault("auditEventKeys", [])
+            if not isinstance(keys, list):
+                keys = []
+            if event_key in keys:
+                return False
+            keys.append(event_key)
+            self._state["auditEventKeys"] = keys[-2000:]
+            self._state.setdefault("audit", []).append({"at": _now(), **value})
+            self._state["audit"] = self._state["audit"][-1000:]
+            self._state["updatedAt"] = _now()
+            self._write()
+            await self._emit_runtime(value)
+            return True
+
+    async def cancel_order(
+        self,
+        *,
+        instrument_id: str,
+        order_id: str,
+        demo: bool,
+        cancel: Callable[[], Awaitable[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """Serialize a validated cancel and release its local reservation.
+
+        The caller owns exchange-side pending-order/contract validation. This
+        method owns the same lock and audit ledger as entry submission so a
+        concurrent retry cannot cancel and reserve the same order out of
+        order.
+        """
+        if not instrument_id or not order_id:
+            raise OrderGatewayError("instrumentID and orderID are required")
+        async with self._lock:
+            reservation = self.reservations.get(order_id)
+            if reservation is not None:
+                if str(reservation.get("instrumentID")) != instrument_id:
+                    raise OrderGatewayError("order reservation does not match instrument")
+                if bool(reservation.get("demo")) != bool(demo):
+                    raise OrderGatewayError("order mode does not match reservation")
+            result = await cancel()
+            if reservation is not None:
+                self.reservations.pop(order_id, None)
+                client_id = reservation.get("clientOrderID")
+                if client_id:
+                    self._state.setdefault("clientOrderIDs", {}).pop(str(client_id), None)
+            self._state.setdefault("audit", []).append({
+                "at": _now(), "type": "cancelled", "orderID": order_id,
+                "instrumentID": instrument_id, "demo": demo,
+            })
+            self._state["audit"] = self._state["audit"][-1000:]
+            self._state["updatedAt"] = _now()
+            self._write()
+            return result
 
     async def audit(self) -> list[dict[str, Any]]:
         async with self._lock:

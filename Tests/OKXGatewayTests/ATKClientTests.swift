@@ -42,12 +42,55 @@ func surfacesATKCommandFailures() async throws {
 @Test
 func parsesClosedSwapPositionHistoryForNativeExitSettlement() async throws {
     let runner = StubATKRunner(outputs: [
-        "account positions-history --instType SWAP --instId BTC-USDT-SWAP --limit 100 --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","posId":"position-7","realizedPnl":"-12.5","uTime":"1700000000000"}]"#)
+        "account positions-history --instType SWAP --instId BTC-USDT-SWAP --limit 100 --json": ATKCommandResult(stdout: #"[{"instId":"BTC-USDT-SWAP","posId":"position-7","realizedPnl":"-12.5","uTime":"1700000000000","openAvgPx":"100","closeAvgPx":"95","closeTotalPos":"2","closeType":"tp"}]"#)
     ])
     let history = try await ATKClient(runner: runner).closedSwapPositions(instrumentID: "BTC-USDT-SWAP")
     #expect(history.count == 1)
     #expect(history[0].positionID == "position-7")
     #expect(history[0].realizedPnL == Decimal(string: "-12.5"))
+    #expect(history[0].entryPrice == 100)
+    #expect(history[0].exitPrice == 95)
+    #expect(history[0].closedQuantity == 2)
+    #expect(history[0].closeType == "tp")
+}
+
+@Test
+func parsesNativeProtectionExitHistoryAndChildOrder() async throws {
+    let runner = StubATKRunner(outputs: [
+        "--demo swap algo orders --history --ordType oco --instId FIL-USDT-SWAP --limit 100 --json": ATKCommandResult(stdout: #"[{"algoId":"algo-7","instId":"FIL-USDT-SWAP","state":"effective","actualSide":"tp","actualSz":"12987","tpTriggerPx":"1.1899","slTriggerPx":"1.1439","tpTriggerPxType":"mark","triggerTime":"1791307820000","attachAlgoClOrdId":"entry-client-7","posId":"position-7","ordIdList":["child-7"]}]"#)
+    ])
+
+    let exits = try await ATKClient(runner: runner).nativeProtectionExitHistory(instrumentID: "FIL-USDT-SWAP", demo: true)
+    let exit = try #require(exits.first)
+    #expect(exit.algorithmID == "algo-7")
+    #expect(exit.instrumentID == "FIL-USDT-SWAP")
+    #expect(exit.state == "effective")
+    #expect(exit.actualSide == "tp")
+    #expect(exit.actualQuantity == 12987)
+    #expect(exit.triggerPrice == Decimal(string: "1.1899"))
+    #expect(exit.triggerPriceType == "mark")
+    #expect(exit.triggerTime == Date(timeIntervalSince1970: 1_791_307_820))
+    #expect(exit.attachedClientOrderID == "entry-client-7")
+    #expect(exit.positionID == "position-7")
+    #expect(exit.closingOrderIDs == ["child-7"])
+    #expect(exit.stopLossTriggerPrice == Decimal(string: "1.1439"))
+}
+
+@Test
+func nativeProtectionHistoryRejectsMismatchedInstrumentOrMissingAlgorithmID() async throws {
+    let wrongInstrument = StubATKRunner(outputs: [
+        "--live swap algo orders --history --ordType oco --instId FIL-USDT-SWAP --limit 100 --json": ATKCommandResult(stdout: #"[{"algoId":"algo-7","instId":"BTC-USDT-SWAP","state":"effective","actualSide":"tp"}]"#)
+    ])
+    await #expect(throws: ATKError.invalidJSON("原生保护单历史缺少有效合约、算法单标识或状态")) {
+        _ = try await ATKClient(runner: wrongInstrument).nativeProtectionExitHistory(instrumentID: "FIL-USDT-SWAP", demo: false)
+    }
+
+    let missingAlgorithm = StubATKRunner(outputs: [
+        "--live swap algo orders --history --ordType oco --instId FIL-USDT-SWAP --limit 100 --json": ATKCommandResult(stdout: #"[{"instId":"FIL-USDT-SWAP","state":"effective","actualSide":"sl"}]"#)
+    ])
+    await #expect(throws: ATKError.invalidJSON("原生保护单历史缺少有效合约、算法单标识或状态")) {
+        _ = try await ATKClient(runner: missingAlgorithm).nativeProtectionExitHistory(instrumentID: "FIL-USDT-SWAP", demo: false)
+    }
 }
 
 @Test
@@ -105,6 +148,24 @@ func resolvesSwapOrderByClientIDAndTreatsOnlyExplicitNotFoundAsAbsent() async th
     #expect(found?.id == "remote-1")
     let absent = try await client.swapOrder(instrumentID: "BTC-USDT-SWAP", clientOrderID: "missing", demo: true)
     #expect(absent == nil)
+}
+
+@Test
+func resolvesSwapOrderByRemoteOrderIDAndRejectsMismatchedResponse() async throws {
+    let runner = StubATKRunner(outputs: [
+        "--demo swap get --instId FIL-USDT-SWAP --ordId child-7 --json": ATKCommandResult(stdout: #"[{"instId":"FIL-USDT-SWAP","ordId":"child-7","side":"buy","state":"filled","sz":"12987","avgPx":"1.19517","accFillSz":"12987","cTime":"1791307820000"}]"#),
+        "--demo swap get --instId FIL-USDT-SWAP --ordId missing --json": ATKCommandResult(stdout: #"{"code":"51603","msg":"Order does not exist"}"#),
+        "--demo swap get --instId FIL-USDT-SWAP --ordId wrong --json": ATKCommandResult(stdout: #"[{"instId":"FIL-USDT-SWAP","ordId":"other","side":"buy","state":"filled","sz":"1","cTime":"1791307820000"}]"#)
+    ])
+    let client = ATKClient(runner: runner)
+    let found = try await client.swapOrder(instrumentID: "FIL-USDT-SWAP", orderID: "child-7", demo: true)
+    #expect(found?.id == "child-7")
+    #expect(found?.averageFillPrice == Decimal(string: "1.19517"))
+    #expect(found?.filledQuantity == 12987)
+    #expect(try await client.swapOrder(instrumentID: "FIL-USDT-SWAP", orderID: "missing", demo: true) == nil)
+    await #expect(throws: ATKError.invalidJSON("订单查询未返回匹配的订单号")) {
+        _ = try await client.swapOrder(instrumentID: "FIL-USDT-SWAP", orderID: "wrong", demo: true)
+    }
 }
 
 @Test

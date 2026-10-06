@@ -647,7 +647,13 @@ class CodexRunner:
     def _decision_prompt(snapshot: AISnapshot, config: AIConfig, *, now: datetime | None = None) -> str:
         freshness = snapshot_freshness(snapshot, config, now=now)
         entry_gates = CodexRunner._entry_gates(snapshot, config)
-        encoding = os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60").strip().lower()
+        # The compact candle experiment belongs only to the DeepSeek route.
+        # A DeepSeek tuning environment variable must never silently alter the
+        # GPT/Codex prompt or its event semantics.
+        encoding = (
+            os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60")
+            if config.provider == "deepseek-harness" else "compact60"
+        ).strip().lower()
         if encoding == "raw":
             candle_encoding_note = (
                 "SNAPSHOT candle series are raw object arrays in ascending order; every supplied row and field is present. "
@@ -755,7 +761,7 @@ class CodexRunner:
             "OBSERVED CONTRACTS (complete assessment coverage required):\n" + json.dumps(snapshot.observed_instruments(), ensure_ascii=False, separators=(",", ":")) + "\n"
             "COPY EXACT SNAPSHOT ID:\n" + snapshot.snapshotId + "\n"
             "SERVER MARKET FACTS:\n" + dumps(market_facts(snapshot)) + "\n"
-            "SNAPSHOT:\n" + dumps(_prompt_snapshot(snapshot)) + "\n"
+            "SNAPSHOT:\n" + dumps(_prompt_snapshot(snapshot, encoding=encoding)) + "\n"
         )
 
     async def invoke(self, snapshot: AISnapshot, config: AIConfig) -> AIDecision:
@@ -853,10 +859,19 @@ class DeepSeekHarnessRunner(CodexRunner):
             + "The server will reject any missing, extra, or type-invalid field.\nJSON SCHEMA:\n"
             + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
         )
+        if len(structured_prompt.encode("utf-8")) > _MAX_DECISION_PROMPT_BYTES:
+            raise CodexError(
+                f"DeepSeek decision prompt exceeds {_MAX_DECISION_PROMPT_BYTES} UTF-8 bytes"
+            )
         self.last_run_metadata = {}
         try:
             with tempfile.TemporaryDirectory(prefix="novatrade-deepseek-") as workdir:
-                raw = await self.adapter.run_json(structured_prompt, cwd=workdir, timeout_seconds=remaining)
+                raw = await self.adapter.run_json(
+                    structured_prompt,
+                    cwd=workdir,
+                    timeout_seconds=remaining,
+                    max_output_bytes=config.maxOutputBytes,
+                )
             self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
             return raw
         except DeepSeekHarnessError as error:
@@ -873,7 +888,12 @@ class DeepSeekHarnessRunner(CodexRunner):
         self.last_run_metadata = {}
         try:
             with tempfile.TemporaryDirectory(prefix="novatrade-deepseek-chat-") as workdir:
-                text = await self.adapter.run_prompt(prompt, cwd=workdir, timeout_seconds=config.cliTimeoutSeconds)
+                text = await self.adapter.run_prompt(
+                    prompt,
+                    cwd=workdir,
+                    timeout_seconds=config.cliTimeoutSeconds,
+                    max_output_bytes=config.maxOutputBytes,
+                )
             self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
             return CodexRunner._decode_chat_response(text)
         except DeepSeekHarnessError as error:
@@ -1113,6 +1133,10 @@ class AIWorker:
             if isinstance(attempts, int) and not isinstance(attempts, bool):
                 compact["attempts"] = attempts
             compact_errors.append(compact)
+        prompt_encoding = (
+            os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60")
+            if config.provider == "deepseek-harness" else "compact60"
+        ).strip().lower()
         return {
             "instrumentCount": len(snapshot.observed_instruments()),
             "candleSeriesCount": len(snapshot.candles),
@@ -1127,7 +1151,7 @@ class AIWorker:
             "collectionErrorCount": len(errors) if isinstance(errors, list) else 0,
             "promptBytes": len(CodexRunner._decision_prompt(snapshot, config).encode("utf-8")),
             "promptBytesScope": "decision-prompt-only",
-            "promptEncoding": os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60").strip().lower(),
+            "promptEncoding": prompt_encoding,
         }
 
     @classmethod
@@ -1454,8 +1478,24 @@ class AIWorker:
             evaluated_at = datetime.now(timezone.utc)
             freshness = snapshot_freshness(parsed_snapshot, self.config, now=evaluated_at)
             result = validate_decision(decision, parsed_snapshot, self.config, self.policy_state, now=evaluated_at)
-            record_decision(self.policy_state, result)
             self._audit({"type": "decision", "accepted": result.accepted, "reason": result.reason, "decision": result.decision.to_dict(), "rawDecision": decision.to_dict(), "snapshotId": parsed_snapshot.snapshotId, "instruments": decision_instruments, "freshness": freshness})
+            # A policy rejection is still a completed, deterministic model
+            # evaluation. Advance the event state so a static signal does not
+            # spend one model request per poll on the same rejected intent.
+            # Unknown/invalid snapshots and runner failures never reach this
+            # point, and gateway failures below still leave the fingerprint
+            # unchanged so they are retried on the next poll.
+            if fingerprint is not None and not result.accepted:
+                self._last_event_fingerprint = fingerprint
+                self._last_model_evaluated_at = evaluated_at
+                self._event_skip_count = 0
+                self.status = replace(
+                    self.status,
+                    lastEvaluationSource="model",
+                    lastEvaluationAt=_now_iso(),
+                    skippedCycles=0,
+                    decisionFingerprint=fingerprint,
+                )
             failures = self.status.consecutiveFailures
             self.status = replace(
                 self.status,
@@ -1476,6 +1516,10 @@ class AIWorker:
             # fails. Its assessments must stay paired with this snapshot.
             if result.accepted and result.decision.action != "hold" and self.order_gateway is not None and self.config.mode != "shadow":
                 await self.order_gateway(result.decision, parsed_snapshot)
+                # A gateway return is the only point at which an entry is
+                # known to have been submitted. In particular, an
+                # OrderNotSubmittedError must leave the entry cooldown free.
+                record_decision(self.policy_state, result, at=evaluated_at)
             if fingerprint is not None:
                 self.status = replace(
                     self.status,

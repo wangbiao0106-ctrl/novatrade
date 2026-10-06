@@ -75,12 +75,66 @@ public struct ClosedSwapPositionSnapshot: Equatable, Sendable {
     public let instrumentID: String
     public let realizedPnL: Decimal
     public let closedAt: Date
+    public let entryPrice: Decimal?
+    public let exitPrice: Decimal?
+    public let closedQuantity: Decimal?
+    public let closeType: String?
 
-    public init(positionID: String, instrumentID: String, realizedPnL: Decimal, closedAt: Date) {
+    public init(positionID: String, instrumentID: String, realizedPnL: Decimal, closedAt: Date,
+                entryPrice: Decimal? = nil, exitPrice: Decimal? = nil,
+                closedQuantity: Decimal? = nil, closeType: String? = nil) {
         self.positionID = positionID
         self.instrumentID = instrumentID
         self.realizedPnL = realizedPnL
         self.closedAt = closedAt
+        self.entryPrice = entryPrice
+        self.exitPrice = exitPrice
+        self.closedQuantity = closedQuantity
+        self.closeType = closeType
+    }
+}
+
+/// A terminal exchange-native TP/SL algorithm. OKX reports these fields from
+/// the algo history endpoint rather than from positions-history, so keeping
+/// the evidence separate prevents a position close from being mislabeled as
+/// a stop or take-profit without an authenticated trigger record.
+public struct NativeProtectionExitSnapshot: Equatable, Sendable {
+    public let algorithmID: String
+    public let instrumentID: String
+    public let state: String
+    public let actualSide: String?
+    public let actualQuantity: Decimal?
+    public let triggerPrice: Decimal?
+    public let triggerPriceType: String?
+    public let triggerTime: Date?
+    public let clientOrderID: String?
+    public let attachedClientOrderID: String?
+    public let positionID: String?
+    public let closingOrderIDs: [String]
+    public let takeProfitTriggerPrice: Decimal?
+    public let stopLossTriggerPrice: Decimal?
+
+    public init(algorithmID: String, instrumentID: String, state: String,
+                actualSide: String? = nil, actualQuantity: Decimal? = nil,
+                triggerPrice: Decimal? = nil, triggerPriceType: String? = nil,
+                triggerTime: Date? = nil, clientOrderID: String? = nil,
+                attachedClientOrderID: String? = nil, positionID: String? = nil,
+                closingOrderIDs: [String] = [], takeProfitTriggerPrice: Decimal? = nil,
+                stopLossTriggerPrice: Decimal? = nil) {
+        self.algorithmID = algorithmID
+        self.instrumentID = instrumentID
+        self.state = state
+        self.actualSide = actualSide
+        self.actualQuantity = actualQuantity
+        self.triggerPrice = triggerPrice
+        self.triggerPriceType = triggerPriceType
+        self.triggerTime = triggerTime
+        self.clientOrderID = clientOrderID
+        self.attachedClientOrderID = attachedClientOrderID
+        self.positionID = positionID
+        self.closingOrderIDs = closingOrderIDs
+        self.takeProfitTriggerPrice = takeProfitTriggerPrice
+        self.stopLossTriggerPrice = stopLossTriggerPrice
     }
 }
 
@@ -480,6 +534,34 @@ public struct ATKClient: Sendable {
         return order
     }
 
+    /// Looks up one exact exchange order id. Native TP/SL algorithms return
+    /// their reduce-only child order ids in `ordIdList`; this query supplies
+    /// the final fill price when that child has already left open orders.
+    public func swapOrder(instrumentID: String, orderID: String, demo: Bool) async throws -> OrderSnapshot? {
+        try Self.validateInstrumentID(instrumentID)
+        try Self.validateIdentifier(orderID, field: "订单")
+        let arguments = [demo ? "--demo" : "--live", "swap", "get", "--instId", instrumentID, "--ordId", orderID, "--json"]
+        let result = try await runner.run(arguments: arguments)
+        let root = try? JSONSerialization.jsonObject(with: Data(result.stdout.utf8))
+        if let root, let failure = Self.responseFailure(root, defaultMessage: "OKX 订单查询失败") {
+            if failure.code == 51603 { return nil }
+            throw ATKError.commandFailed(code: failure.code, message: failure.message)
+        }
+        guard result.exitCode == 0 else {
+            let codeLines = result.stderr.split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            if codeLines.contains("Code: 51603") { return nil }
+            let message = result.stderr.isEmpty ? result.stdout : result.stderr
+            throw ATKError.commandFailed(code: result.exitCode, message: message.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        guard let root, let rows = Self.objectRows(root), rows.count == 1,
+              let order = try Self.decodeOrder(rows[0]), order.instrumentID == instrumentID,
+              order.id == orderID else {
+            throw ATKError.invalidJSON("订单查询未返回匹配的订单号")
+        }
+        return order
+    }
+
     /// OKX `clOrdId`: 1 to 32 ASCII letters or digits.
     public static func isValidClientOrderID(_ value: String) -> Bool {
         (1...32).contains(value.utf8.count) && value.utf8.allSatisfy { byte in
@@ -504,8 +586,58 @@ public struct ATKClient: Sendable {
                   let closedAt = Self.date(row["uTime"]) else {
                 throw ATKError.invalidJSON("历史持仓缺少有效合约、持仓标识、净盈亏或结算时间")
             }
+            let entryPrice = Self.decimal(row["openAvgPx"] ?? row["openPrice"])
+                .flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            let exitPrice = Self.decimal(row["closeAvgPx"] ?? row["closePrice"])
+                .flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            let closedQuantity = Self.decimal(row["closeTotalPos"] ?? row["closeSz"] ?? row["closeQty"])
+                .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+            let closeType = (row["type"] ?? row["closeType"] ?? row["closeReason"]) as? String
             return ClosedSwapPositionSnapshot(positionID: positionID, instrumentID: returnedID,
-                                              realizedPnL: realized, closedAt: closedAt)
+                                              realizedPnL: realized, closedAt: closedAt,
+                                              entryPrice: entryPrice, exitPrice: exitPrice,
+                                              closedQuantity: closedQuantity, closeType: closeType)
+        }
+    }
+
+    /// Reads terminal OKX-native TP/SL algorithms. These rows are the
+    /// authenticated source for `actualSide=tp|sl`; positions-history alone
+    /// contains realized PnL but cannot explain why the position disappeared.
+    public func nativeProtectionExitHistory(instrumentID: String, demo: Bool) async throws -> [NativeProtectionExitSnapshot] {
+        try Self.validateInstrumentID(instrumentID)
+        let root = try await runJSON([demo ? "--demo" : "--live", "swap", "algo", "orders",
+                                      "--history", "--ordType", "oco", "--instId", instrumentID, "--limit", "100"])
+        guard let rows = Self.objectRows(root) else { throw ATKError.invalidJSON("原生保护单历史响应格式无效") }
+        return try rows.map { row in
+            guard let returnedID = Self.requiredText(row["instId"]), returnedID == instrumentID,
+                  let algorithmID = Self.requiredText(row["algoId"] ?? row["algoID"]), Self.isSafeIdentifier(algorithmID),
+                  let state = Self.requiredText(row["state"]) else {
+                throw ATKError.invalidJSON("原生保护单历史缺少有效合约、算法单标识或状态")
+            }
+            let rawActualSide = (row["actualSide"] as? String)?.lowercased()
+            let actualSide = ["tp", "sl"].contains(rawActualSide ?? "") ? rawActualSide : nil
+            let actualQuantity = Self.decimal(row["actualSz"] ?? row["actualSize"])
+                .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+            let takeProfit = Self.decimal(row["tpTriggerPx"] ?? row["tpTriggerPrice"])
+                .flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            let stopLoss = Self.decimal(row["slTriggerPx"] ?? row["slTriggerPrice"])
+                .flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            let triggerPrice = Self.decimal(row["triggerPx"] ?? row["triggerPrice"] ?? (actualSide == "tp" ? takeProfit : actualSide == "sl" ? stopLoss : nil))
+                .flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+            let triggerTime = Self.date(row["triggerTime"] ?? row["uTime"] ?? row["cTime"])
+            let clientOrderID = Self.requiredText(row["clOrdId"] ?? row["algoClOrdId"])
+            let attachedClientOrderID = Self.requiredText(row["attachAlgoClOrdId"] ?? row["attachClOrdId"])
+            let positionID = Self.requiredText(row["posId"])
+            let closingOrderIDs = Self.identifierList(row["ordIdList"] ?? row["ordId"])
+            return NativeProtectionExitSnapshot(
+                algorithmID: algorithmID, instrumentID: returnedID, state: state.lowercased(),
+                actualSide: actualSide, actualQuantity: actualQuantity,
+                triggerPrice: triggerPrice,
+                triggerPriceType: (row["triggerPxType"] ?? row["tpTriggerPxType"] ?? row["slTriggerPxType"]) as? String,
+                triggerTime: triggerTime, clientOrderID: clientOrderID,
+                attachedClientOrderID: attachedClientOrderID, positionID: positionID,
+                closingOrderIDs: closingOrderIDs, takeProfitTriggerPrice: takeProfit,
+                stopLossTriggerPrice: stopLoss)
         }
     }
 
@@ -720,6 +852,22 @@ public struct ATKClient: Sendable {
               !text.isEmpty,
               text.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return nil }
         return text
+    }
+
+    private static func identifierList(_ value: Any?) -> [String] {
+        let values: [String]
+        if let array = value as? [String] {
+            values = array
+        } else if let array = value as? [Any] {
+            values = array.compactMap { $0 as? String }
+        } else if let text = value as? String {
+            values = text.split(separator: ",").map(String.init)
+        } else if let text = value as? NSNumber {
+            values = [text.stringValue]
+        } else {
+            values = []
+        }
+        return values.filter { isSafeIdentifier($0) }
     }
 
     private static func objectRows(_ root: Any) -> [[String: Any]]? {

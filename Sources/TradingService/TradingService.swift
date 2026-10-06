@@ -808,6 +808,9 @@ public actor MarketDataService {
     public func privateOrder(instrumentID: String, clientOrderID: String, demo: Bool) async throws -> OrderSnapshot? {
         try await client.swapOrder(instrumentID: instrumentID, clientOrderID: clientOrderID, demo: demo)
     }
+    public func privateOrder(instrumentID: String, orderID: String, demo: Bool) async throws -> OrderSnapshot? {
+        try await client.swapOrder(instrumentID: instrumentID, orderID: orderID, demo: demo)
+    }
     public func cancelLiveOrder(instrumentID: String, orderID: String) async throws { try await client.cancelLiveSwapOrder(instrumentID: instrumentID, orderID: orderID); invalidateAccountState() }
     public func cancelDemoOrder(instrumentID: String, orderID: String) async throws { try await client.cancelDemoSwapOrder(instrumentID: instrumentID, orderID: orderID); invalidateAccountState() }
     public func closeLivePosition(instrumentID: String, positionSide: String?, marginMode: String? = nil) async throws { try await client.closeLiveSwapPosition(instrumentID: instrumentID, positionSide: positionSide, marginMode: marginMode); invalidateAccountState() }
@@ -853,6 +856,9 @@ public actor MarketDataService {
 
     public func closedSwapPositions(instrumentID: String) async throws -> [ClosedSwapPositionSnapshot] {
         try await client.closedSwapPositions(instrumentID: instrumentID)
+    }
+    public func nativeProtectionExitHistory(instrumentID: String, demo: Bool) async throws -> [NativeProtectionExitSnapshot] {
+        try await client.nativeProtectionExitHistory(instrumentID: instrumentID, demo: demo)
     }
 
     /// `OKXCandleSocket` owns the socket lifecycle and reconnects with
@@ -924,6 +930,7 @@ public actor TradingBackend {
     private struct PendingRemoteExit: Codable {
         let strategyID: UUID
         let entryOrderID: String?
+        let clientOrderID: String?
         let positionID: String
         let instrumentID: String
         let quantity: Decimal
@@ -935,6 +942,10 @@ public actor TradingBackend {
         let exitRisk: Decimal
         var remoteOrderID: String?
         var realizedPnL: Decimal? = nil
+        var reasonCode: String? = nil
+        var observedPrice: Decimal? = nil
+        var stopPrice: Decimal? = nil
+        var takePrice: Decimal? = nil
     }
     private var pendingRemoteExits: [String: PendingRemoteExit] = [:]
     private let pendingRemoteExitURL: URL
@@ -2063,9 +2074,11 @@ public actor TradingBackend {
                 let exitRisk = signal?.stopPrice.map {
                     abs(position.entryPrice - $0) * abs(position.quantity) * spec.contractValue
                 } ?? 0
+                let reasonCode = stopHit ? "stop_loss" : takeHit ? "take_profit" : "timeout"
                 pendingRemoteExits[positionKey] = PendingRemoteExit(
                     strategyID: config.id,
                     entryOrderID: order.remoteOrderID,
+                    clientOrderID: order.clientOrderID,
                     positionID: position.id,
                     instrumentID: position.instrumentID,
                     quantity: abs(position.quantity),
@@ -2075,10 +2088,14 @@ public actor TradingBackend {
                     contractValue: spec.contractValue,
                     reservedNotional: reservedNotional,
                     exitRisk: exitRisk,
-                    remoteOrderID: result.orderID
+                    remoteOrderID: result.orderID,
+                    reasonCode: reasonCode,
+                    observedPrice: price,
+                    stopPrice: signal?.stopPrice,
+                    takePrice: signal?.takePrice
                 )
                 savePendingRemoteExits()
-                appendLog("策略平仓已提交，等待成交确认：\(config.name) / \(position.instrumentID) / \(result.orderID) / \(stopHit ? "止损" : takeHit ? "止盈" : "持仓超时离场")", level: "exit")
+                appendLog("exit_event event=exit_submitted source=service reason=\(reasonCode) strategyID=\(config.id.uuidString) instrument=\(position.instrumentID) positionID=\(position.id) entryOrderID=\(Self.logText(order.remoteOrderID)) exitOrderID=\(result.orderID) side=\(isShort ? "short" : "long") qty=\(Self.logDecimal(abs(position.quantity))) entryPrice=\(Self.logDecimal(position.entryPrice)) observedPrice=\(Self.logDecimal(price)) stopPrice=\(Self.logDecimal(signal?.stopPrice)) takePrice=\(Self.logDecimal(signal?.takePrice))", level: "exit")
                 await market.invalidateAccountState()
             } catch {
                 submittedExitPositionIDs.remove(positionKey)
@@ -2093,6 +2110,59 @@ public actor TradingBackend {
         96 * 3600
     }
 
+    private static func logDecimal(_ value: Decimal?) -> String {
+        value.map { NSDecimalNumber(decimal: $0).stringValue } ?? "unknown"
+    }
+
+    private static func logText(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "unknown" }
+        return value.replacingOccurrences(of: " ", with: "_")
+    }
+
+    private static func nativeExitEvidence(
+        events: [NativeProtectionExitSnapshot], instrumentID: String,
+        positionID: String, clientOrderID: String?
+    ) -> NativeProtectionExitSnapshot? {
+        let candidates = events.filter { event in
+            guard event.instrumentID == instrumentID,
+                  ["effective", "filled", "triggered"].contains(event.state),
+                  event.actualSide != nil else { return false }
+            if event.positionID == positionID { return true }
+            if let clientOrderID,
+               event.clientOrderID == clientOrderID || event.attachedClientOrderID == clientOrderID { return true }
+            return false
+        }
+        return candidates.sorted {
+            ($0.triggerTime ?? .distantPast) > ($1.triggerTime ?? .distantPast)
+        }.first
+    }
+
+    private func appendNativeExitLog(
+        event: NativeProtectionExitSnapshot, closed: ClosedSwapPositionSnapshot?,
+        strategyID: UUID?, entryOrderID: String?, clientOrderID: String?
+    ) {
+        let side = event.actualSide ?? "unknown"
+        let reason = side == "tp" ? "take_profit" : side == "sl" ? "stop_loss" : "native_protection"
+        let childOrders = event.closingOrderIDs.isEmpty ? "unknown" : event.closingOrderIDs.joined(separator: ",")
+        appendLog(
+            "exit_event event=exit_settled source=exchange_native_oco reason=\(reason) actualSide=\(side) instrument=\(event.instrumentID) positionID=\(Self.logText(closed?.positionID ?? event.positionID)) entryOrderID=\(Self.logText(entryOrderID)) clientOrderID=\(Self.logText(clientOrderID)) strategyID=\(Self.logText(strategyID?.uuidString)) algoID=\(event.algorithmID) childOrderID=\(childOrders) triggerPrice=\(Self.logDecimal(event.triggerPrice)) triggerPriceType=\(Self.logText(event.triggerPriceType)) triggerTime=\(Self.logText(event.triggerTime.map { ISO8601DateFormatter().string(from: $0) })) actualQty=\(Self.logDecimal(event.actualQuantity ?? closed?.closedQuantity)) entryPrice=\(Self.logDecimal(closed?.entryPrice)) exitPrice=\(Self.logDecimal(closed?.exitPrice)) realizedPnL=\(Self.logDecimal(closed?.realizedPnL)) closeType=\(Self.logText(closed?.closeType))",
+            level: "exit"
+        )
+    }
+
+    private func appendServiceExitLog(
+        pending: PendingRemoteExit, realized: Decimal, closed: ClosedSwapPositionSnapshot?,
+        exitOrderID: String?
+    ) {
+        let triggerPrice: Decimal? = pending.reasonCode == "stop_loss"
+            ? pending.stopPrice
+            : pending.reasonCode == "take_profit" ? pending.takePrice : nil
+        appendLog(
+            "exit_event event=exit_settled source=service_reduce_only reason=\(Self.logText(pending.reasonCode)) instrument=\(pending.instrumentID) positionID=\(pending.positionID) entryOrderID=\(Self.logText(pending.entryOrderID)) exitOrderID=\(Self.logText(exitOrderID)) actualQty=\(Self.logDecimal(closed?.closedQuantity ?? pending.quantity)) entryPrice=\(Self.logDecimal(closed?.entryPrice ?? pending.entryPrice)) exitPrice=\(Self.logDecimal(closed?.exitPrice ?? pending.exitPrice)) observedPrice=\(Self.logDecimal(pending.observedPrice)) triggerPrice=\(Self.logDecimal(triggerPrice)) realizedPnL=\(Self.logDecimal(realized))",
+            level: "exit"
+        )
+    }
+
     /// Reduce-only exits are asynchronous. Keep the strategy pool reserved
     /// until a later position snapshot confirms that the exit completed.
     private func settleCompletedRemoteExits(positions: [PositionSnapshot], timestamp: Date) async {
@@ -2101,6 +2171,7 @@ public actor TradingBackend {
         // mutating the pending record so that the final settlement uses the
         // actual realized PnL when that race occurs.
         var closedHistoryByInstrument: [String: [ClosedSwapPositionSnapshot]] = [:]
+        var nativeHistoryByContext: [String: [NativeProtectionExitSnapshot]] = [:]
         let pendingSnapshot = pendingRemoteExits.values
         let historyInstruments = Set(pendingSnapshot.compactMap { pending -> String? in
             guard !positions.contains(where: { $0.id == pending.positionID && abs($0.quantity) > 0 }) else { return nil }
@@ -2111,11 +2182,19 @@ public actor TradingBackend {
                 closedHistoryByInstrument[instrumentID] = history
             }
         }
+        for pending in pendingSnapshot {
+            guard !positions.contains(where: { $0.id == pending.positionID && abs($0.quantity) > 0 }),
+                  closedHistoryByInstrument[pending.instrumentID]?.contains(where: { $0.positionID == pending.positionID }) == true else { continue }
+            let demo = remoteReservations.values.first(where: { $0.strategyID == pending.strategyID && $0.instrumentID == pending.instrumentID && $0.positionID == pending.positionID })?.demo ?? false
+            let context = "\(demo ? "demo" : "live")|\(pending.instrumentID)"
+            guard nativeHistoryByContext[context] == nil else { continue }
+            nativeHistoryByContext[context] = (try? await market.nativeProtectionExitHistory(instrumentID: pending.instrumentID, demo: demo)) ?? []
+        }
         await withRiskReservationMutation {
             // Claim completed exits before the first RiskEngine await. The
             // mutation gate keeps the claim and release atomic with generic
             // reconciliation and new order authorization.
-            var completed: [(String, PendingRemoteExit, Decimal, Decimal, Decimal)] = []
+            var completed: [(String, PendingRemoteExit, Decimal, Decimal, Decimal, ClosedSwapPositionSnapshot?, NativeProtectionExitSnapshot?)] = []
             for (key, pending) in pendingRemoteExits {
                 let hasOpenOriginalPosition = positions.contains {
                     $0.id == pending.positionID &&
@@ -2123,6 +2202,7 @@ public actor TradingBackend {
                         abs($0.quantity) > 0
                 }
                 guard !hasOpenOriginalPosition else { continue }
+                let pendingDemo = remoteReservations.values.first(where: { $0.strategyID == pending.strategyID && $0.instrumentID == pending.instrumentID && $0.positionID == pending.positionID })?.demo ?? false
                 pendingRemoteExits.removeValue(forKey: key)
                 submittedExitPositionIDs.remove(key)
                 let reservationsToRelease = remoteReservations.compactMap { reservationKey, reservation -> RemoteReservation? in
@@ -2152,23 +2232,34 @@ public actor TradingBackend {
                 for localOrderID in unresolvedEntryIDs {
                     await paper.markLocalOrderTerminal(localOrderID, status: "closed")
                 }
+                let closed = closedHistoryByInstrument[pending.instrumentID]?.first(where: { $0.positionID == pending.positionID })
+                let native = Self.nativeExitEvidence(
+                    events: nativeHistoryByContext["\(pendingDemo ? "demo" : "live")|\(pending.instrumentID)"] ?? [],
+                    instrumentID: pending.instrumentID, positionID: pending.positionID,
+                    clientOrderID: pending.clientOrderID
+                )
                 completed.append((key, pending,
                                   reservedNotional > 0 ? reservedNotional : pending.reservedNotional,
                                   reservedMargin > 0 ? reservedMargin : pending.reservedNotional,
-                                  reservedRisk > 0 ? reservedRisk : pending.exitRisk))
+                                  reservedRisk > 0 ? reservedRisk : pending.exitRisk,
+                                  closed, native))
             }
             if !completed.isEmpty {
                 savePendingRemoteExits()
             }
-            for (_, pending, reservedNotional, reservedMargin, reservedRisk) in completed {
+            for (_, pending, reservedNotional, reservedMargin, reservedRisk, closed, native) in completed {
                 let direction: Decimal = pending.side == "short" ? -1 : 1
                 let fallbackRealized = (pending.exitPrice - pending.entryPrice) * pending.quantity * pending.contractValue * direction
                     - abs(pending.exitPrice * pending.quantity * pending.contractValue) * broker.feeRate
-                let historyRealized = closedHistoryByInstrument[pending.instrumentID]?
-                    .first(where: { $0.positionID == pending.positionID })?.realizedPnL
+                let historyRealized = closed?.realizedPnL
                 let realized = historyRealized ?? pending.realizedPnL ?? fallbackRealized
                 await riskEngine.recordStrategyRealized(realized, strategyID: pending.strategyID, now: timestamp)
                 await riskEngine.release(instrumentID: pending.instrumentID, notional: reservedNotional, strategyID: pending.strategyID, margin: reservedMargin, riskAmount: reservedRisk, closedPosition: true)
+                if let native {
+                    appendNativeExitLog(event: native, closed: closed, strategyID: pending.strategyID, entryOrderID: pending.entryOrderID, clientOrderID: pending.clientOrderID)
+                } else {
+                    appendServiceExitLog(pending: pending, realized: realized, closed: closed, exitOrderID: pending.remoteOrderID)
+                }
                 appendLog("策略平仓已成交并结算：\(pending.instrumentID)，已实现盈亏 \(realized)", level: "fill")
             }
             await paper.setRisk(await riskEngine.snapshot(now: timestamp))
@@ -2257,7 +2348,8 @@ public actor TradingBackend {
                 riskAmount: riskAmount,
                 closedPosition: strategyID != nil,
                 inFlight: false,
-                positionID: position?.id
+                positionID: position?.id,
+                clientOrderID: paperOrder.clientOrderID
             )
         }
         // Rebuild the global exposure baseline from the authenticated remote
@@ -2321,6 +2413,16 @@ public actor TradingBackend {
                 closedHistoryByInstrument[instrumentID] = history
             }
         }
+        var nativeHistoryByContext: [String: [NativeProtectionExitSnapshot]] = [:]
+        for (_, reservation) in Array(remoteReservations) + Array(recoveredReservations) {
+            guard reservation.strategyID != nil, let positionID = reservation.positionID,
+                  !positions.contains(where: { $0.id == positionID && $0.instrumentID == reservation.instrumentID && abs($0.quantity) > 0 }),
+                  closedHistoryByInstrument[reservation.instrumentID]?.contains(where: { $0.positionID == positionID }) == true else { continue }
+            let demo = reservation.demo ?? false
+            let context = "\(demo ? "demo" : "live")|\(reservation.instrumentID)"
+            guard nativeHistoryByContext[context] == nil else { continue }
+            nativeHistoryByContext[context] = (try? await market.nativeProtectionExitHistory(instrumentID: reservation.instrumentID, demo: demo)) ?? []
+        }
         await withRiskReservationMutation {
             guard generation == reconciliationGeneration else { return }
             for (orderID, reservation) in recoveredReservations where remoteReservations[orderID] == nil {
@@ -2354,7 +2456,7 @@ public actor TradingBackend {
                     remoteReservations[orderID] = reservation
                 }
             }
-            var releases: [(RemoteReservation, Decimal?)] = []
+            var releases: [(String, RemoteReservation, Decimal?, ClosedSwapPositionSnapshot?, NativeProtectionExitSnapshot?)] = []
             for (orderID, reservation) in remoteReservations {
                 // Only a clOrdId lookup may settle an unresolved submission.
                 guard !reservation.inFlight, !Self.isUnresolvedReservation(orderID) else { continue }
@@ -2370,6 +2472,7 @@ public actor TradingBackend {
                 }
                 let shouldRelease: Bool
                 var realizedPnL: Decimal?
+                var closedSnapshot: ClosedSwapPositionSnapshot?
                 if let order {
                     if OrderLifecycle.isTerminal(order.status) && !hasPosition {
                         if !order.endedUnfilled {
@@ -2380,6 +2483,7 @@ public actor TradingBackend {
                                let history = closedHistoryByInstrument[reservation.instrumentID],
                                let closed = history.first(where: { $0.positionID == positionID }) {
                                 realizedPnL = closed.realizedPnL
+                                closedSnapshot = closed
                             } else if !cancellationSettled {
                                 terminalRemoteOrderObservations.removeValue(forKey: orderID)
                                 continue
@@ -2410,6 +2514,7 @@ public actor TradingBackend {
                            let history = closedHistoryByInstrument[reservation.instrumentID],
                            let closed = history.first(where: { $0.positionID == positionID }) {
                             realizedPnL = closed.realizedPnL
+                            closedSnapshot = closed
                         } else {
                             continue
                         }
@@ -2419,6 +2524,7 @@ public actor TradingBackend {
                            let history = closedHistoryByInstrument[reservation.instrumentID],
                            let closed = history.first(where: { $0.positionID == positionID }) {
                             realizedPnL = closed.realizedPnL
+                            closedSnapshot = closed
                         } else {
                             realizedPnL = nil
                         }
@@ -2433,9 +2539,15 @@ public actor TradingBackend {
                 // engine. Recovery must never resurrect this entry and
                 // release another position's pool reservation a second time.
                 await paper.markRemoteOrderTerminal(orderID)
-                releases.append((reservation, realizedPnL))
+                let native = closedSnapshot.flatMap { closed in
+                    Self.nativeExitEvidence(
+                        events: nativeHistoryByContext["\((reservation.demo ?? false) ? "demo" : "live")|\(reservation.instrumentID)"] ?? [],
+                        instrumentID: reservation.instrumentID, positionID: closed.positionID,
+                        clientOrderID: reservation.clientOrderID)
+                }
+                releases.append((orderID, reservation, realizedPnL, closedSnapshot, native))
             }
-            for (reservation, realizedPnL) in releases {
+            for (orderID, reservation, realizedPnL, closedSnapshot, native) in releases {
                 await riskEngine.release(
                     instrumentID: reservation.instrumentID,
                     notional: reservation.notional,
@@ -2446,6 +2558,11 @@ public actor TradingBackend {
                 )
                 if let strategyID = reservation.strategyID, let realizedPnL {
                     await riskEngine.recordStrategyRealized(realizedPnL, strategyID: strategyID)
+                }
+                if let native {
+                    appendNativeExitLog(event: native, closed: closedSnapshot, strategyID: reservation.strategyID, entryOrderID: orderID, clientOrderID: reservation.clientOrderID)
+                } else if let closedSnapshot {
+                    appendLog("exit_event event=exit_settled source=exchange_position_history reason=native_protection_unknown instrument=\(reservation.instrumentID) positionID=\(closedSnapshot.positionID) entryOrderID=\(orderID) clientOrderID=\(Self.logText(reservation.clientOrderID)) entryPrice=\(Self.logDecimal(closedSnapshot.entryPrice)) exitPrice=\(Self.logDecimal(closedSnapshot.exitPrice)) actualQty=\(Self.logDecimal(closedSnapshot.closedQuantity)) realizedPnL=\(Self.logDecimal(realizedPnL))", level: "exit")
                 }
             }
 
@@ -2961,7 +3078,7 @@ public actor TradingBackend {
         await market.invalidateAccountState()
         await paper.setRisk(await riskEngine.snapshot(now: signal.timestamp))
         appendLog("挂单：策略 \(config.name) / OKX \(demo ? "模拟" : "实盘") / \(instrumentID) / \(side) \(quantity)，订单 \(remoteOrderID)", level: "order")
-        if signal.stopPrice != nil || signal.takePrice != nil || signal.takePrices != nil { appendLog("策略 \(config.name) 已附带保护规则；分批止盈/保本/跟踪由策略监控处理", level: "info") }
+        appendLog("entry_event event=entry_submitted source=strategy instrument=\(instrumentID) strategyID=\(config.id.uuidString) localOrderID=\(order.id.uuidString) entryOrderID=\(remoteOrderID) clientOrderID=\(clientOrderID) side=\(side) qty=\(Self.logDecimal(quantity)) observedEntryPrice=\(Self.logDecimal(entry)) takeProfitPrice=\(Self.logDecimal(takePrice)) stopLossPrice=\(Self.logDecimal(stopPrice)) triggerPriceType=mark protectionSource=exchange_native marginMode=\(request.marginMode) leverage=\(Self.logDecimal(request.leverage))", level: "order")
         return true
     }
 

@@ -49,6 +49,11 @@ class DecisionProfileTemplateTests(unittest.TestCase):
         for kept in ("llm", "agent", "agent-loop", "tools", "llm-deepseek"):
             self.assertNotIn(f"- id: {kept}\n  disabled: true", deepseek_profile.PATCH_YAML)
 
+    def test_safety_overlay_disables_tools_and_session_persistence(self):
+        for row_id in deepseek_profile.SAFETY_ROWS:
+            self.assertIn(f"- id: {row_id}\n  disabled: true", deepseek_profile.SAFETY_PATCH_YAML)
+        self.assertNotIn("system-prompt", deepseek_profile.SAFETY_PATCH_YAML)
+
 
 class HarnessTelemetryTests(unittest.TestCase):
     def test_usage_parser_accepts_nested_and_direct_acp_fields(self):
@@ -116,6 +121,22 @@ class DecisionProfileBootstrapTests(unittest.TestCase):
                 self.assertIsNone(deepseek_profile.ensure_patch_file(Path(home)))
             self.assertFalse(blocked.exists())
 
+    def test_safety_bootstrap_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as home:
+            path = deepseek_profile.ensure_safety_patch_file(Path(home))
+            self.assertIsNotNone(path)
+            assert path is not None
+            self.assertEqual(path.read_text(encoding="utf-8"), deepseek_profile.SAFETY_PATCH_YAML)
+            stamp = path.stat().st_mtime_ns
+            self.assertEqual(deepseek_profile.ensure_safety_patch_file(Path(home)), path)
+            self.assertEqual(path.stat().st_mtime_ns, stamp)
+
+    def test_dsh_home_accepts_novatrade_override(self):
+        self.assertEqual(
+            deepseek_profile.dsh_home({"NOVATRADE_DSH_HOME": "~/isolated-dsh"}),
+            Path.home() / "isolated-dsh",
+        )
+
     def test_launcher_arguments_patch_installed_acp_profile(self):
         arguments = deepseek_profile.launcher_arguments(Path("/tmp/overlay.yml"))
         self.assertEqual(arguments[0], "--profile")
@@ -142,12 +163,15 @@ class HarnessRunnerProfileTests(unittest.TestCase):
             ["/usr/bin/dsh", "--profile", "acp", "--patch", str(patch_path)],
         )
         self.assertEqual(runner.profile_patch, str(patch_path))
+        self.assertEqual(runner.profile_mode, "optimized")
 
     def test_falls_back_to_the_vendor_profile_when_unavailable(self):
         with patch("backend.deepseek_harness._profile_dsh_command", return_value=["/usr/bin/dsh"]), \
-             patch("backend.deepseek_harness._ensure_profile_patch", return_value=None):
+             patch("backend.deepseek_harness._ensure_profile_patch", return_value=None), \
+             patch("backend.deepseek_harness._ensure_safety_patch", return_value=Path("/tmp/safety-test.yml")):
             runner = DeepSeekHarnessRunner()
-        self.assertEqual(runner.launch_command, ["/usr/bin/dsh", "--profile", "acp"])
+        self.assertEqual(runner.launch_command, ["/usr/bin/dsh", "--profile", "acp", "--patch", "/tmp/safety-test.yml"])
+        self.assertEqual(runner.profile_mode, "safety")
 
     def test_profile_opt_out_uses_stock_acp_without_writing_overlay(self):
         with tempfile.TemporaryDirectory() as home, patch.dict(
@@ -163,15 +187,17 @@ class HarnessRunnerProfileTests(unittest.TestCase):
         self.assertIsNone(runner.profile_patch)
         self.assertFalse((Path(home) / deepseek_profile.PROFILE_DIRECTORY_NAME).exists())
 
-    def test_profile_rejection_retries_once_with_stock_acp(self):
+    def test_profile_rejection_retries_once_with_safety_acp(self):
         optimized_patch = Path(tempfile.gettempdir()) / "novatrade-decision-fallback-test.yml"
+        safety_patch = Path(tempfile.gettempdir()) / "novatrade-safety-fallback-test.yml"
         async def run() -> tuple[str, list[list[str]], dict]:
             with patch("backend.deepseek_harness._profile_dsh_command", return_value=["/usr/bin/dsh"]), \
-                 patch("backend.deepseek_harness._ensure_profile_patch", return_value=optimized_patch):
+                 patch("backend.deepseek_harness._ensure_profile_patch", return_value=optimized_patch), \
+                 patch("backend.deepseek_harness._ensure_safety_patch", return_value=safety_patch):
                 runner = DeepSeekHarnessRunner()
                 launches: list[list[str]] = []
 
-                async def attempt(prompt, *, launch, profile_name, cwd=None, timeout_seconds=90.0):
+                async def attempt(prompt, *, launch, profile_name, cwd=None, timeout_seconds=90.0, max_output_bytes=1_000_000):
                     launches.append(list(launch))
                     if len(launches) == 1:
                         raise DeepSeekHarnessError("unknown profile patch")
@@ -185,10 +211,41 @@ class HarnessRunnerProfileTests(unittest.TestCase):
         self.assertEqual(result, '{"action":"hold"}')
         self.assertEqual(launches, [
             ["/usr/bin/dsh", "--profile", "acp", "--patch", str(optimized_patch)],
-            ["/usr/bin/dsh", "--profile", "acp"],
+            ["/usr/bin/dsh", "--profile", "acp", "--patch", str(safety_patch)],
         ])
-        self.assertEqual(metadata["profileFallback"], "acp")
+        self.assertEqual(metadata["profileFallback"], "acp-safety")
         self.assertIn("unknown profile", metadata["profileFallbackReason"])
+
+    def test_safe_environment_does_not_forward_exchange_credentials(self):
+        with patch.dict(os.environ, {
+            "OKX_API_KEY": "okx-secret",
+            "OKX_SECRET_KEY": "okx-secret",
+            "OKX_PASSPHRASE": "okx-secret",
+            "DEEPSEEK_API_KEY": "deepseek-secret",
+        }, clear=False):
+            environment = DeepSeekHarnessRunner._safe_environment("/tmp/novatrade-test")
+        self.assertNotIn("OKX_API_KEY", environment)
+        self.assertNotIn("OKX_SECRET_KEY", environment)
+        self.assertNotIn("OKX_PASSPHRASE", environment)
+        self.assertEqual(environment["DEEPSEEK_API_KEY"], "deepseek-secret")
+        self.assertEqual(environment["HOME"], str(Path("/tmp/novatrade-test").resolve()))
+
+    def test_profile_error_patterns_cover_patch_loader_failures(self):
+        for detail in (
+            "patch: entry tools not found",
+            "unknown option: --patch",
+            "failed to parse overlay file",
+            "failed to read patch file",
+        ):
+            self.assertTrue(DeepSeekHarnessRunner._is_profile_error(DeepSeekHarnessError(detail)))
+
+    def test_nonpositive_deadline_fails_before_starting_child(self):
+        async def run() -> None:
+            runner = DeepSeekHarnessRunner(executable=[sys.executable, "-c", "raise SystemExit(1)"])
+            with self.assertRaisesRegex(DeepSeekHarnessError, "timeout must be positive"):
+                await runner.run_prompt("decision", timeout_seconds=0)
+
+        asyncio.run(run())
 
     def test_missing_launcher_still_reports_unavailable(self):
         with patch("backend.deepseek_harness._profile_dsh_command", return_value=None):

@@ -1,0 +1,44 @@
+{
+  "strategy_id": "codex_ai_decision",
+  "version": "1.0",
+  "source_of_truth": "strategies/codex_ai_decision/STRATEGY.md",
+  "display_name": "Codex AI 决策策略",
+  "name_en": "Codex AI Decision",
+  "provider": "codex",
+  "lifecycle": "candidate",
+  "runtime_integration": {
+    "strategy_id": "codex",
+    "runtime_handler": "backend.ai_worker.CodexRunner",
+    "decision_endpoint": "/api/v1/ai/strategies/codex",
+    "workflow": "grouped",
+    "event_prefilter_default": "off",
+    "event_fingerprint": "market-facts-v1",
+    "enabled_by_default": false,
+    "live_gate": "manual_enable_and_live_trading_switch"
+  },
+  "model_route": {
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "reasoning_effort": "medium"
+  },
+  "signal_parameters": {
+    "minimum_confidence": 0.65,
+    "decision_interval_seconds": 30,
+    "cli_timeout_seconds": 90,
+    "max_output_bytes": 1000000,
+    "cooldown_seconds": 43200,
+    "max_consecutive_failures": 3,
+    "max_daily_orders": 20,
+    "max_daily_losses": 5,
+    "margin_per_order_usd": 500,
+    "max_leverage": 5
+  },
+  "risk_policy": {
+    "allow_open": true,
+    "allow_close": true,
+    "allow_cancel": true,
+    "require_stop_loss": true,
+    "account_data_unknown": "fail_closed",
+    "order_gateway": "shared_durable_ledger"
+  }
+}

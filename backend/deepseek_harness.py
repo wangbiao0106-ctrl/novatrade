@@ -23,12 +23,16 @@ import signal
 from typing import Any
 
 try:
+    from .deepseek_profile import dsh_home as _dsh_home
     from .deepseek_profile import PROFILE_NAME as _DECISION_PROFILE_NAME
     from .deepseek_profile import ensure_patch_file as _ensure_profile_patch
+    from .deepseek_profile import ensure_safety_patch_file as _ensure_safety_patch
     from .deepseek_profile import launcher_arguments as _profile_launcher_arguments
 except ImportError:  # bundled backend modules are launched as scripts
+    from deepseek_profile import dsh_home as _dsh_home
     from deepseek_profile import PROFILE_NAME as _DECISION_PROFILE_NAME
     from deepseek_profile import ensure_patch_file as _ensure_profile_patch
+    from deepseek_profile import ensure_safety_patch_file as _ensure_safety_patch
     from deepseek_profile import launcher_arguments as _profile_launcher_arguments
 
 
@@ -38,6 +42,17 @@ class DeepSeekHarnessError(RuntimeError):
 
 _DEFAULT_MODEL = "deepseek-v4-pro"
 _DEFAULT_REASONING_EFFORT = "low"
+_DEFAULT_MAX_OUTPUT_BYTES = 1_000_000
+_MAX_STDOUT_LINE_BYTES = 256 * 1024
+_MAX_STDERR_BYTES = 64 * 1024
+_MAX_ASSISTANT_CHUNKS = 4096
+_DEEPSEEK_ENV_KEYS = (
+    "DEEPSEEK_API_KEY",
+    "DEEPSEEK_API_BASE",
+    "DEEPSEEK_BASE_URL",
+    "DEEPSEEK_AUTH_TOKEN",
+    "DEEPSEEK_TOKEN",
+)
 _USAGE_ALIASES = {
     "inputTokens": ("inputTokens", "input_tokens", "promptTokens", "prompt_tokens", "uncachedInputTokens", "uncached_input_tokens"),
     "outputTokens": ("outputTokens", "output_tokens", "completionTokens", "completion_tokens"),
@@ -53,13 +68,25 @@ def _decision_profile_arguments() -> tuple[list[str], str | None]:
     The vendor ``acp`` profile ships the whole coding-agent surface, whose
     tool schemas, workspace instructions and runtime boilerplate are re-sent
     on every model request even though a decision prompt forbids tool use.
-    The bundled overlay removes that overhead; when it cannot be written the
-    worker degrades to the vendor profile rather than blocking decisions.
+    The bundled overlay removes that overhead. If the optimized overlay cannot
+    be written, use the smaller safety overlay instead of starting a profile
+    that can persist account and risk prompts.
     """
     patch = _ensure_profile_patch()
-    if patch is None:
+    if patch is not None:
+        return _profile_launcher_arguments(patch), str(patch)
+    # An explicit opt-out keeps the documented stock-profile behavior. For all
+    # other failures, fail closed rather than silently losing persistence and
+    # tool boundaries.
+    if (os.environ.get("NOVATRADE_DEEPSEEK_PROFILE", "").strip().lower()
+            in {"0", "off", "none", "stock", "disabled"}):
         return _profile_launcher_arguments(None), None
-    return _profile_launcher_arguments(patch), str(patch)
+    safety = _ensure_safety_patch()
+    if safety is None:
+        raise DeepSeekHarnessError(
+            "DeepSeek Harness safety profile overlay is unavailable; refusing to start ACP"
+        )
+    return _profile_launcher_arguments(safety), str(safety)
 
 
 def _profile_dsh_command() -> list[str] | None:
@@ -139,6 +166,10 @@ class DeepSeekHarnessRunner:
             self.profile_arguments, self.profile_patch = _decision_profile_arguments()
         else:
             self.profile_arguments, self.profile_patch = [], None
+        self.profile_mode = (
+            "safety" if self.profile_patch and Path(self.profile_patch).name.startswith("safety-")
+            else "optimized" if self.profile_patch else "stock"
+        )
         self.provider = provider
         self.model = model or os.environ.get("NOVATRADE_DEEPSEEK_MODEL", _DEFAULT_MODEL)
         self.reasoning_effort = reasoning_effort or os.environ.get(
@@ -224,6 +255,54 @@ class DeepSeekHarnessRunner:
                 return detail.strip()
         return "unknown ACP error"
 
+    @staticmethod
+    def _safe_environment(workspace: str) -> dict[str, str]:
+        """Build the smallest environment needed by the ACP launcher.
+
+        The trading worker's parent environment includes exchange credentials.
+        Passing it wholesale to a model-facing process makes those credentials
+        visible to the Harness runtime and any profile extension. Keep only
+        the launcher/runtime paths, an isolated temporary home, the Harness
+        home used for its installed profile, locale, and DeepSeek provider
+        variables.
+        """
+        root = str(Path(workspace).expanduser().resolve())
+        environment = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": root,
+            "TMPDIR": root,
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "LC_ALL": os.environ.get("LC_ALL", os.environ.get("LANG", "C.UTF-8")),
+            "DSH_HOME": str(_dsh_home()),
+        }
+        for key in _DEEPSEEK_ENV_KEYS:
+            value = os.environ.get(key)
+            if value:
+                environment[key] = value
+        return environment
+
+    @staticmethod
+    async def _drain_stderr(stream: asyncio.StreamReader, buffer: bytearray) -> None:
+        """Continuously consume stderr so a noisy child cannot deadlock."""
+        try:
+            while True:
+                chunk = await stream.read(4096)
+                if not chunk:
+                    return
+                remaining = _MAX_STDERR_BYTES - len(buffer)
+                if remaining > 0:
+                    buffer.extend(chunk[:remaining])
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # stderr is diagnostic only; a closed transport must never leave
+            # an unobserved task exception behind while stdout remains usable.
+            return
+
+    @staticmethod
+    def _stderr_detail(buffer: bytearray) -> str:
+        return bytes(buffer).decode("utf-8", errors="replace").strip()[:500]
+
     async def _stop_process(self, process: asyncio.subprocess.Process) -> None:
         if process.returncode is None:
             try:
@@ -249,32 +328,38 @@ class DeepSeekHarnessRunner:
         timeout: float | Callable[[], float],
         text_chunks: list[str] | None = None,
         usage: dict[str, Any] | None = None,
+        output: dict[str, int] | None = None,
     ) -> Mapping[str, Any]:
+        wait_timeout = timeout() if callable(timeout) else timeout
+        if wait_timeout <= 0:
+            raise DeepSeekHarnessError(f"DeepSeek Harness ACP deadline exceeded before {method}")
         if process.stdin is None or process.stdout is None:
             raise DeepSeekHarnessError("DeepSeek Harness ACP pipes are unavailable")
         request = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": dict(params)}
         try:
             process.stdin.write((json.dumps(request, ensure_ascii=False, separators=(",", ":")) + "\n").encode())
-            await process.stdin.drain()
+            await asyncio.wait_for(process.stdin.drain(), timeout=wait_timeout)
         except (BrokenPipeError, ConnectionError) as error:
             raise DeepSeekHarnessError("DeepSeek Harness ACP stdin closed") from error
+        except asyncio.TimeoutError as error:
+            raise DeepSeekHarnessError(f"DeepSeek Harness ACP timed out writing {method}") from error
 
         while True:
             try:
                 wait_timeout = timeout() if callable(timeout) else timeout
-                line = await asyncio.wait_for(process.stdout.readline(), timeout=max(0.1, wait_timeout))
+                if wait_timeout <= 0:
+                    raise DeepSeekHarnessError(f"DeepSeek Harness ACP deadline exceeded waiting for {method}")
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=wait_timeout)
+            except (asyncio.LimitOverrunError, ValueError) as error:
+                raise DeepSeekHarnessError("DeepSeek Harness ACP stdout line exceeded limit") from error
             except asyncio.TimeoutError as error:
                 raise DeepSeekHarnessError(f"DeepSeek Harness ACP timed out waiting for {method}") from error
             if not line:
-                stderr = b""
-                if process.stderr is not None:
-                    try:
-                        stderr = await asyncio.wait_for(process.stderr.read(), timeout=0.5)
-                    except asyncio.TimeoutError:
-                        pass
-                detail = stderr.decode("utf-8", errors="replace").strip()[:500]
-                suffix = f": {detail}" if detail else ""
-                raise DeepSeekHarnessError(f"DeepSeek Harness ACP exited while waiting for {method}{suffix}")
+                raise DeepSeekHarnessError(f"DeepSeek Harness ACP exited while waiting for {method}")
+            if output is not None:
+                output["stdoutBytes"] = output.get("stdoutBytes", 0) + len(line)
+                if output["stdoutBytes"] > output["maxOutputBytes"]:
+                    raise DeepSeekHarnessError("DeepSeek Harness ACP stdout exceeded configured limit")
             try:
                 message = json.loads(line.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -286,6 +371,13 @@ class DeepSeekHarnessRunner:
             if text_chunks is not None:
                 text = self._text_from_update(message)
                 if text is not None:
+                    if output is not None:
+                        output["assistantChunks"] = output.get("assistantChunks", 0) + 1
+                        output["assistantBytes"] = output.get("assistantBytes", 0) + len(text.encode("utf-8"))
+                        if output["assistantChunks"] > _MAX_ASSISTANT_CHUNKS:
+                            raise DeepSeekHarnessError("DeepSeek Harness assistant chunk count exceeded limit")
+                        if output["assistantBytes"] > output["maxOutputBytes"]:
+                            raise DeepSeekHarnessError("DeepSeek Harness assistant output exceeded configured limit")
                     text_chunks.append(text)
             if message.get("id") != request_id:
                 continue
@@ -304,16 +396,27 @@ class DeepSeekHarnessRunner:
         profile_name: str,
         cwd: str | None = None,
         timeout_seconds: float = 90.0,
+        max_output_bytes: int = _DEFAULT_MAX_OUTPUT_BYTES,
     ) -> str:
         """Run one ACP attempt with a specific profile command."""
         if not isinstance(prompt, str) or not prompt.strip():
             raise DeepSeekHarnessError("DeepSeek Harness prompt is empty")
         if timeout_seconds <= 0:
             raise DeepSeekHarnessError("DeepSeek Harness timeout must be positive")
+        if max_output_bytes < 1024:
+            raise DeepSeekHarnessError("DeepSeek Harness output limit must be at least 1024 bytes")
         workspace = str(Path(cwd or os.getcwd()).expanduser().resolve())
         process: asyncio.subprocess.Process | None = None
+        stderr_task: asyncio.Task[None] | None = None
+        stderr_buffer = bytearray()
         chunks: list[str] = []
         usage: dict[str, Any] = {}
+        output = {
+            "maxOutputBytes": int(max_output_bytes),
+            "stdoutBytes": 0,
+            "assistantBytes": 0,
+            "assistantChunks": 0,
+        }
         started = asyncio.get_running_loop().time()
         metadata: dict[str, Any] = {
             "provider": self.provider,
@@ -340,20 +443,23 @@ class DeepSeekHarnessRunner:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=workspace,
-                env={**os.environ, "DSH_TOOLS_MODE": os.environ.get("DSH_TOOLS_MODE", "")},
+                env=self._safe_environment(workspace),
+                limit=_MAX_STDOUT_LINE_BYTES,
                 start_new_session=True,
             )
-            remaining = lambda: max(0.1, timeout_seconds - (asyncio.get_running_loop().time() - started))
+            if process.stderr is not None:
+                stderr_task = asyncio.create_task(self._drain_stderr(process.stderr, stderr_buffer))
+            remaining = lambda: timeout_seconds - (asyncio.get_running_loop().time() - started)
             stage_started = asyncio.get_running_loop().time()
             await self._request(
                 process, 1, "initialize", {"protocolVersion": 1, "clientCapabilities": {}},
-                timeout=remaining, usage=usage,
+                timeout=remaining, usage=usage, output=output,
             )
             metadata["initializeSeconds"] = round(asyncio.get_running_loop().time() - stage_started, 3)
             stage_started = asyncio.get_running_loop().time()
             session = await self._request(
                 process, 2, "session/new", {"cwd": workspace, "mcpServers": []},
-                timeout=remaining, usage=usage,
+                timeout=remaining, usage=usage, output=output,
             )
             metadata["sessionCreateSeconds"] = round(asyncio.get_running_loop().time() - stage_started, 3)
             session_id = session.get("sessionId")
@@ -366,19 +472,19 @@ class DeepSeekHarnessRunner:
             await self._request(
                 process, 3, "session/set_config_option",
                 {"sessionId": session_id, "configId": "model", "value": self._model_value(self.provider, self.model)},
-                timeout=remaining, usage=usage,
+                timeout=remaining, usage=usage, output=output,
             )
             await self._request(
                 process, 4, "session/set_config_option",
                 {"sessionId": session_id, "configId": "reasoning_effort", "value": self.reasoning_effort},
-                timeout=remaining, usage=usage,
+                timeout=remaining, usage=usage, output=output,
             )
             metadata["configSeconds"] = round(asyncio.get_running_loop().time() - stage_started, 3)
             stage_started = asyncio.get_running_loop().time()
             result = await self._request(
                 process, 5, "session/prompt",
                 {"sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]},
-                timeout=remaining, text_chunks=chunks, usage=usage,
+                timeout=remaining, text_chunks=chunks, usage=usage, output=output,
             )
             metadata["promptSeconds"] = round(asyncio.get_running_loop().time() - stage_started, 3)
             if result.get("stopReason") not in {"end_turn", "max_tokens", "max_turn_requests"}:
@@ -391,13 +497,18 @@ class DeepSeekHarnessRunner:
                 "outcome": "success",
                 **{field: usage.get(field) for field in _USAGE_ALIASES},
             })
-            stage_started = asyncio.get_running_loop().time()
-            await self._request(
-                process, 6, "session/close", {"sessionId": session_id}, timeout=remaining, usage=usage,
-            )
-            metadata["closeSeconds"] = round(asyncio.get_running_loop().time() - stage_started, 3)
+            if remaining() > 0:
+                stage_started = asyncio.get_running_loop().time()
+                await self._request(
+                    process, 6, "session/close", {"sessionId": session_id},
+                    timeout=remaining, usage=usage, output=output,
+                )
+                metadata["closeSeconds"] = round(asyncio.get_running_loop().time() - stage_started, 3)
+            else:
+                metadata["closeSkipped"] = True
             metadata["totalSeconds"] = round(asyncio.get_running_loop().time() - started, 3)
             metadata.update({field: usage.get(field) for field in _USAGE_ALIASES})
+            metadata.update({key: value for key, value in output.items() if key != "maxOutputBytes"})
             self.last_run_metadata = metadata
             return text
         except asyncio.CancelledError:
@@ -409,54 +520,86 @@ class DeepSeekHarnessRunner:
             metadata["error"] = str(error)[:500]
             metadata["totalSeconds"] = round(asyncio.get_running_loop().time() - started, 3)
             metadata.update({field: usage.get(field) for field in _USAGE_ALIASES})
+            metadata.update({key: value for key, value in output.items() if key != "maxOutputBytes"})
+            detail = self._stderr_detail(stderr_buffer)
+            if detail and not metadata.get("error"):
+                metadata["error"] = detail
             self.last_run_metadata = metadata
             raise
         finally:
             if process is not None:
                 await self._stop_process(process)
+            if stderr_task is not None:
+                try:
+                    await asyncio.wait_for(stderr_task, timeout=0.5)
+                except (asyncio.CancelledError, asyncio.TimeoutError, ConnectionError):
+                    stderr_task.cancel()
+                    try:
+                        await stderr_task
+                    except (asyncio.CancelledError, ConnectionError):
+                        pass
 
     @staticmethod
     def _is_profile_error(error: Exception) -> bool:
         detail = str(error).lower()
         return any(token in detail for token in (
             "unknown profile", "profile not found", "invalid profile", "failed to load profile",
-            "unrecognized option '--patch'", "unknown option '--patch'", "patch file", "overlay",
+            "patch: entry", "patch entry", "unknown option", "unrecognized option",
+            "failed to parse", "failed to read", "cannot read", "patch file", "overlay",
         ))
 
-    async def run_prompt(self, prompt: str, *, cwd: str | None = None, timeout_seconds: float = 90.0) -> str:
-        """Run with the optimized overlay, retrying once with stock ACP."""
+    async def run_prompt(
+        self,
+        prompt: str,
+        *,
+        cwd: str | None = None,
+        timeout_seconds: float = 90.0,
+        max_output_bytes: int = _DEFAULT_MAX_OUTPUT_BYTES,
+    ) -> str:
+        """Run with the optimized overlay, retrying once with the safety overlay."""
         launch = self.launch_command
         if launch is None:
             raise DeepSeekHarnessError(
                 "DeepSeek Harness ACP is unavailable; set NOVATRADE_DEEPSEEK_HARNESS_BIN "
                 "to the dsh launcher or node bin.js path"
             )
-        profile_name = _DECISION_PROFILE_NAME if self.profile_patch else "acp"
+        profile_name = (
+            _DECISION_PROFILE_NAME if self.profile_mode == "optimized"
+            else "acp-safety" if self.profile_mode == "safety" else "acp"
+        )
         started = asyncio.get_running_loop().time()
         try:
             return await self._run_prompt_once(
                 prompt, launch=launch, profile_name=profile_name,
-                cwd=cwd, timeout_seconds=timeout_seconds,
+                cwd=cwd, timeout_seconds=timeout_seconds, max_output_bytes=max_output_bytes,
             )
         except DeepSeekHarnessError as error:
-            if not self.profile_patch or not self._is_profile_error(error):
+            if self.profile_mode != "optimized" or not self._is_profile_error(error):
                 raise
             fallback_reason = str(error)[:500]
-            self.profile_arguments, self.profile_patch = _profile_launcher_arguments(None), None
+            safety_patch = _ensure_safety_patch()
+            if safety_patch is None:
+                raise DeepSeekHarnessError(
+                    "DeepSeek Harness optimized profile failed and safety overlay is unavailable"
+                ) from error
+            self.profile_arguments, self.profile_patch = _profile_launcher_arguments(safety_patch), str(safety_patch)
+            self.profile_mode = "safety"
             fallback_launch = self.launch_command
             if fallback_launch is None:
                 raise
+            fallback_timeout = timeout_seconds - (asyncio.get_running_loop().time() - started)
+            if fallback_timeout <= 0:
+                raise DeepSeekHarnessError("DeepSeek Harness profile fallback exceeded deadline") from error
             try:
-                fallback_timeout = max(0.1, timeout_seconds - (asyncio.get_running_loop().time() - started))
                 result = await self._run_prompt_once(
-                    prompt, launch=fallback_launch, profile_name="acp",
-                    cwd=cwd, timeout_seconds=fallback_timeout,
+                    prompt, launch=fallback_launch, profile_name="acp-safety",
+                    cwd=cwd, timeout_seconds=fallback_timeout, max_output_bytes=max_output_bytes,
                 )
             except DeepSeekHarnessError:
-                self.last_run_metadata["profileFallback"] = "acp"
+                self.last_run_metadata["profileFallback"] = "acp-safety"
                 self.last_run_metadata["profileFallbackReason"] = fallback_reason
                 raise
-            self.last_run_metadata["profileFallback"] = "acp"
+            self.last_run_metadata["profileFallback"] = "acp-safety"
             self.last_run_metadata["profileFallbackReason"] = fallback_reason
             return result
 

@@ -20,6 +20,37 @@ from backend import main  # noqa: E402
 
 
 class GatewayContractTests(unittest.TestCase):
+    def test_ai_strategy_catalog_exposes_package_source_runtime_and_live_gate(self):
+        class StubWorker:
+            def __init__(self, strategy_id: str, provider: str):
+                self.config = main.AIConfig(provider=provider)
+
+            def get_config(self):
+                return self.config.to_dict()
+
+            def get_status(self):
+                return {"enabled": False, "mode": "disabled"}
+
+        workers = {
+            "codex": StubWorker("codex", "codex"),
+            "deepseek": StubWorker("deepseek", "deepseek-harness"),
+        }
+
+        async def ensure(strategy_id: str):
+            return workers[strategy_id]
+
+        with patch.object(main, "_ensure_ai_worker", side_effect=ensure):
+            catalog = asyncio.run(main.ai_strategies())
+
+        self.assertEqual([item["id"] for item in catalog], ["codex", "deepseek"])
+        self.assertEqual(catalog[0]["package"]["id"], "codex_ai_decision")
+        self.assertEqual(catalog[1]["package"]["id"], "deepseek_ai_decision")
+        for item in catalog:
+            self.assertTrue(item["source"]["ofTruth"].endswith("/STRATEGY.md"))
+            self.assertTrue(item["runtime"]["decisionEndpoint"].startswith("/api/v1/ai/strategies/"))
+            self.assertTrue(item["liveGate"]["requiresManualEnable"])
+            self.assertTrue(item["liveGate"]["requiresLiveTradingSwitch"])
+
     def test_daily_loss_count_deduplicates_negative_bills_by_order(self):
         today_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         rows = [

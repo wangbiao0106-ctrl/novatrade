@@ -19,6 +19,146 @@ class PolicyError(ValueError):
 
 MIN_OPEN_WIN_RATE = 0.45
 MIN_OPEN_RISK_REWARD_RATIO = 2.0
+_OPEN_CANDLE_INTERVALS = ("5m", "15m", "1H", "4H")
+
+
+def _is_current_snapshot(snapshot: AISnapshot) -> bool:
+    """Return whether the snapshot carries the server execution metadata.
+
+    Older library callers construct small, credential-free snapshots for
+    analysis and policy tests. Runtime snapshots always include at least one
+    of these fields, so only that path is subject to the strict execution
+    gates below.
+    """
+    account = snapshot.account if isinstance(snapshot.account, dict) else {}
+    freshness = snapshot.dataFreshness if isinstance(snapshot.dataFreshness, dict) else {}
+    return bool(
+        any(key in account for key in ("authenticated", "pendingOrdersKnown"))
+        or "availability" in freshness
+    )
+
+
+def _finite_positive(value: Any) -> bool:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(parsed) and parsed > 0
+
+
+def _open_snapshot_gate(snapshot: AISnapshot, instrument_id: str) -> str | None:
+    """Check server-owned facts required before an entry can be admitted."""
+    if not _is_current_snapshot(snapshot):
+        return None
+    account = snapshot.account if isinstance(snapshot.account, dict) else {}
+    if account.get("authenticated") is not True:
+        return "authenticated account data is unavailable"
+    if not _finite_positive(account.get("availableEquityUSD")):
+        return "available account equity is unavailable"
+    loss_count = account.get("todayLossCount")
+    if isinstance(loss_count, bool) or not isinstance(loss_count, (int, float)) or not math.isfinite(float(loss_count)) or float(loss_count) < 0:
+        return "todayLossCount is unavailable or invalid"
+    if account.get("pendingOrdersKnown") is not True or not isinstance(account.get("pendingOrders"), list):
+        return "pending order state is unavailable"
+    account_quality = account.get("dataQuality")
+    if not isinstance(account_quality, dict):
+        return "account data quality is unavailable"
+    if account_quality.get("dailyBillsAvailable") is not True or account_quality.get("dailyBillsError"):
+        return "daily account loss data is unavailable"
+    if account_quality.get("pendingOrdersAvailable") is not True or account_quality.get("pendingOrdersError"):
+        return "pending order data is unavailable"
+
+    risk = snapshot.risk if isinstance(snapshot.risk, dict) else {}
+    risk_quality = risk.get("dataQuality")
+    if not isinstance(risk_quality, dict):
+        return "risk data quality is unavailable"
+    if risk_quality.get("accountRefreshError") or risk_quality.get("accountRefreshRetryable"):
+        return "risk account refresh is unavailable"
+    if not isinstance(risk.get("killSwitch"), bool):
+        return "risk kill switch state is unavailable"
+    daily_pnl = risk.get("dailyPnLPercent")
+    if isinstance(daily_pnl, bool) or not isinstance(daily_pnl, (int, float)) or not math.isfinite(float(daily_pnl)):
+        return "risk daily PnL is unavailable"
+    if risk.get("killSwitch") or float(daily_pnl) <= -5:
+        return "risk kill switch is active"
+
+    ai = snapshot.ai if isinstance(snapshot.ai, dict) else {}
+    availability = ai.get("tradingAvailability")
+    item = availability.get(instrument_id) if isinstance(availability, dict) else None
+    if not isinstance(item, dict) or item.get("available") is not True:
+        return f"{instrument_id} trading availability is unavailable"
+
+    ticker = snapshot.tickers.get(instrument_id) if isinstance(snapshot.tickers, dict) else None
+    if not isinstance(ticker, dict) or not _finite_positive(ticker.get("last")):
+        return f"{instrument_id} ticker data is unavailable"
+    for interval in _OPEN_CANDLE_INTERVALS:
+        rows = snapshot.candles.get(f"{instrument_id}/{interval}") if isinstance(snapshot.candles, dict) else None
+        if not isinstance(rows, list) or not rows:
+            return f"{instrument_id} {interval} candle data is unavailable"
+        if not any(isinstance(row, dict) and row.get("confirmed") is True for row in rows):
+            return f"{instrument_id} {interval} confirmed candle data is unavailable"
+    return None
+
+
+def _check_protection_geometry(
+    *, instrument_id: str, direction: str | None, entry: Any,
+    stop_loss: Any, take_profit: Any,
+) -> str | None:
+    """Validate optional stop/target prices against the actual entry price."""
+    if direction not in {"long", "short"}:
+        return None
+    if stop_loss is None and take_profit is None:
+        return None
+    # Credential-free legacy market intents do not carry a server ticker. A
+    # current runtime snapshot is rejected by _open_snapshot_gate before this
+    # helper, so preserve that compatibility path here.
+    if entry is None:
+        return None
+    if not _finite_positive(entry):
+        return f"{instrument_id} entry price is unavailable"
+    try:
+        entry_value = float(entry)
+        stop_value = float(stop_loss) if stop_loss is not None else None
+        target_value = float(take_profit) if take_profit is not None else None
+    except (TypeError, ValueError):
+        return f"{instrument_id} protection prices are invalid"
+    if stop_value is not None and (not math.isfinite(stop_value) or stop_value <= 0):
+        return f"{instrument_id} stop loss price is invalid"
+    if target_value is not None and (not math.isfinite(target_value) or target_value <= 0):
+        return f"{instrument_id} take profit price is invalid"
+    ordered = (
+        (stop_value is None or stop_value < entry_value)
+        and (target_value is None or entry_value < target_value)
+        if direction == "long" else
+        (target_value is None or target_value < entry_value)
+        and (stop_value is None or entry_value < stop_value)
+    )
+    if not ordered:
+        return f"assessment entry/stop loss/take profit conflict with direction: {instrument_id}"
+    return None
+
+
+def _validate_cancel_scope(snapshot: AISnapshot, instrument_id: str, order_id: str) -> str | None:
+    """Require a cancel intent to name a current, cancellable order."""
+    if not _is_current_snapshot(snapshot):
+        return None
+    account = snapshot.account if isinstance(snapshot.account, dict) else {}
+    if account.get("pendingOrdersKnown") is not True or not isinstance(account.get("pendingOrders"), list):
+        return "pending order state is unavailable"
+    allowed_states = {"live", "partially_filled", "waiting", "pending", "open", "queued"}
+    for row in account["pendingOrders"]:
+        if not isinstance(row, dict):
+            continue
+        candidate = row.get("id") or row.get("orderID") or row.get("ordId")
+        if str(candidate or "") != order_id:
+            continue
+        if str(row.get("instrumentID") or row.get("instId") or "") != instrument_id:
+            return "cancel order does not belong to the selected instrument"
+        status = str(row.get("status") or row.get("state") or "").lower()
+        if status not in allowed_states:
+            return "cancel order is no longer cancellable"
+        return None
+    return "cancel order is not a current pending order"
 
 
 def utc_now() -> datetime:
@@ -172,12 +312,13 @@ def validate_decision(
             if item.direction in {"long", "short"} and all(
                 value is not None for value in (item.limitPrice, item.stopLossPrice, item.takeProfitPrice)
             ):
-                ordered = (
-                    item.stopLossPrice < item.limitPrice < item.takeProfitPrice
-                    if item.direction == "long" else item.takeProfitPrice < item.limitPrice < item.stopLossPrice
+                geometry_error = _check_protection_geometry(
+                    instrument_id=item.instrumentID, direction=item.direction,
+                    entry=item.limitPrice, stop_loss=item.stopLossPrice,
+                    take_profit=item.takeProfitPrice,
                 )
-                if not ordered:
-                    return reject(f"assessment entry/stop loss/take profit conflict with direction: {item.instrumentID}", parsed_snapshot.snapshotId)
+                if geometry_error:
+                    return reject(geometry_error, parsed_snapshot.snapshotId)
     try:
         captured = parse_time(parsed_snapshot.capturedAt)
         valid_until = parse_time(parsed_decision.validUntil)
@@ -244,6 +385,17 @@ def validate_decision(
                 # threshold or demanding a TP from legacy entry intents.
                 if selected.riskRewardRatio is not None and selected.riskRewardRatio > gross_ratio * 1.01 + .01:
                     return reject("open riskRewardRatio exceeds its proposed price setup", parsed_snapshot.snapshotId)
+            entry_price = selected.limitPrice
+            if parsed_decision.orderType == "market":
+                ticker = parsed_snapshot.tickers.get(parsed_decision.instrumentID, {})
+                entry_price = ticker.get("last") if isinstance(ticker, dict) else None
+            geometry_error = _check_protection_geometry(
+                instrument_id=selected.instrumentID, direction=selected.direction,
+                entry=entry_price, stop_loss=selected.stopLossPrice,
+                take_profit=selected.takeProfitPrice,
+            )
+            if geometry_error:
+                return reject(geometry_error, parsed_snapshot.snapshotId)
         freshness = snapshot_freshness(parsed_snapshot, parsed_config, now=clock)
         if not freshness["valid"]:
             return reject(str(freshness["error"]), parsed_snapshot.snapshotId)
@@ -288,11 +440,29 @@ def validate_decision(
             return reject("open requires a stop loss", parsed_snapshot.snapshotId)
         if parsed_decision.orderType == "limit" and (parsed_decision.limitPrice is None or parsed_decision.limitPrice <= 0):
             return reject("limit orders require limitPrice", parsed_snapshot.snapshotId)
+        entry_price = parsed_decision.limitPrice
+        if parsed_decision.orderType == "market":
+            ticker = parsed_snapshot.tickers.get(parsed_decision.instrumentID, {})
+            entry_price = ticker.get("last") if isinstance(ticker, dict) else None
+        geometry_error = _check_protection_geometry(
+            instrument_id=parsed_decision.instrumentID, direction=parsed_decision.direction,
+            entry=entry_price, stop_loss=parsed_decision.stopLossPrice,
+            take_profit=parsed_decision.takeProfitPrice,
+        )
+        if geometry_error:
+            return reject(geometry_error, parsed_snapshot.snapshotId)
     if parsed_decision.action == "close" and parsed_decision.direction is None:
         return reject("close requires direction", parsed_snapshot.snapshotId)
     if parsed_decision.action == "cancel" and not parsed_decision.orderID:
         return reject("cancel requires orderID", parsed_snapshot.snapshotId)
+    if parsed_decision.action == "cancel":
+        cancel_error = _validate_cancel_scope(parsed_snapshot, parsed_decision.instrumentID, parsed_decision.orderID)
+        if cancel_error:
+            return reject(cancel_error, parsed_snapshot.snapshotId)
     if parsed_decision.action == "open":
+        gate_error = _open_snapshot_gate(parsed_snapshot, parsed_decision.instrumentID)
+        if gate_error:
+            return reject(gate_error, parsed_snapshot.snapshotId)
         previous = state.lastActionAt.get(parsed_decision.instrumentID)
         if previous is not None and clock - previous < timedelta(seconds=parsed_config.cooldownSeconds):
             return reject("instrument is in cooldown", parsed_snapshot.snapshotId)
@@ -300,8 +470,8 @@ def validate_decision(
 
 
 def record_decision(state: PolicyState, result: PolicyResult, *, at: datetime | None = None) -> None:
-    """Record only admitted actions; hold decisions do not consume cooldown."""
-    if result.accepted and result.decision.action != "hold":
+    """Record an executed entry; exits and holds do not consume cooldown."""
+    if result.accepted and result.decision.action == "open":
         state.remember(result.decision, at)
 
 

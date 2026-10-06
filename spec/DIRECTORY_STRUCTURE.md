@@ -59,6 +59,8 @@ spec/                               稳定的工程规范和接口约定
 | 目录 | 用途 | 状态 |
 | --- | --- | --- |
 | `strategies/sweep_reversal_short/` | 山寨币二次扫顶 | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.4）|
+| `strategies/codex_ai_decision/` | Codex / GPT AI 决策策略实验室包 | 候选规则；由 backend 配置中心 `codex` 管理 |
+| `strategies/deepseek_ai_decision/` | DeepSeek AI 决策策略实验室包 | 候选规则；由 backend 配置中心 `deepseek` 管理 |
 | `strategies/ema_3line_pullback/` | 三线突破回踩（EMA 20/60/120，四方向历史研究） | 研究归档，不是规则真源，未接入运行时 |
 | `strategies/intraday_pump_retest_short/` | 缩量二次拉升（山寨日内涨幅超过 60% 后回落再突涨） | 研究候选，未接入运行时 |
 | `strategies/personal_trading_style_backtest/` | 交易风格回放（OKX 统一账单回放、风格验证和候选筛选） | 研究候选，未接入运行时 |
