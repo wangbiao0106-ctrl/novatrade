@@ -133,6 +133,31 @@ class GatewayContractTests(unittest.TestCase):
         self.assertEqual(snapshot["takeProfitPrice"], 110)
         self.assertEqual(snapshot["stopLossPrice"], 95)
 
+    def test_pending_position_protections_reads_okx_algorithm_order_types(self):
+        calls = []
+
+        async def fake_request(method, path, *, params=None, body=None):
+            calls.append((method, path, params))
+            if params["ordType"] == "oco":
+                return {"data": [{
+                    "instId": "FIL-USDT-SWAP", "posSide": "net",
+                    "tpTriggerPx": "1.1899", "slTriggerPx": "1.1439",
+                }]}
+            return {"data": []}
+
+        previous = main.okx_private_request
+        main.okx_private_request = fake_request
+        try:
+            protections = asyncio.run(main._pending_position_protections())
+        finally:
+            main.okx_private_request = previous
+
+        self.assertEqual(protections["FIL-USDT-SWAP|net"], {
+            "takeProfitPrice": 1.1899,
+            "stopLossPrice": 1.1439,
+        })
+        self.assertEqual([call[2]["ordType"] for call in calls], ["conditional", "oco", "trigger"])
+
     def test_order_snapshot_calculates_margin_from_contract_spec(self):
         snapshot = main.order_snapshot({
             "ordId": "order-1", "instId": "BTC-USDT-SWAP", "side": "buy",

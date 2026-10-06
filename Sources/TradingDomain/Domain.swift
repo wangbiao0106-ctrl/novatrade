@@ -569,10 +569,52 @@ public enum AIOrderType: String, Codable, CaseIterable, Sendable {
     case limit
 }
 
+/// Stable identifiers for the server-owned AI workers. The legacy Codex
+/// endpoint remains the default when a response omits this value.
+public enum AIStrategyID: String, Codable, CaseIterable, Sendable, Identifiable, Hashable {
+    case codex
+    case deepseek
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .codex: return "Codex AI"
+        case .deepseek: return "DeepSeek AI"
+        }
+    }
+
+    public var providerLabel: String {
+        switch self {
+        case .codex: return "Codex"
+        case .deepseek: return "DeepSeek Harness"
+        }
+    }
+}
+
+/// Decision engine used by an AI strategy. Kept separate from the strategy
+/// identifier so a future strategy can share a provider without changing the
+/// dashboard model.
+public enum AIProvider: String, Codable, CaseIterable, Sendable, Hashable {
+    case codex
+    case deepseekHarness = "deepseek-harness"
+
+    public var displayName: String {
+        switch self {
+        case .codex: return "Codex"
+        case .deepseekHarness: return "DeepSeek Harness"
+        }
+    }
+}
+
 /// Persisted configuration for the local AI worker.  The same object is used
 /// for GET responses and PATCH requests; the service merges PATCH fields with
 /// its persisted configuration before validating the result.
 public struct AIConfig: Codable, Equatable, Sendable {
+    /// Optional for compatibility with configurations written before the
+    /// multi-strategy control plane existed.
+    public var strategyID: AIStrategyID?
+    public var provider: AIProvider?
     public var enabled: Bool
     public var mode: AIRunMode
     public var allowedInstruments: [String]
@@ -595,7 +637,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
     /// Upper leverage bound. The AI may request a lower leverage per decision.
     public var maxLeverage: Double
 
-    public init(enabled: Bool = false, mode: AIRunMode = .disabled, allowedInstruments: [String] = [], minimumConfidence: Double = 0.65, decisionIntervalSeconds: Double = 30, cliTimeoutSeconds: Double = 45, maxOutputBytes: Int = 1_000_000, cooldownSeconds: Double = 43_200, maxConsecutiveFailures: Int = 3, allowOpen: Bool = true, allowClose: Bool = true, allowCancel: Bool = true, requireStopLoss: Bool = true, maxDailyOrders: Int = 20, maxDailyLosses: Int = 5, marginPerOrderUSD: Double = 500, maxLeverage: Double = 5) {
+    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool = false, mode: AIRunMode = .disabled, allowedInstruments: [String] = [], minimumConfidence: Double = 0.65, decisionIntervalSeconds: Double = 30, cliTimeoutSeconds: Double = 90, maxOutputBytes: Int = 1_000_000, cooldownSeconds: Double = 43_200, maxConsecutiveFailures: Int = 3, allowOpen: Bool = true, allowClose: Bool = true, allowCancel: Bool = true, requireStopLoss: Bool = true, maxDailyOrders: Int = 20, maxDailyLosses: Int = 5, marginPerOrderUSD: Double = 500, maxLeverage: Double = 5) {
+        self.strategyID = strategyID; self.provider = provider
         self.enabled = enabled; self.mode = mode; self.allowedInstruments = allowedInstruments
         self.minimumConfidence = minimumConfidence; self.decisionIntervalSeconds = decisionIntervalSeconds
         self.cliTimeoutSeconds = cliTimeoutSeconds; self.maxOutputBytes = maxOutputBytes
@@ -607,7 +650,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case enabled, mode, allowedInstruments
+        case strategyID, provider, enabled, mode, allowedInstruments
         case minimumConfidence, decisionIntervalSeconds, cliTimeoutSeconds, maxOutputBytes
         case cooldownSeconds, maxConsecutiveFailures, allowOpen, allowClose, allowCancel
         case requireStopLoss, maxDailyOrders, maxDailyLosses, marginPerOrderUSD, maxLeverage
@@ -618,12 +661,14 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
+            strategyID: try container.decodeIfPresent(AIStrategyID.self, forKey: .strategyID),
+            provider: try container.decodeIfPresent(AIProvider.self, forKey: .provider),
             enabled: try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false,
             mode: try container.decodeIfPresent(AIRunMode.self, forKey: .mode) ?? .disabled,
             allowedInstruments: try container.decodeIfPresent([String].self, forKey: .allowedInstruments) ?? [],
             minimumConfidence: try container.decodeIfPresent(Double.self, forKey: .minimumConfidence) ?? 0.65,
             decisionIntervalSeconds: try container.decodeIfPresent(Double.self, forKey: .decisionIntervalSeconds) ?? 30,
-            cliTimeoutSeconds: try container.decodeIfPresent(Double.self, forKey: .cliTimeoutSeconds) ?? 45,
+            cliTimeoutSeconds: try container.decodeIfPresent(Double.self, forKey: .cliTimeoutSeconds) ?? 90,
             maxOutputBytes: try container.decodeIfPresent(Int.self, forKey: .maxOutputBytes) ?? 1_000_000,
             cooldownSeconds: try container.decodeIfPresent(Double.self, forKey: .cooldownSeconds) ?? 43_200,
             maxConsecutiveFailures: try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveFailures) ?? 3,
@@ -640,6 +685,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(strategyID, forKey: .strategyID)
+        try container.encodeIfPresent(provider, forKey: .provider)
         try container.encode(enabled, forKey: .enabled)
         try container.encode(mode, forKey: .mode)
         try container.encode(allowedInstruments, forKey: .allowedInstruments)
@@ -663,6 +710,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
 /// A partial configuration update.  Omitting a field leaves the server's
 /// persisted value unchanged, which keeps PATCH semantics explicit.
 public struct AIPatch: Codable, Equatable, Sendable {
+    public var strategyID: AIStrategyID?
+    public var provider: AIProvider?
     public var enabled: Bool?
     public var mode: AIRunMode?
     public var allowedInstruments: [String]?
@@ -681,7 +730,8 @@ public struct AIPatch: Codable, Equatable, Sendable {
     public var marginPerOrderUSD: Double?
     public var maxLeverage: Double?
 
-    public init(enabled: Bool? = nil, mode: AIRunMode? = nil, allowedInstruments: [String]? = nil, minimumConfidence: Double? = nil, decisionIntervalSeconds: Double? = nil, cliTimeoutSeconds: Double? = nil, maxOutputBytes: Int? = nil, cooldownSeconds: Double? = nil, maxConsecutiveFailures: Int? = nil, allowOpen: Bool? = nil, allowClose: Bool? = nil, allowCancel: Bool? = nil, requireStopLoss: Bool? = nil, maxDailyOrders: Int? = nil, maxDailyLosses: Int? = nil, marginPerOrderUSD: Double? = nil, maxLeverage: Double? = nil) {
+    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool? = nil, mode: AIRunMode? = nil, allowedInstruments: [String]? = nil, minimumConfidence: Double? = nil, decisionIntervalSeconds: Double? = nil, cliTimeoutSeconds: Double? = nil, maxOutputBytes: Int? = nil, cooldownSeconds: Double? = nil, maxConsecutiveFailures: Int? = nil, allowOpen: Bool? = nil, allowClose: Bool? = nil, allowCancel: Bool? = nil, requireStopLoss: Bool? = nil, maxDailyOrders: Int? = nil, maxDailyLosses: Int? = nil, marginPerOrderUSD: Double? = nil, maxLeverage: Double? = nil) {
+        self.strategyID = strategyID; self.provider = provider
         self.enabled = enabled; self.mode = mode; self.allowedInstruments = allowedInstruments
         self.minimumConfidence = minimumConfidence; self.decisionIntervalSeconds = decisionIntervalSeconds
         self.cliTimeoutSeconds = cliTimeoutSeconds; self.maxOutputBytes = maxOutputBytes
@@ -711,6 +761,8 @@ public struct AIDecisionFreshness: Codable, Equatable, Sendable {
 }
 
 public struct AIStatus: Codable, Equatable, Sendable {
+    public let strategyID: AIStrategyID?
+    public let provider: AIProvider?
     public let state: String
     public let mode: AIRunMode
     public let enabled: Bool
@@ -728,7 +780,8 @@ public struct AIStatus: Codable, Equatable, Sendable {
     public let lastDecisionInstruments: [String]
     public let lastDecisionFreshness: AIDecisionFreshness?
 
-    public init(state: String = "stopped", mode: AIRunMode = .disabled, enabled: Bool = false, consecutiveFailures: Int = 0, lastDecisionAt: Date? = nil, lastError: String? = nil, lastDecision: AIDecision? = nil, updatedAt: Date? = nil, observedInstruments: [String] = [], observationUpdatedAt: Date? = nil, lastDecisionInstruments: [String] = [], lastDecisionFreshness: AIDecisionFreshness? = nil) {
+    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, state: String = "stopped", mode: AIRunMode = .disabled, enabled: Bool = false, consecutiveFailures: Int = 0, lastDecisionAt: Date? = nil, lastError: String? = nil, lastDecision: AIDecision? = nil, updatedAt: Date? = nil, observedInstruments: [String] = [], observationUpdatedAt: Date? = nil, lastDecisionInstruments: [String] = [], lastDecisionFreshness: AIDecisionFreshness? = nil) {
+        self.strategyID = strategyID; self.provider = provider
         self.state = state; self.mode = mode; self.enabled = enabled; self.consecutiveFailures = consecutiveFailures
         self.lastDecisionAt = lastDecisionAt; self.lastError = lastError; self.lastDecision = lastDecision; self.updatedAt = updatedAt
         self.observedInstruments = observedInstruments
@@ -738,7 +791,7 @@ public struct AIStatus: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case state, mode, enabled, consecutiveFailures, lastDecisionAt, lastError
+        case strategyID, provider, state, mode, enabled, consecutiveFailures, lastDecisionAt, lastError
         case lastDecision, updatedAt, observedInstruments, observationUpdatedAt, lastDecisionInstruments, lastDecisionFreshness
     }
 
@@ -748,6 +801,8 @@ public struct AIStatus: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
+            strategyID: try container.decodeIfPresent(AIStrategyID.self, forKey: .strategyID),
+            provider: try container.decodeIfPresent(AIProvider.self, forKey: .provider),
             state: try container.decodeIfPresent(String.self, forKey: .state) ?? "stopped",
             mode: try container.decodeIfPresent(AIRunMode.self, forKey: .mode) ?? .disabled,
             enabled: try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false,
@@ -765,6 +820,8 @@ public struct AIStatus: Codable, Equatable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(strategyID, forKey: .strategyID)
+        try container.encodeIfPresent(provider, forKey: .provider)
         try container.encode(state, forKey: .state)
         try container.encode(mode, forKey: .mode)
         try container.encode(enabled, forKey: .enabled)

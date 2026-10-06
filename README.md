@@ -32,7 +32,7 @@ cp backend/.env.example "$HOME/Library/Application Support/NovaTrade/backend.env
 ## 当前版本
 
 - macOS SwiftUI 交易工作台：支持永续合约搜索、自选收藏、合约切换、周期切换、行情指标和策略配置/启停。
-- K 线使用 SwiftUI 原生 Canvas：红涨绿跌、连续拖拽、悬停十字线、日期/价格轴、成交量和 EMA。历史数据首次通过 API 预热；实时 K 柱仅使用 OKX V5 Business WSS 的 candle 频道，没有 K 线轮询或 ticker 拼接。WSS 不提供历史查询，因此首次历史加载仍需 API。
+- K 线使用 SwiftUI 原生 Canvas：绿涨红跌、连续拖拽、悬停十字线、日期/价格轴、成交量和 EMA。历史数据首次通过 API 预热；实时 K 柱仅使用 OKX V5 Business WSS 的 candle 频道，没有 K 线轮询或 ticker 拼接。WSS 不提供历史查询，因此首次历史加载仍需 API。
 - FastAPI backend 负责本地 REST/WebSocket 请求的 token、Host/Origin 校验，并直接请求 OKX 公共 REST/WSS。历史 K 线和实时 K 线都由 Python 处理，客户端不再启动 Swift 本地服务。
 - 策略和风控状态保存在应用支持目录的 JSON 文件中；可用 `GET /api/v1/strategies/targets?fresh=true` 读取当前缓存。
 - 状态目录（`~/Library/Application Support/NovaTrade/`）的基础运行文件包括 `paper-state.json`（原子写入策略、状态、订单、成交和风控）与 `runtime-log.jsonl`（最近 1000 条运行日志）；启用 AI 后还会增加独立的 AI 配置、决策审计和订单 reservation 文件。

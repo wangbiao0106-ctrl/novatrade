@@ -140,12 +140,17 @@ def authorized(headers: Any, host: str | None, origin: str | None) -> bool:
 
 app = FastAPI(title="NovaTrade FastAPI", version="1")
 ai_worker: AIWorker | None = None
+# Strategy-specific workers share the market collector and order gateway but
+# keep provider config, lifecycle state and audit ledgers independent.
+ai_workers: dict[str, AIWorker] = {}
 order_gateway: OrderGateway | None = None
 
 
 @app.on_event("shutdown")
 async def close_okx_http_client() -> None:
-    if ai_worker is not None:
+    for worker in {id(item): item for item in ai_workers.values()}.values():
+        await worker.stop()
+    if ai_worker is not None and "codex" not in ai_workers:
         await ai_worker.stop()
     await OKX_HTTP_CLIENT.aclose()
 
@@ -615,26 +620,33 @@ def _position_protection_key(row: dict[str, Any]) -> str:
 
 async def _pending_position_protections() -> dict[str, dict[str, float | None]]:
     """Best-effort lookup of standalone position protection algorithms."""
-    try:
-        payload = await okx_private_request("GET", "/trade/orders-algo-pending", params={"instType": "SWAP"})
-    except Exception:
-        return {}
     result: dict[str, dict[str, float | None]] = {}
-    for row in payload.get("data", []):
-        if not isinstance(row, dict) or not row.get("instId"):
+    # OKX requires `ordType` for this endpoint. Attached TP/SL orders are
+    # commonly represented as OCO algorithms after the parent order fills;
+    # conditional and trigger orders are valid representations as well.
+    for order_type in ("conditional", "oco", "trigger"):
+        try:
+            payload = await okx_private_request(
+                "GET", "/trade/orders-algo-pending",
+                params={"instType": "SWAP", "ordType": order_type},
+            )
+        except Exception:
             continue
-        take_profit, stop_loss = _protection_prices(row)
-        if take_profit is None and stop_loss is None:
-            continue
-        key = _position_protection_key(row)
-        current = result.setdefault(key, {"takeProfitPrice": None, "stopLossPrice": None})
-        current["takeProfitPrice"] = current["takeProfitPrice"] or take_profit
-        current["stopLossPrice"] = current["stopLossPrice"] or stop_loss
-        # A missing posSide is common for net-mode algorithms. Keep an
-        # instrument-only fallback for the corresponding position row.
-        fallback = result.setdefault(f"{row.get('instId')}|net", {"takeProfitPrice": None, "stopLossPrice": None})
-        fallback["takeProfitPrice"] = fallback["takeProfitPrice"] or take_profit
-        fallback["stopLossPrice"] = fallback["stopLossPrice"] or stop_loss
+        for row in payload.get("data", []) if isinstance(payload, dict) else []:
+            if not isinstance(row, dict) or not row.get("instId"):
+                continue
+            take_profit, stop_loss = _protection_prices(row)
+            if take_profit is None and stop_loss is None:
+                continue
+            key = _position_protection_key(row)
+            current = result.setdefault(key, {"takeProfitPrice": None, "stopLossPrice": None})
+            current["takeProfitPrice"] = current["takeProfitPrice"] or take_profit
+            current["stopLossPrice"] = current["stopLossPrice"] or stop_loss
+            # A missing posSide is common for net-mode algorithms. Keep an
+            # instrument-only fallback for the corresponding position row.
+            fallback = result.setdefault(f"{row.get('instId')}|net", {"takeProfitPrice": None, "stopLossPrice": None})
+            fallback["takeProfitPrice"] = fallback["takeProfitPrice"] or take_profit
+            fallback["stopLossPrice"] = fallback["stopLossPrice"] or stop_loss
     return result
 
 
@@ -1013,11 +1025,12 @@ class _AIDataCollector:
                 return None, metadata
 
 
-async def _ai_snapshot() -> AISnapshot:
-    """Build a credential-free snapshot for one Codex invocation."""
+async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
+    """Build a credential-free snapshot using the selected strategy config."""
     collection_started = now_iso()
     collection_clock = asyncio.get_running_loop().time()
-    config = ai_worker.config if ai_worker is not None else AIConfig()
+    worker = ai_workers.get(strategy_id) or (ai_worker if strategy_id == "codex" else None)
+    config = worker.config if worker is not None else AIConfig()
     contract_rows = await contracts(fresh=True)
     available = {str(row.get("id")): row for row in contract_rows}
     candidates = _ai_candidate_ids(config, contract_rows)
@@ -1160,7 +1173,7 @@ async def _ai_cancel(decision: AIDecision, *, demo: bool) -> dict[str, Any]:
     return {"action": "cancel", "orderID": decision.orderID, "instrumentID": decision.instrumentID, "status": "cancelled", "submittedAt": now_iso()}
 
 
-async def _ai_execute(decision: AIDecision, snapshot: AISnapshot) -> dict[str, Any]:
+async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: str = "codex") -> dict[str, Any]:
     """Apply current account/risk state immediately before submitting an AI intent."""
     if decision.action == "cancel":
         return await _ai_cancel(decision, demo=OKX_DEMO)
@@ -1168,7 +1181,8 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot) -> dict[str, A
         raise HTTPException(status_code=422, detail="AI action requires an instrument and direction")
     if decision.action == "open" and (snapshot.risk.get("killSwitch") or as_float(snapshot.risk.get("dailyPnLPercent")) <= -5):
         raise HTTPException(status_code=409, detail="risk kill switch is active")
-    config = ai_worker.config if ai_worker is not None else AIConfig()
+    worker = ai_workers.get(strategy_id) or (ai_worker if strategy_id == "codex" else None)
+    config = worker.config if worker is not None else AIConfig()
     entry_deadline = None
     if decision.action == "open":
         freshness = snapshot_freshness(snapshot, config, now=datetime.now(timezone.utc))
@@ -1251,18 +1265,55 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot) -> dict[str, A
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
-async def _ensure_ai_worker() -> AIWorker:
+def _strategy_id(value: str) -> str:
+    if value not in {"codex", "deepseek"}:
+        raise HTTPException(status_code=404, detail="unknown AI strategy")
+    return value
+
+
+async def _ensure_ai_worker(strategy_id: str = "codex") -> AIWorker:
     global ai_worker
-    if ai_worker is None:
-        ai_worker = AIWorker(snapshot_provider=_ai_snapshot, order_gateway=_ai_execute, state_dir=state_dir())
-    if ai_worker.config.enabled and ai_worker.config.mode not in {"disabled", "halted"}:
-        await ai_worker.start()
-    return ai_worker
+    strategy_id = _strategy_id(strategy_id)
+    existing = ai_workers.get(strategy_id)
+    if existing is None:
+        if strategy_id == "codex":
+            existing = AIWorker(
+                snapshot_provider=lambda: _ai_snapshot("codex"),
+                order_gateway=lambda decision, snapshot: _ai_execute(decision, snapshot, "codex"),
+                state_dir=state_dir(), strategy_id="codex",
+            )
+            ai_worker = existing
+        else:
+            codex = await _ensure_ai_worker("codex")
+            config_path = state_dir() / "ai-config-deepseek.json"
+            if config_path.exists():
+                config = None
+            else:
+                # Keep every risk/timing/observation setting identical. The
+                # provider is the only field that changes in the clone.
+                config = codex.config.clone_for_provider("deepseek-harness")
+            existing = AIWorker(
+                snapshot_provider=lambda: _ai_snapshot("deepseek"),
+                order_gateway=lambda decision, snapshot: _ai_execute(decision, snapshot, "deepseek"),
+                config=config,
+                state_dir=state_dir(), strategy_id="deepseek",
+            )
+            if existing.config.provider != "deepseek-harness":
+                existing.update_config({"provider": "deepseek-harness"})
+            if config is not None:
+                existing.update_config({})
+        ai_workers[strategy_id] = existing
+    if existing.config.enabled and existing.config.mode not in {"disabled", "halted"}:
+        await existing.start()
+    return existing
 
 
 @app.on_event("startup")
 async def start_ai_worker() -> None:
-    await _ensure_ai_worker()
+    await _ensure_ai_worker("codex")
+    # Initialize the cloned strategy on first launch. A persisted DeepSeek
+    # file always wins on later launches, so user changes are preserved.
+    await _ensure_ai_worker("deepseek")
     if private_ready():
         with contextlib.suppress(Exception):
             await _get_order_gateway().reconcile(demo=OKX_DEMO)
@@ -1321,9 +1372,89 @@ async def ai_config() -> dict[str, Any]:
     return worker.get_config()
 
 
+def _check_strategy_provider(strategy_id: str, values: dict[str, Any]) -> None:
+    expected = "deepseek-harness" if strategy_id == "deepseek" else "codex"
+    provider = values.get("provider")
+    if provider is not None and provider != expected:
+        raise HTTPException(status_code=422, detail=f"{strategy_id} strategy requires provider={expected}")
+
+
+@app.get("/api/v1/ai/strategies")
+async def ai_strategies() -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for strategy_id in ("codex", "deepseek"):
+        worker = await _ensure_ai_worker(strategy_id)
+        result.append({
+            "id": strategy_id,
+            "name": "DeepSeek Harness AI 策略" if strategy_id == "deepseek" else "Codex AI 策略",
+            "provider": worker.config.provider,
+            "config": worker.get_config(),
+            "status": worker.get_status(),
+        })
+    return result
+
+
+@app.get("/api/v1/ai/strategies/{strategy_id}/status")
+async def strategy_ai_status(strategy_id: str) -> dict[str, Any]:
+    strategy_id = _strategy_id(strategy_id)
+    worker = await _ensure_ai_worker(strategy_id)
+    value = worker.get_status()
+    value.update({"strategyID": strategy_id, "provider": worker.config.provider})
+    return value
+
+
+@app.get("/api/v1/ai/strategies/{strategy_id}/config")
+async def strategy_ai_config(strategy_id: str) -> dict[str, Any]:
+    return (await _ensure_ai_worker(strategy_id)).get_config()
+
+
+@app.patch("/api/v1/ai/strategies/{strategy_id}/config")
+async def update_strategy_ai_config(strategy_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    strategy_id = _strategy_id(strategy_id)
+    _check_strategy_provider(strategy_id, config)
+    worker = await _ensure_ai_worker(strategy_id)
+    if config.get("mode") == "live-armed" and (OKX_DEMO or not read_state("live-trading.json", {}).get("enabled", False)):
+        raise HTTPException(status_code=409, detail="live AI mode requires the separate live trading switch")
+    try:
+        await _validate_fixed_instruments(config)
+        value = worker.update_config(config)
+    except (SchemaError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if worker.config.enabled and worker.config.mode not in {"disabled", "halted"}:
+        await worker.start()
+    else:
+        await worker.stop()
+    return value
+
+
+@app.get("/api/v1/ai/strategies/{strategy_id}/decisions")
+async def strategy_ai_decisions(strategy_id: str) -> list[dict[str, Any]]:
+    worker = await _ensure_ai_worker(strategy_id)
+    path = worker._path("ai-decisions.jsonl")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()[-1000:]
+    except OSError:
+        return []
+    result: list[dict[str, Any]] = []
+    for line in lines:
+        try:
+            value = json.loads(line)
+            if isinstance(value, dict):
+                result.append(value)
+        except json.JSONDecodeError:
+            continue
+    return result
+
+
+@app.get("/api/v1/ai/strategies/{strategy_id}/audit")
+async def strategy_ai_audit(strategy_id: str) -> list[dict[str, Any]]:
+    return await strategy_ai_decisions(strategy_id)
+
+
 @app.patch("/api/v1/ai/config")
 async def update_ai_config(config: dict[str, Any]) -> dict[str, Any]:
     worker = await _ensure_ai_worker()
+    _check_strategy_provider("codex", config)
     if config.get("mode") == "live-armed" and (OKX_DEMO or not read_state("live-trading.json", {}).get("enabled", False)):
         raise HTTPException(status_code=409, detail="live AI mode requires the separate live trading switch")
     try:
@@ -1386,6 +1517,29 @@ async def ai_chat(request: dict[str, Any]) -> dict[str, Any]:
             "errorCode": "chat_unavailable",
         }
 
+
+@app.post("/api/v1/ai/strategies/{strategy_id}/chat")
+async def strategy_ai_chat(strategy_id: str, request: dict[str, Any]) -> dict[str, Any]:
+    try:
+        chat_request = AIChatRequest.from_dict(request)
+    except (SchemaError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    worker = await _ensure_ai_worker(strategy_id)
+    try:
+        if chat_request.apply and chat_request.suggestion is not None:
+            await _validate_fixed_instruments(chat_request.suggestion)
+        return await worker.chat(chat_request.message, apply=chat_request.apply, suggestion=chat_request.suggestion)
+    except CodexError as error:
+        return {
+            "schemaVersion": 1,
+            "reply": "AI 对话服务暂时不可用，当前策略和配置没有改变。请稍后重试。",
+            "suggestion": None,
+            "applied": False,
+            "config": worker.get_config(),
+            "degraded": True,
+            "errorCode": "ai_provider_unavailable",
+        }
+
 @app.post("/api/v1/ai/enable")
 async def enable_ai() -> dict[str, Any]:
     worker = await _ensure_ai_worker()
@@ -1402,6 +1556,21 @@ async def enable_ai() -> dict[str, Any]:
     return worker.get_status()
 
 
+@app.post("/api/v1/ai/strategies/{strategy_id}/enable")
+async def enable_strategy_ai(strategy_id: str) -> dict[str, Any]:
+    worker = await _ensure_ai_worker(strategy_id)
+    if worker.config.mode == "disabled":
+        if not OKX_DEMO and not read_state("live-trading.json", {}).get("enabled", False):
+            raise HTTPException(status_code=409, detail="enable live trading before arming AI for live orders")
+        worker.update_config({"enabled": True, "mode": "demo-active" if OKX_DEMO else "live-armed"})
+    elif worker.config.mode == "halted":
+        raise HTTPException(status_code=409, detail="AI worker is halted; update config after reviewing the error")
+    else:
+        worker.update_config({"enabled": True})
+    await worker.start()
+    return worker.get_status()
+
+
 @app.post("/api/v1/ai/disable")
 async def disable_ai() -> dict[str, Any]:
     worker = await _ensure_ai_worker()
@@ -1409,10 +1578,17 @@ async def disable_ai() -> dict[str, Any]:
     return worker.get_status()
 
 
+@app.post("/api/v1/ai/strategies/{strategy_id}/disable")
+async def disable_strategy_ai(strategy_id: str) -> dict[str, Any]:
+    worker = await _ensure_ai_worker(strategy_id)
+    await worker.disable()
+    return worker.get_status()
+
+
 @app.post("/api/v1/ai/flatten")
-async def flatten_ai() -> dict[str, Any]:
+async def flatten_ai(strategy_id: str = "codex") -> dict[str, Any]:
     """Cancel pending orders and close current positions using reduce-only orders."""
-    worker = await _ensure_ai_worker()
+    worker = await _ensure_ai_worker(strategy_id)
     await worker.disable()
     if not private_ready():
         raise HTTPException(status_code=503, detail="OKX private REST credentials are not configured")
@@ -1445,6 +1621,11 @@ async def flatten_ai() -> dict[str, Any]:
         except (OrderGatewayError, HTTPException) as error:
             await _get_order_gateway().record_audit({"type": "flatten-error", "instrumentID": instrument_id, "error": str(error)})
     return {"cancelledOrderIDs": cancelled, "closed": closed, "updatedAt": now_iso()}
+
+
+@app.post("/api/v1/ai/strategies/{strategy_id}/flatten")
+async def flatten_strategy_ai(strategy_id: str) -> dict[str, Any]:
+    return await flatten_ai(strategy_id)
 
 
 @app.get("/api/v1/ai/decisions")

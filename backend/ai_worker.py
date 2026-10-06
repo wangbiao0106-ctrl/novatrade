@@ -32,18 +32,22 @@ from typing import Any, Protocol
 
 try:
     from .ai_market_facts import market_facts
+    from .deepseek_harness import DeepSeekHarnessError, DeepSeekHarnessRunner as DeepSeekACP
     from .ai_policy import MIN_OPEN_WIN_RATE, MIN_OPEN_RISK_REWARD_RATIO, PolicyResult, PolicyState, record_decision, snapshot_freshness, validate_decision
     from .ai_schema import (
         AIDecision, AIChatResponse, AIConfig, AISnapshot, AIStatus, SchemaError,
+        DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
         FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT,
         ai_chat_json_schema, decision_json_schema, dumps, normalize_ai_chat_patch,
         normalize_contract_ids,
     )
 except ImportError:  # launched from bundled backend/main.py as a script
     from ai_market_facts import market_facts
+    from deepseek_harness import DeepSeekHarnessError, DeepSeekHarnessRunner as DeepSeekACP
     from ai_policy import MIN_OPEN_WIN_RATE, MIN_OPEN_RISK_REWARD_RATIO, PolicyResult, PolicyState, record_decision, snapshot_freshness, validate_decision
     from ai_schema import (
         AIDecision, AIChatResponse, AIConfig, AISnapshot, AIStatus, SchemaError,
+        DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
         FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT,
         ai_chat_json_schema, decision_json_schema, dumps, normalize_ai_chat_patch,
         normalize_contract_ids,
@@ -398,6 +402,7 @@ class CodexRunner:
             except (UnicodeDecodeError, SchemaError, CodexError) as error:
                 raise CodexError(str(error)) from error
 
+
     async def _run_single(
         self, snapshot: AISnapshot, config: AIConfig, *, deadline: float | None = None,
         prompt: str | None = None,
@@ -409,7 +414,7 @@ class CodexRunner:
         )
         try:
             if "assessments" not in raw:
-                raise SchemaError("new Codex decisions must include per-contract assessments")
+                raise SchemaError("new AI decisions must include per-contract assessments")
             decision = AIDecision.from_dict(raw)
             decision.require_complete_assessments(snapshot.observed_instruments())
             if decision.snapshotId != snapshot.snapshotId:
@@ -499,7 +504,7 @@ class CodexRunner:
             except (asyncio.TimeoutError, CodexError) as error:
                 self.last_run_metadata.update(failureStage="analysis")
                 raise CodexError(
-                    f"Codex analysis phase failed ({self.last_run_metadata['completedGroups']}/{len(groups)} groups complete): "
+                    f"{getattr(self, 'provider_label', 'Codex')} analysis phase failed ({self.last_run_metadata['completedGroups']}/{len(groups)} groups complete): "
                     f"{str(error) or 'timed out'}"
                 ) from error
             finally:
@@ -533,7 +538,7 @@ class CodexRunner:
                     reasonCode="COORDINATOR_FAILED", assessments=assessments,
                 )
                 raise CodexError(
-                    f"Codex coordinator phase failed ({len(groups)}/{len(groups)} groups complete): "
+                    f"{getattr(self, 'provider_label', 'Codex')} coordinator phase failed ({len(groups)}/{len(groups)} groups complete): "
                     f"{str(error) or 'timed out'}", safe_decision=fallback,
                 ) from error
             finally:
@@ -768,6 +773,62 @@ class CodexRunner:
                 raise CodexError(str(error)) from error
 
 
+class DeepSeekHarnessRunner(CodexRunner):
+    """Use the shared ACP adapter while retaining Codex's decision workflow."""
+
+    provider_label = "DeepSeek Harness"
+
+    def __init__(self, executable: list[str] | str | None = None) -> None:
+        self.adapter = DeepSeekACP(executable=executable)
+        self.last_run_metadata: dict[str, Any] = {}
+
+    @staticmethod
+    def runtime_identity() -> dict[str, str]:
+        return {
+            "model": os.getenv("NOVATRADE_DEEPSEEK_MODEL", "deepseek-v4-pro"),
+            "provider": "DeepSeek Harness",
+            "reasoningEffort": os.getenv("NOVATRADE_DEEPSEEK_REASONING_EFFORT", "low"),
+        }
+
+    async def _run_prompt(
+        self, prompt: str, schema: dict[str, Any], config: AIConfig, *, deadline: float | None = None,
+    ) -> dict[str, Any]:
+        remaining = config.cliTimeoutSeconds
+        if deadline is not None:
+            remaining = min(remaining, deadline - asyncio.get_running_loop().time())
+        if remaining <= 0:
+            raise CodexError("DeepSeek Harness decision workflow timed out")
+        structured_prompt = (
+            prompt
+            + "\nSTRICT OUTPUT CONTRACT (authoritative): return exactly one JSON object, with no markdown or prose. "
+            + "Every property declared in the schema must be present; use null only where the schema permits it. "
+            + "The server will reject any missing, extra, or type-invalid field.\nJSON SCHEMA:\n"
+            + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        )
+        try:
+            with tempfile.TemporaryDirectory(prefix="novatrade-deepseek-") as workdir:
+                raw = await self.adapter.run_json(structured_prompt, cwd=workdir, timeout_seconds=remaining)
+            self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
+            return raw
+        except DeepSeekHarnessError as error:
+            raise CodexError(str(error)) from error
+
+    async def run_chat(self, message: str, config: AIConfig) -> AIChatResponse:
+        prompt = (
+            "You are NovaTrade's strategy copilot. Return exactly one JSON object matching this schema. "
+            "Never place or modify orders; suggestion may only contain safe strategy fields.\n"
+            "SCHEMA:\n" + dumps(ai_chat_json_schema()) + "\nCURRENT CONFIG:\n" + dumps(config)
+            + "\nUSER MESSAGE:\n" + message
+        )
+        try:
+            with tempfile.TemporaryDirectory(prefix="novatrade-deepseek-chat-") as workdir:
+                text = await self.adapter.run_prompt(prompt, cwd=workdir, timeout_seconds=config.cliTimeoutSeconds)
+            self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
+            return CodexRunner._decode_chat_response(text)
+        except DeepSeekHarnessError as error:
+            raise CodexError(str(error)) from error
+
+
 def parse_codex_output(output: str, snapshot_id: str = "unknown") -> AIDecision:
     """Parse CLI output and return a safe hold for malformed output."""
     try:
@@ -798,11 +859,15 @@ class AIWorker:
         config: AIConfig | Mapping[str, Any] | None = None,
         runner: CodexRunnerProtocol | None = None,
         state_dir: Path | None = None,
+        strategy_id: str = "codex",
     ) -> None:
         self.snapshot_provider = snapshot_provider
         self.order_gateway = order_gateway
         self.config = config if isinstance(config, AIConfig) else AIConfig.from_dict(config)
-        self.runner = runner or CodexRunner()
+        selected_strategy = "deepseek" if strategy_id == "codex" and self.config.provider == "deepseek-harness" else strategy_id
+        self.strategy_id = re.sub(r"[^A-Za-z0-9_-]+", "-", selected_strategy.strip()) or "codex"
+        self.runner = runner or (DeepSeekHarnessRunner() if self.config.provider == "deepseek-harness" else CodexRunner())
+        self._custom_runner = runner is not None
         self.state_dir = state_dir or _state_dir()
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.policy_state = PolicyState()
@@ -812,15 +877,31 @@ class AIWorker:
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._load_persisted()
+        if not self._custom_runner:
+            self.runner = DeepSeekHarnessRunner() if self.config.provider == "deepseek-harness" else CodexRunner()
 
     def _path(self, name: str) -> Path:
-        return self.state_dir / name
+        if self.strategy_id == "codex":
+            return self.state_dir / name
+        stem, suffix = name.rsplit(".", 1)
+        return self.state_dir / f"{stem}-{self.strategy_id}.{suffix}"
 
     def _load_persisted(self) -> None:
         migrated_config = False
         try:
             raw = json.loads(self._path("ai-config.json").read_text(encoding="utf-8"))
             self.config = AIConfig.from_dict(raw)
+            # The original default was 45 seconds and was never exposed as a
+            # user setting. Treat that persisted value as the old default so
+            # existing installations receive the larger grouped-analysis
+            # budget without requiring a manual reset.
+            if (
+                isinstance(raw, Mapping)
+                and isinstance(raw.get("cliTimeoutSeconds"), (int, float))
+                and not isinstance(raw.get("cliTimeoutSeconds"), bool)
+                and float(raw["cliTimeoutSeconds"]) == LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS
+            ):
+                self.config = AIConfig.from_dict({**raw, "cliTimeoutSeconds": DEFAULT_CLI_TIMEOUT_SECONDS})
             migrated_config = isinstance(raw, Mapping) and raw != self.config.to_dict()
             self.status = AIStatus(mode=self.config.mode, enabled=self.config.enabled, updatedAt=_now_iso())
         except (OSError, ValueError, SchemaError, json.JSONDecodeError):
@@ -926,7 +1007,13 @@ class AIWorker:
 
     @classmethod
     def route_for_snapshot(cls, snapshot: AISnapshot, config: AIConfig) -> tuple[str, str, str]:
-        """Use the fixed route for every snapshot, including signal conflicts."""
+        """Use one fixed provider route for every snapshot."""
+        if config.provider == "deepseek-harness":
+            return (
+                os.getenv("NOVATRADE_DEEPSEEK_MODEL", "deepseek-v4-pro"),
+                os.getenv("NOVATRADE_DEEPSEEK_REASONING_EFFORT", "low"),
+                "deepseek-harness",
+            )
         model, effort = CodexRunner._route_values(config)
         CodexRunner._validate_override(model, effort)
         return model, effort, "fixed-model"
@@ -967,10 +1054,12 @@ class AIWorker:
         # commands that have an exact server-side meaning.
         if re.search(r"(模型|model|版本)", message, re.IGNORECASE):
             identity = getattr(self.runner, "runtime_identity", lambda: {"model": "Codex 默认模型", "provider": "default"})()
+            route_model = identity.get("model") if self.config.provider == "deepseek-harness" else self.config.routineModel
+            route_effort = identity.get("reasoningEffort", "low") if self.config.provider == "deepseek-harness" else self.config.routineReasoningEffort
             return {
                 "schemaVersion": 1,
                 "reply": (
-                    f"AI 策略固定使用 {self.config.routineModel}（{self.config.routineReasoningEffort}）。"
+                    f"AI 策略固定使用 {route_model}（{route_effort}）。"
                     f"服务提供方是 {identity['provider']}；"
                     f"CLI 全局默认模型 {identity['model']} 不会被自动轮询继承。"
                 ),
@@ -1151,13 +1240,16 @@ class AIWorker:
             "applied": False,
             "config": self.get_config(),
             "degraded": True,
-            "errorCode": "codex_unavailable",
+            "errorCode": "deepseek_unavailable" if self.config.provider == "deepseek-harness" else "codex_unavailable",
         }
 
     def update_config(self, values: Mapping[str, Any]) -> dict[str, Any]:
         merged = self.config.to_dict()
         merged.update(dict(values))
+        previous_provider = self.config.provider
         self.config = AIConfig.from_dict(merged)
+        if self.config.provider != previous_provider and isinstance(self.runner, (CodexRunner, DeepSeekHarnessRunner)):
+            self.runner = DeepSeekHarnessRunner() if self.config.provider == "deepseek-harness" else CodexRunner()
         if any(key in values for key in ("allowedInstruments", "universeMode", "candidateLimit", "selectionLimit")):
             # The previous snapshot no longer describes the requested
             # universe. Clear it until the next cycle resolves fresh symbols.

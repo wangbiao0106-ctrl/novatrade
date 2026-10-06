@@ -817,11 +817,27 @@ class AIGatewayTests(unittest.TestCase):
         self.assertEqual(defaults.marginPerOrderUSD, 500)
         self.assertEqual(defaults.maxLeverage, 5)
         self.assertEqual(defaults.cooldownSeconds, 43_200)
+        self.assertEqual(defaults.cliTimeoutSeconds, 90.0)
+        self.assertEqual(AIConfig.from_dict({"cliTimeoutSeconds": 45}).cliTimeoutSeconds, 45.0)
         self.assertEqual(AIConfig.from_dict({"cooldownSeconds": 60}).cooldownSeconds, 43_200)
         with self.assertRaises(SchemaError):
             AIConfig.from_dict({"allowedInstruments": ["BTC"]})
         with self.assertRaises(SchemaError):
             AIConfig.from_dict({"routineModel": "gpt-6-astra"})
+
+    def test_worker_migrates_legacy_cli_timeout_default(self):
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                state_dir = Path(directory)
+                raw = AIConfig(enabled=True, mode="shadow").to_dict()
+                raw["cliTimeoutSeconds"] = 45
+                (state_dir / "ai-config.json").write_text(json.dumps(raw), encoding="utf-8")
+                worker = AIWorker(state_dir=state_dir)
+                self.assertEqual(worker.config.cliTimeoutSeconds, 90.0)
+                persisted = json.loads((state_dir / "ai-config.json").read_text(encoding="utf-8"))
+                self.assertEqual(persisted["cliTimeoutSeconds"], 90.0)
+
+        asyncio.run(run())
 
     def test_legacy_dynamic_config_migrates_to_fixed_allowlist(self):
         migrated = AIConfig.from_dict({

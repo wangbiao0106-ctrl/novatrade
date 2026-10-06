@@ -19,6 +19,7 @@ Action = Literal["hold", "open", "close", "cancel"]
 Direction = Literal["long", "short"]
 OrderType = Literal["market", "limit"]
 RunMode = Literal["disabled", "shadow", "demo-active", "live-armed", "halted"]
+AIProvider = Literal["codex", "deepseek-harness"]
 _CONTRACT_ID_RE = re.compile(r"^[A-Z0-9]+-USDT-SWAP$")
 FIXED_AI_MODEL = "gpt-6-luna"
 FIXED_AI_REASONING_EFFORT = "medium"
@@ -27,6 +28,10 @@ FIXED_AI_REASONING_EFFORT = "medium"
 # the rule in prompts and API responses so the model cannot assume a shorter
 # interval.
 AI_ENTRY_COOLDOWN_SECONDS = 12 * 60 * 60
+# Four parallel analysis groups can each carry tens of thousands of tokens.
+# Keep enough wall-clock budget for provider queueing and model processing.
+DEFAULT_CLI_TIMEOUT_SECONDS = 90.0
+LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS = 45.0
 
 
 class SchemaError(ValueError):
@@ -375,12 +380,15 @@ class AISnapshot:
 
 @dataclass(frozen=True)
 class AIConfig:
+    # The strategy's decision engine. ``codex`` is the backwards-compatible
+    # default; DeepSeek Harness uses the local ACP stdio adapter.
+    provider: AIProvider = "codex"
     enabled: bool = False
     mode: RunMode = "disabled"
     allowedInstruments: tuple[str, ...] = ()
     minimumConfidence: float = 0.65
     decisionIntervalSeconds: float = 30.0
-    cliTimeoutSeconds: float = 45.0
+    cliTimeoutSeconds: float = DEFAULT_CLI_TIMEOUT_SECONDS
     maxOutputBytes: int = 1_000_000
     cooldownSeconds: float = float(AI_ENTRY_COOLDOWN_SECONDS)
     maxConsecutiveFailures: int = 3
@@ -402,6 +410,7 @@ class AIConfig:
     escalationReasoningEffort: str = FIXED_AI_REASONING_EFFORT
 
     _FIELDS: ClassVar[set[str]] = {
+        "provider",
         "enabled", "mode", "allowedInstruments",
         # Legacy fields are accepted only while reading old state files. They
         # are ignored and never emitted again, so dynamic boards cannot be
@@ -418,6 +427,9 @@ class AIConfig:
     def from_dict(cls, value: Mapping[str, Any] | None) -> "AIConfig":
         row = _mapping(value or {}, "config")
         _reject_extra(row, cls._FIELDS, "config")
+        provider = row.get("provider", "codex")
+        if provider not in {"codex", "deepseek-harness"}:
+            raise SchemaError("config.provider must be one of: codex, deepseek-harness")
         bools = {key: bool(row.get(key, getattr(cls(), key))) for key in ("enabled", "allowOpen", "allowClose", "allowCancel", "requireStopLoss")}
         for key, val in bools.items():
             if not isinstance(row.get(key, val), bool):
@@ -433,10 +445,10 @@ class AIConfig:
         _model_name(row.get("escalationModel", FIXED_AI_MODEL), "config.escalationModel", allowed={"gpt-6.1-sol", FIXED_AI_MODEL})
         _reasoning_effort(row.get("escalationReasoningEffort", FIXED_AI_REASONING_EFFORT), "config.escalationReasoningEffort", allowed={FIXED_AI_REASONING_EFFORT})
         return cls(
-            enabled=bools["enabled"], mode=mode, allowedInstruments=tuple(instruments),
+            provider=provider, enabled=bools["enabled"], mode=mode, allowedInstruments=tuple(instruments),
             minimumConfidence=_number(row.get("minimumConfidence", .65), "config.minimumConfidence", minimum=0, maximum=1),
             decisionIntervalSeconds=_number(row.get("decisionIntervalSeconds", 30), "config.decisionIntervalSeconds", minimum=.1),
-            cliTimeoutSeconds=_number(row.get("cliTimeoutSeconds", 45), "config.cliTimeoutSeconds", minimum=.1),
+            cliTimeoutSeconds=_number(row.get("cliTimeoutSeconds", DEFAULT_CLI_TIMEOUT_SECONDS), "config.cliTimeoutSeconds", minimum=.1),
             maxOutputBytes=int(_number(row.get("maxOutputBytes", 1_000_000), "config.maxOutputBytes", minimum=1024, maximum=10_000_000)),
             cooldownSeconds=max(
                 _number(row.get("cooldownSeconds", AI_ENTRY_COOLDOWN_SECONDS), "config.cooldownSeconds", minimum=0),
@@ -454,6 +466,12 @@ class AIConfig:
         result = asdict(self)
         result["allowedInstruments"] = list(self.allowedInstruments)
         return result
+
+    def clone_for_provider(self, provider: AIProvider) -> "AIConfig":
+        """Clone every strategy parameter while changing only the provider."""
+        values = self.to_dict()
+        values["provider"] = provider
+        return AIConfig.from_dict(values)
 
 
 # These are the only configuration fields an AI conversation may suggest.
