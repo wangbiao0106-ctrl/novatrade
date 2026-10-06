@@ -544,7 +544,8 @@ async def account() -> dict[str, Any]:
     if not private_ready():
         return {"mode": "readOnly", "profile": None, "site": None, "label": None, "authenticated": False,
                 "equityUSD": None, "availableEquityUSD": None, "totalAssetValueUSD": None, "todayPnLUSD": None,
-                "todayLossCount": None, "assets": [], "positions": [], "updatedAt": now_iso()}
+                "todayLossCount": None, "assets": [], "positions": [], "pendingOrders": None,
+                "pendingOrdersKnown": False, "updatedAt": now_iso()}
     balance, config, position_payload = await asyncio.gather(
         okx_private_request("GET", "/account/balance"),
         okx_private_request("GET", "/account/config"),
@@ -564,6 +565,25 @@ async def account() -> dict[str, Any]:
                        "available": as_float(row.get("availEq"), as_float(row.get("availBal"), max(0, equity - as_float(row.get("frozenBal"))))),
                        "usdValue": as_float(row.get("eqUsd")) if row.get("eqUsd") is not None else None})
     positions = [position_snapshot(row) for row in position_payload.get("data", [])]
+    pending_orders: list[dict[str, Any]] | None = None
+    pending_orders_error = None
+    pending_orders_retryable = False
+    try:
+        pending_payload = await okx_private_request("GET", "/trade/orders-pending", params={"instType": "SWAP"})
+        pending_rows = pending_payload.get("data") if isinstance(pending_payload, dict) else None
+        if not isinstance(pending_rows, list):
+            raise ValueError("OKX pending order response is invalid")
+        pending_orders = []
+        for row in pending_rows:
+            if not isinstance(row, dict):
+                raise ValueError("OKX pending order row is invalid")
+            item = order_snapshot(row)
+            if item is None:
+                raise ValueError("OKX pending order row is incomplete")
+            pending_orders.append(item)
+    except (HTTPException, httpx.HTTPError, ValueError, TypeError) as error:
+        pending_orders_error = _ai_collection_error(error)
+        pending_orders_retryable = _AIDataCollector._retryable(error)
     today_pnl = None
     today_loss_count = None
     daily_bills_error = None
@@ -582,8 +602,17 @@ async def account() -> dict[str, Any]:
             "label": config_row.get("label"), "authenticated": True, "equityUSD": total_equity,
             "availableEquityUSD": available_equity, "totalAssetValueUSD": total_equity, "todayPnLUSD": today_pnl,
             "todayLossCount": today_loss_count,
-            "dataQuality": {"dailyBillsAvailable": today_loss_count is not None, "dailyBillsError": daily_bills_error, "dailyBillsRetryable": daily_bills_retryable},
-            "assets": assets, "positions": [item for item in positions if item], "updatedAt": now_iso()}
+            "dataQuality": {
+                "dailyBillsAvailable": today_loss_count is not None,
+                "dailyBillsError": daily_bills_error,
+                "dailyBillsRetryable": daily_bills_retryable,
+                "pendingOrdersAvailable": pending_orders is not None,
+                "pendingOrdersError": pending_orders_error,
+                "pendingOrdersRetryable": pending_orders_retryable,
+            },
+            "assets": assets, "positions": [item for item in positions if item],
+            "pendingOrders": pending_orders, "pendingOrdersKnown": pending_orders is not None,
+            "updatedAt": now_iso()}
 
 
 def _positive_field(row: dict[str, Any], *names: str) -> float | None:
@@ -1112,6 +1141,15 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
     risk_snapshot, risk_quality = risk_result
     account_snapshot = dict(account_snapshot or {})
     risk_snapshot = dict(risk_snapshot or {})
+    # Prescreening must distinguish a confirmed empty order set from an
+    # account provider that does not expose pending orders. Older providers
+    # and test fixtures omit this field, so mark those snapshots unknown.
+    if "pendingOrders" not in account_snapshot:
+        account_snapshot["pendingOrders"] = None
+    account_snapshot["pendingOrdersKnown"] = (
+        account_snapshot.get("pendingOrdersKnown") is True
+        and isinstance(account_snapshot.get("pendingOrders"), list)
+    )
     # Unknown private data remains unknown. It is visible to Codex and the
     # existing order gateway still refuses missing equity or daily loss count.
     if account_quality["available"] and (not account_snapshot.get("authenticated") or account_snapshot.get("todayLossCount") is None):

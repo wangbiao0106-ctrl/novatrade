@@ -18,3 +18,4 @@ strategies/sweep_reversal_short/results/full_history/data/
 # Rebuildable 1h arrays folded from data/kline by the strategy's own backtest.
 strategies/liquid_crypto_trend_long/results/cache/
 dist/
+.tmp/

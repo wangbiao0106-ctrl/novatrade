@@ -758,6 +758,26 @@ class AIGatewayTests(unittest.TestCase):
         compact["candles"]["BTC-USDT-SWAP/5m"][1]["extra"] = "changed"
         self.assertEqual(snapshot.to_dict(), original)
 
+    def test_experimental_prompt_encoding_keeps_facts_local_and_limits_rows(self):
+        rows = [{
+            "timestamp": f"2026-10-05T16:{row:02d}:00Z", "open": 100 + row,
+            "high": 101 + row, "low": 99 + row, "close": 100.5 + row,
+            "volume": 10, "confirmed": row < 59,
+        } for row in range(60)]
+        snapshot = AISnapshot(
+            snapshotId="snap-window", capturedAt=self.snapshot().capturedAt,
+            instruments=[{"id": "BTC-USDT-SWAP"}],
+            candles={"BTC-USDT-SWAP/5m": rows},
+            ai={"selectedInstruments": ["BTC-USDT-SWAP"]},
+        )
+        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "compact10"}, clear=False):
+            compact = _prompt_snapshot(snapshot)
+        self.assertEqual(len(compact["candles"]["BTC-USDT-SWAP/5m"]["rows"]), 11)
+        self.assertEqual(compact["candles"]["BTC-USDT-SWAP/5m"]["rows"][-1][-1], False)
+        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "raw"}, clear=False):
+            raw = _prompt_snapshot(snapshot)
+        self.assertIsInstance(raw["candles"]["BTC-USDT-SWAP/5m"], list)
+
     def test_production_runner_rejects_missing_duplicate_extra_and_omitted_rows(self):
         valid = self.decision(action="hold", instrumentID=None, assessments=[self.assessment()])
         variants = [

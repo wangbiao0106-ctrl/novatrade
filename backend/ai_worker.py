@@ -32,6 +32,7 @@ from typing import Any, Protocol
 
 try:
     from .ai_market_facts import market_facts
+    from .ai_trigger import decision_fingerprint, structure_identity, trigger_reason
     from .deepseek_harness import DeepSeekHarnessError, DeepSeekHarnessRunner as DeepSeekACP
     from .ai_policy import MIN_OPEN_WIN_RATE, MIN_OPEN_RISK_REWARD_RATIO, PolicyResult, PolicyState, record_decision, snapshot_freshness, validate_decision
     from .ai_schema import (
@@ -43,6 +44,7 @@ try:
     )
 except ImportError:  # launched from bundled backend/main.py as a script
     from ai_market_facts import market_facts
+    from ai_trigger import decision_fingerprint, structure_identity, trigger_reason
     from deepseek_harness import DeepSeekHarnessError, DeepSeekHarnessRunner as DeepSeekACP
     from ai_policy import MIN_OPEN_WIN_RATE, MIN_OPEN_RISK_REWARD_RATIO, PolicyResult, PolicyState, record_decision, snapshot_freshness, validate_decision
     from ai_schema import (
@@ -72,16 +74,46 @@ _AUTOMATIC_REASONING = frozenset({FIXED_AI_REASONING_EFFORT})
 _MAX_DECISION_PROMPT_BYTES = 1_000_000
 
 
-def _prompt_snapshot(snapshot: AISnapshot) -> dict[str, Any]:
-    """Losslessly encode uniform candle objects as a column table.
+def _event_driven_enabled() -> bool:
+    return _event_driven_mode() != "off"
+
+
+def _event_driven_mode() -> str:
+    explicit = os.getenv("NOVATRADE_AI_EVENT_MODE", "").strip().lower()
+    if explicit in {"off", "shadow", "on"}:
+        return explicit
+    return "on" if os.getenv("NOVATRADE_AI_EVENT_DRIVEN", "0").strip().lower() in {"1", "true", "yes", "on"} else "off"
+
+
+def _event_max_skip_seconds() -> float:
+    try:
+        value = float(os.getenv("NOVATRADE_AI_EVENT_MAX_SKIP_SECONDS", "900"))
+    except (TypeError, ValueError):
+        return 900.0
+    return value if math.isfinite(value) and value > 0 else 900.0
+
+
+def _prompt_snapshot(snapshot: AISnapshot, *, encoding: str | None = None) -> dict[str, Any]:
+    """Encode the model snapshot, optionally selecting a shorter candle window.
 
     The runtime/audit snapshot is unchanged. Repeated candle field names are
-    removed only from the model prompt; all fields and all row values remain
-    present. Heterogeneous objects stay objects to preserve absent-vs-null.
+    removed only from the model prompt in the default compact mode; all fields
+    and all row values remain present. ``compact20``/``compact10`` are explicit
+    experimental window modes and retain the latest forming row. Heterogeneous
+    objects stay objects to preserve absent-vs-null.
     """
+    selected_encoding = (encoding or os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60")).strip().lower()
     result = snapshot.to_dict()
     for key, rows in result["candles"].items():
         if not rows:
+            continue
+        if selected_encoding in {"compact20", "compact10"}:
+            limit = 20 if selected_encoding == "compact20" else 10
+            confirmed = [row for row in rows if row.get("confirmed") is True]
+            forming = next((row for row in reversed(rows) if row.get("confirmed") is False), None)
+            rows = [*confirmed[-limit:], *([forming] if forming is not None else [])]
+            result["candles"][key] = rows
+        if selected_encoding == "raw":
             continue
         columns = list(rows[0])
         fields = set(columns)
@@ -615,6 +647,22 @@ class CodexRunner:
     def _decision_prompt(snapshot: AISnapshot, config: AIConfig, *, now: datetime | None = None) -> str:
         freshness = snapshot_freshness(snapshot, config, now=now)
         entry_gates = CodexRunner._entry_gates(snapshot, config)
+        encoding = os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60").strip().lower()
+        if encoding == "raw":
+            candle_encoding_note = (
+                "SNAPSHOT candle series are raw object arrays in ascending order; every supplied row and field is present. "
+            )
+        elif encoding in {"compact20", "compact10"}:
+            limit = 20 if encoding == "compact20" else 10
+            candle_encoding_note = (
+                f"SNAPSHOT candle series contain the latest {limit} confirmed rows plus the latest forming row when present; "
+                "the local SERVER MARKET FACTS still use the complete collected history. "
+            )
+        else:
+            candle_encoding_note = (
+                "SNAPSHOT candle series may be encoded as {columns:[field names],rows:[[values]]}; every supplied row, "
+                "field, precision and type is preserved. "
+            )
         return (
             "You are a constrained trading decision engine. Return exactly one JSON decision "
             "matching the supplied schema. Never call tools, access files, place orders, or include prose. "
@@ -631,9 +679,9 @@ class CodexRunner:
             "Use these measured summaries directly; do not recompute their arithmetic. Consult relevant raw candle rows "
             "only to resolve a specific ambiguity or verify a proposed level. Choose one concise supported conditional plan "
             "per contract; no exhaustive search over setups is required. "
-            "SNAPSHOT candle series may be encoded as {columns:[field names],rows:[[values]]}. "
-            "Each row is exactly the original candle object reconstructed by pairing columns with row values; "
-            "no candle fields, rows, precision or types were removed. Use the confirmed column to identify closed candles. "
+            + candle_encoding_note
+            + "When columns/rows encoding is used, reconstruct each row by pairing columns with row values. "
+            "Use the confirmed column to identify closed candles. "
             "Candle series with heterogeneous fields retain their original object arrays. "
             "A global hold, disabled opening, account/risk block, pending confirmation or a below-threshold signal "
             "must not erase a contract's technical plan or numerical estimates. "
@@ -805,12 +853,14 @@ class DeepSeekHarnessRunner(CodexRunner):
             + "The server will reject any missing, extra, or type-invalid field.\nJSON SCHEMA:\n"
             + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
         )
+        self.last_run_metadata = {}
         try:
             with tempfile.TemporaryDirectory(prefix="novatrade-deepseek-") as workdir:
                 raw = await self.adapter.run_json(structured_prompt, cwd=workdir, timeout_seconds=remaining)
             self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
             return raw
         except DeepSeekHarnessError as error:
+            self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
             raise CodexError(str(error)) from error
 
     async def run_chat(self, message: str, config: AIConfig) -> AIChatResponse:
@@ -820,12 +870,14 @@ class DeepSeekHarnessRunner(CodexRunner):
             "SCHEMA:\n" + dumps(ai_chat_json_schema()) + "\nCURRENT CONFIG:\n" + dumps(config)
             + "\nUSER MESSAGE:\n" + message
         )
+        self.last_run_metadata = {}
         try:
             with tempfile.TemporaryDirectory(prefix="novatrade-deepseek-chat-") as workdir:
                 text = await self.adapter.run_prompt(prompt, cwd=workdir, timeout_seconds=config.cliTimeoutSeconds)
             self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
             return CodexRunner._decode_chat_response(text)
         except DeepSeekHarnessError as error:
+            self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
             raise CodexError(str(error)) from error
 
 
@@ -871,6 +923,10 @@ class AIWorker:
         self.state_dir = state_dir or _state_dir()
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.policy_state = PolicyState()
+        self._last_event_fingerprint: str | None = None
+        self._last_model_evaluated_at: datetime | None = None
+        self._event_skip_count = 0
+        self._event_mode_seen = False
         self.observed_instruments: list[str] = []
         self.observation_updated_at: str | None = None
         self.status = AIStatus(mode=self.config.mode, enabled=self.config.enabled, updatedAt=_now_iso())
@@ -888,6 +944,7 @@ class AIWorker:
 
     def _load_persisted(self) -> None:
         migrated_config = False
+        persisted_fingerprint: str | None = None
         try:
             raw = json.loads(self._path("ai-config.json").read_text(encoding="utf-8"))
             self.config = AIConfig.from_dict(raw)
@@ -919,14 +976,21 @@ class AIWorker:
                 ))
             updated_at = state.get("observationUpdatedAt") if isinstance(state, dict) else None
             self.observation_updated_at = updated_at if isinstance(updated_at, str) else None
+            # A restart always forces one model evaluation. Keep the persisted
+            # fingerprint for diagnostics, but do not restore it as skip state.
+            fingerprint = state.get("decisionFingerprint") if isinstance(state, dict) else None
+            if isinstance(fingerprint, str) and fingerprint:
+                persisted_fingerprint = fingerprint
         except (OSError, ValueError, json.JSONDecodeError, AttributeError):
             pass
-        self.status = AIStatus(
+        self.status = replace(
+            self.status,
             mode=self.config.mode,
             enabled=self.config.enabled,
             updatedAt=_now_iso(),
             observedInstruments=list(self.observed_instruments),
             observationUpdatedAt=self.observation_updated_at,
+            decisionFingerprint=persisted_fingerprint,
         )
         # lastDecision is not restored, so its snapshot universe must also
         # remain empty rather than being inferred from current observations.
@@ -952,7 +1016,10 @@ class AIWorker:
         temporary.replace(path)
         state_path = self._path("ai-state.json")
         state_tmp = state_path.with_suffix(".tmp")
-        state_tmp.write_text(json.dumps(self.status.to_dict(), ensure_ascii=False), encoding="utf-8")
+        state = self.status.to_dict()
+        if self._last_event_fingerprint is not None:
+            state["decisionFingerprint"] = self._last_event_fingerprint
+        state_tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
         state_tmp.replace(state_path)
 
     def _audit(self, event: Mapping[str, Any]) -> None:
@@ -969,6 +1036,62 @@ class AIWorker:
     def _snapshot_observed_instruments(snapshot: AISnapshot) -> list[str]:
         """Share the policy's resolution of the actual observation set."""
         return snapshot.observed_instruments()
+
+    def _event_trigger(self, snapshot: AISnapshot) -> tuple[str, str | None]:
+        """Return the event reason and fingerprint before a model call."""
+        if not _event_driven_enabled():
+            # Toggling the optimization off must not leave stale event state
+            # that could suppress the first call after it is enabled again.
+            self._event_mode_seen = False
+            self._last_event_fingerprint = None
+            self._last_model_evaluated_at = None
+            self._event_skip_count = 0
+            return "disabled", None
+        if not self._event_mode_seen:
+            self._event_mode_seen = True
+            self._last_event_fingerprint = None
+            self._last_model_evaluated_at = None
+            self._event_skip_count = 0
+        fingerprint = decision_fingerprint(snapshot, self.config)
+        reason = trigger_reason(snapshot, self._last_event_fingerprint, fingerprint)
+        if reason == "unchanged":
+            if self._last_model_evaluated_at is None:
+                reason = "watchdog"
+            elif (datetime.now(timezone.utc) - self._last_model_evaluated_at).total_seconds() >= _event_max_skip_seconds():
+                reason = "watchdog"
+        return reason, fingerprint
+
+    def _record_prescreen_skip(
+        self, snapshot: AISnapshot, fingerprint: str, reason: str,
+    ) -> PolicyResult:
+        self._event_skip_count += 1
+        decision = AIDecision.hold(
+            snapshot.snapshotId,
+            "关键特征未变化，本轮不调用模型。",
+            decision_id=f"prescreen-{fingerprint[:20]}-{self._event_skip_count}",
+        )
+        freshness = snapshot_freshness(snapshot, self.config)
+        now = _now_iso()
+        self._last_event_fingerprint = fingerprint
+        self.status = replace(
+            self.status,
+            updatedAt=now,
+            observedInstruments=list(snapshot.observed_instruments()),
+            observationUpdatedAt=snapshot.capturedAt,
+            lastEvaluationSource="prescreen",
+            lastEvaluationAt=now,
+            skippedCycles=self._event_skip_count,
+            decisionFingerprint=fingerprint,
+        )
+        self._audit({
+            "type": "prescreen-skip", "reason": reason,
+            "decisionSource": "prescreen", "snapshotId": snapshot.snapshotId,
+            "decisionFingerprint": fingerprint, "freshness": freshness,
+            "accepted": True, "policyReason": "prescreen unchanged",
+            "decision": decision.to_dict(),
+        })
+        self._persist()
+        return PolicyResult(True, decision, "prescreen unchanged")
 
     @staticmethod
     def _snapshot_quality(snapshot: AISnapshot, config: AIConfig) -> dict[str, Any]:
@@ -1003,6 +1126,8 @@ class AIWorker:
             "collectionErrors": compact_errors,
             "collectionErrorCount": len(errors) if isinstance(errors, list) else 0,
             "promptBytes": len(CodexRunner._decision_prompt(snapshot, config).encode("utf-8")),
+            "promptBytesScope": "decision-prompt-only",
+            "promptEncoding": os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60").strip().lower(),
         }
 
     @classmethod
@@ -1255,14 +1380,20 @@ class AIWorker:
             # universe. Clear it until the next cycle resolves fresh symbols.
             self.observed_instruments = []
             self.observation_updated_at = None
-        self.status = AIStatus(
-            state=self.status.state, mode=self.config.mode, enabled=self.config.enabled,
-            consecutiveFailures=self.status.consecutiveFailures, lastDecisionAt=self.status.lastDecisionAt,
-            lastError=self.status.lastError, lastDecision=self.status.lastDecision, updatedAt=_now_iso(),
+        # Configuration changes are decision-relevant events. Force the next
+        # enabled cycle through the model instead of reusing a prior fingerprint.
+        self._last_event_fingerprint = None
+        self._last_model_evaluated_at = None
+        self._event_skip_count = 0
+        self.status = replace(
+            self.status,
+            mode=self.config.mode,
+            enabled=self.config.enabled,
+            updatedAt=_now_iso(),
             observedInstruments=list(self.observed_instruments),
             observationUpdatedAt=self.observation_updated_at,
-            lastDecisionInstruments=list(self.status.lastDecisionInstruments),
-            lastDecisionFreshness=dict(self.status.lastDecisionFreshness),
+            skippedCycles=0,
+            decisionFingerprint=None,
         )
         self._persist()
         return self.get_config()
@@ -1272,12 +1403,16 @@ class AIWorker:
             return PolicyResult(False, AIDecision.hold("unknown", "AI worker is halted"), "AI worker is halted")
         if not self.config.enabled or self.config.mode in {"disabled", "halted"}:
             return PolicyResult(False, AIDecision.hold("unknown", "AI worker is disabled"), "AI worker is disabled")
-        self.status = AIStatus(
-            "running", self.config.mode, True, self.status.consecutiveFailures,
-            self.status.lastDecisionAt, self.status.lastError, self.status.lastDecision,
-            _now_iso(), list(self.observed_instruments), self.observation_updated_at,
-            list(self.status.lastDecisionInstruments),
-            dict(self.status.lastDecisionFreshness),
+        self.status = replace(
+            self.status,
+            state="running",
+            mode=self.config.mode,
+            enabled=True,
+            updatedAt=_now_iso(),
+            observedInstruments=list(self.observed_instruments),
+            observationUpdatedAt=self.observation_updated_at,
+            lastDecisionInstruments=list(self.status.lastDecisionInstruments),
+            lastDecisionFreshness=dict(self.status.lastDecisionFreshness),
         )
         parsed_snapshot: AISnapshot | None = None
         workflow_audited = False
@@ -1290,6 +1425,15 @@ class AIWorker:
             self.observed_instruments = self._snapshot_observed_instruments(parsed_snapshot)
             self.observation_updated_at = parsed_snapshot.capturedAt
             decision_instruments = list(self.observed_instruments)
+            trigger, fingerprint = self._event_trigger(parsed_snapshot)
+            if fingerprint is not None and trigger == "unchanged":
+                if _event_driven_mode() == "on":
+                    return self._record_prescreen_skip(parsed_snapshot, fingerprint, trigger)
+                self._audit({
+                    "type": "prescreen-candidate", "reason": trigger,
+                    "decisionSource": "prescreen-shadow", "snapshotId": parsed_snapshot.snapshotId,
+                    "decisionFingerprint": fingerprint,
+                })
             operation = getattr(self.runner, "run", None) or getattr(self.runner, "invoke", None)
             if operation is None:
                 raise CodexError("Codex runner has no run/invoke operation")
@@ -1302,6 +1446,7 @@ class AIWorker:
                 "reasoningEffort": reasoning_effort, "reason": route_reason,
                 "snapshotId": parsed_snapshot.snapshotId,
                 "snapshotQuality": self._snapshot_quality(parsed_snapshot, self.config),
+                "structure": structure_identity(parsed_snapshot),
             })
             decision = await operation(parsed_snapshot, self.config)
             self._audit_analysis_workflow(parsed_snapshot)
@@ -1312,17 +1457,48 @@ class AIWorker:
             record_decision(self.policy_state, result)
             self._audit({"type": "decision", "accepted": result.accepted, "reason": result.reason, "decision": result.decision.to_dict(), "rawDecision": decision.to_dict(), "snapshotId": parsed_snapshot.snapshotId, "instruments": decision_instruments, "freshness": freshness})
             failures = self.status.consecutiveFailures
-            self.status = AIStatus(
-                "running", self.config.mode, True, failures, _now_iso(), None,
-                result.decision.to_dict(), _now_iso(), list(self.observed_instruments),
-                self.observation_updated_at, decision_instruments, freshness,
+            self.status = replace(
+                self.status,
+                state="running",
+                mode=self.config.mode,
+                enabled=True,
+                consecutiveFailures=failures,
+                lastDecisionAt=_now_iso(),
+                lastError=None,
+                lastDecision=result.decision.to_dict(),
+                updatedAt=_now_iso(),
+                observedInstruments=list(self.observed_instruments),
+                observationUpdatedAt=self.observation_updated_at,
+                lastDecisionInstruments=decision_instruments,
+                lastDecisionFreshness=freshness,
             )
             # Keep the evaluated setup visible even if the downstream gateway
             # fails. Its assessments must stay paired with this snapshot.
             if result.accepted and result.decision.action != "hold" and self.order_gateway is not None and self.config.mode != "shadow":
                 await self.order_gateway(result.decision, parsed_snapshot)
+            if fingerprint is not None:
+                self.status = replace(
+                    self.status,
+                    lastEvaluationSource="model",
+                    lastEvaluationAt=_now_iso(),
+                    skippedCycles=0,
+                )
             if result.accepted:
+                if fingerprint is not None:
+                    self._last_event_fingerprint = fingerprint
+                    self._last_model_evaluated_at = evaluated_at
+                    self._event_skip_count = 0
                 self.status = replace(self.status, consecutiveFailures=0)
+                if fingerprint is not None:
+                    self.status = replace(self.status, decisionFingerprint=fingerprint)
+                else:
+                    self.status = replace(
+                        self.status,
+                        lastEvaluationSource="model",
+                        lastEvaluationAt=_now_iso(),
+                        skippedCycles=0,
+                        decisionFingerprint=None,
+                    )
             self._persist()
             return result
         except Exception as error:
@@ -1354,12 +1530,18 @@ class AIWorker:
                              "decision": safe_decision.to_dict(), "rawDecision": None,
                              "snapshotId": parsed_snapshot.snapshotId,
                              "instruments": list(parsed_snapshot.observed_instruments()), "freshness": freshness})
-            self.status = AIStatus(
-                "halted" if mode == "halted" else "error", mode, enabled, failures,
-                self.status.lastDecisionAt, message, self.status.lastDecision, _now_iso(),
-                list(self.observed_instruments), self.observation_updated_at,
-                list(self.status.lastDecisionInstruments),
-                dict(self.status.lastDecisionFreshness),
+            self.status = replace(
+                self.status,
+                state="halted" if mode == "halted" else "error",
+                mode=mode,
+                enabled=enabled,
+                consecutiveFailures=failures,
+                lastError=message,
+                updatedAt=_now_iso(),
+                observedInstruments=list(self.observed_instruments),
+                observationUpdatedAt=self.observation_updated_at,
+                lastDecisionInstruments=list(self.status.lastDecisionInstruments),
+                lastDecisionFreshness=dict(self.status.lastDecisionFreshness),
             )
             self._audit({"type": "error", "error": message, "failures": failures})
             self._persist()
@@ -1370,19 +1552,38 @@ class AIWorker:
         if not isinstance(metadata, Mapping) or not metadata:
             return
         compact: dict[str, Any] = {}
-        for key in ("workflow", "stage", "failureStage"):
+        for key in ("workflow", "stage", "failureStage", "outcome", "profile", "profileFallback"):
             value = metadata.get(key)
-            allowed = {"single", "grouped"} if key == "workflow" else {"starting", "analysis", "coordinator", "complete", "failed", "cancelled"}
+            allowed = {"single", "grouped"} if key == "workflow" else {"starting", "analysis", "coordinator", "complete", "failed", "cancelled", "success", "error", "acp", "novatrade-decision"}
             if isinstance(value, str) and value in allowed:
                 compact[key] = value
+        # The harness profile decides how much fixed prompt overhead each
+        # request carries, so keep the active profile visible in the audit.
+        for key in ("provider", "model", "reasoningEffort", "sessionId", "profileFallback"):
+            value = metadata.get(key)
+            if key in metadata:
+                compact[key] = value if isinstance(value, str) and value.strip() and len(value) <= 256 else None
+        fallback_reason = metadata.get("profileFallbackReason")
+        if isinstance(fallback_reason, str) and fallback_reason.strip():
+            compact["profileFallbackReason"] = fallback_reason[:500]
         for key in ("observedCount", "groupCount", "completedGroups", "assessmentCount"):
-            value = metadata.get(key)
-            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-                compact[key] = value
-        for key in ("analysisTimeoutSeconds", "coordinatorTimeoutSeconds", "analysisDurationSeconds", "coordinatorDurationSeconds", "durationSeconds"):
-            value = metadata.get(key)
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
-                compact[key] = value
+            if key in metadata:
+                value = metadata.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    compact[key] = value
+        for key in ("analysisTimeoutSeconds", "coordinatorTimeoutSeconds", "analysisDurationSeconds",
+                    "coordinatorDurationSeconds", "durationSeconds"):
+            if key in metadata:
+                value = metadata.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
+                    compact[key] = value
+        for key in ("requestId", "inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens",
+                    "cacheWriteTokens", "basePromptBytes", "strictContractBytes", "schemaBytes",
+                    "modelPayloadBytes", "initializeSeconds", "sessionCreateSeconds", "configSeconds",
+                    "promptSeconds", "closeSeconds", "totalSeconds"):
+            if key in metadata:
+                value = metadata.get(key)
+                compact[key] = value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0 else None
         if compact:
             self._audit({"type": "analysis-workflow", "snapshotId": snapshot.snapshotId, "workflow": compact})
 
@@ -1399,12 +1600,16 @@ class AIWorker:
     async def start(self) -> None:
         if self._task is None or self._task.done():
             self._stop.clear()
-            self.status = AIStatus(
-                "running", self.config.mode, self.config.enabled, self.status.consecutiveFailures,
-                self.status.lastDecisionAt, self.status.lastError, self.status.lastDecision, _now_iso(),
-                list(self.observed_instruments), self.observation_updated_at,
-                list(self.status.lastDecisionInstruments),
-                dict(self.status.lastDecisionFreshness),
+            self.status = replace(
+                self.status,
+                state="running",
+                mode=self.config.mode,
+                enabled=self.config.enabled,
+                updatedAt=_now_iso(),
+                observedInstruments=list(self.observed_instruments),
+                observationUpdatedAt=self.observation_updated_at,
+                lastDecisionInstruments=list(self.status.lastDecisionInstruments),
+                lastDecisionFreshness=dict(self.status.lastDecisionFreshness),
             )
             self._persist()
             self._task = asyncio.create_task(self._loop(), name="novatrade-ai-worker")
@@ -1418,11 +1623,15 @@ class AIWorker:
     async def disable(self) -> None:
         self.update_config({"enabled": False, "mode": "disabled"})
         await self.stop()
-        self.status = AIStatus(
-            "stopped", "disabled", False, self.status.consecutiveFailures,
-            self.status.lastDecisionAt, self.status.lastError, self.status.lastDecision, _now_iso(),
-            list(self.observed_instruments), self.observation_updated_at,
-            list(self.status.lastDecisionInstruments),
-            dict(self.status.lastDecisionFreshness),
+        self.status = replace(
+            self.status,
+            state="stopped",
+            mode="disabled",
+            enabled=False,
+            updatedAt=_now_iso(),
+            observedInstruments=list(self.observed_instruments),
+            observationUpdatedAt=self.observation_updated_at,
+            lastDecisionInstruments=list(self.status.lastDecisionInstruments),
+            lastDecisionFreshness=dict(self.status.lastDecisionFreshness),
         )
         self._persist()

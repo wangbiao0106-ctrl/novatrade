@@ -126,9 +126,14 @@ python3 scripts/test_ai_gateway.py
 python3 scripts/test_ai_snapshot.py
 python3 scripts/test_ai_execution.py
 python3 scripts/test_ai_market_facts.py
+python3 scripts/test_ai_deepseek_profile.py
 ```
 
 首次接入建议保持 `shadow`，确认 `GET /api/v1/ai/decisions` 的快照、决策和拒绝原因，再启用 OKX 模拟盘。Codex CLI 路径可通过 `NOVATRADE_CODEX_BIN` 配置；每次调用使用临时目录、`--sandbox read-only`、`--ephemeral` 和 `--output-schema`，超时或非法输出按 `hold` 处理。
+
+DeepSeek 策略默认使用已安装的 `acp` profile，并通过 `backend/deepseek_profile.py` 的 overlay（`--profile acp --patch <overlay>`）去掉决策不会使用的工具和工作区上下文。厂商 `acp` profile 会随每次请求下发 24 个工具 schema、工作区指令、skill 目录和运行时样板，合计约 19 KB / 请求，而决策提示词明确禁止调用工具；overlay 不改动观察池、开仓闸门、提示词、schema、校验与下单路径。overlay 会以内容寻址文件名写入 `$DSH_HOME/novatrade-deepseek/`，无法写入时仍显式使用厂商 `acp` profile 而不阻塞决策。`NOVATRADE_DEEPSEEK_PROFILE=0` 可关闭 overlay；`NOVATRADE_DEEPSEEK_ENCODING=raw|compact20|compact10` 可实验性调整模型收到的 K 线窗口，默认 `compact60`，本地指标仍使用完整采集数据；`ai-decisions.jsonl` 中的 `analysis-workflow.profile` 字段记录本次实际生效的 profile。
+
+事件预筛默认关闭。设置 `NOVATRADE_AI_EVENT_MODE=shadow` 可只记录潜在跳过、不改变模型调用；设置 `NOVATRADE_AI_EVENT_DRIVEN=1` 或 `NOVATRADE_AI_EVENT_MODE=on` 后，首次运行、确认 K 线或关键行情分箱变化、资金/账户/风险/可交易性/路由变化，以及持仓或挂单管理状态都会调用模型；指纹不变时生成服务端安全 hold 并跳过模型，最长连续跳过时间由 `NOVATRADE_AI_EVENT_MAX_SKIP_SECONDS` 控制（默认 900 秒）。模型失败、网关失败、账户或挂单数据未知时不会推进成功指纹。该开关只减少 DeepSeek/Codex 请求和模型 token，当前 REST 行情采集仍按原轮询周期执行。
 
 ## 导出 AI 行情数据
 

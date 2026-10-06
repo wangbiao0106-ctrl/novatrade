@@ -590,6 +590,12 @@ class AIStatus:
     lastDecisionInstruments: list[str] = field(default_factory=list)
     # Server-computed clock context paired with lastDecision, never a model estimate.
     lastDecisionFreshness: dict[str, Any] = field(default_factory=dict)
+    # Evaluation metadata is separate from lastDecision so a prescreen hold
+    # cannot overwrite the last real model decision shown to the operator.
+    lastEvaluationSource: str = "model"
+    lastEvaluationAt: str | None = None
+    skippedCycles: int = 0
+    decisionFingerprint: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
