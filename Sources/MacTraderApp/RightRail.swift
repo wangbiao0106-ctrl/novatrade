@@ -30,27 +30,42 @@ struct RightRail: View {
                 RailModule(title: "持仓", icon: "chart.bar.xaxis") {
                     if model.livePositions.isEmpty { RailEmpty("暂无\(accountLabel)持仓") }
                     ForEach(model.livePositions) { position in
-                        let pnl = position.unrealizedPnL ?? 0
                         let protection = protectionPrices(for: position)
+                        let pnlColor = position.unrealizedPnL.map { $0 >= 0 ? Color.green : Color.red } ?? Color.secondary
                         VStack(alignment: .leading, spacing: 5) {
                             RailRow {
-                                Text(position.instrumentID).font(.caption.monospaced())
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(position.instrumentID).font(.caption.monospaced())
+                                    Text("\(formatContracts(abs(position.quantity))) 张 · \(position.side.uppercased())")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                                 Spacer(minLength: 4)
-                                Text(formatContracts(abs(position.quantity))).font(.caption.monospacedDigit())
-                                Text(position.side.uppercased()).foregroundStyle(.secondary)
-                                Text(formatSigned(pnl)).foregroundStyle(pnl >= 0 ? .green : .red)
+                                VStack(alignment: .trailing, spacing: 1) {
+                                    Text("持仓收益")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text(position.unrealizedPnL.map(formatSignedUSD) ?? "--")
+                                        .font(.caption.weight(.semibold).monospacedDigit())
+                                        .foregroundStyle(pnlColor)
+                                    if let returnPercent = positionReturnPercent(for: position) {
+                                        Text("\(formatSignedPercent(returnPercent))")
+                                            .font(.caption2.monospacedDigit())
+                                            .foregroundStyle(pnlColor)
+                                    }
+                                }
                             }
                             HStack(spacing: 10) {
-                                RailMetric(title: "保证金", value: position.margin.map(formatUSD) ?? "--")
-                                RailMetric(title: "成交", value: formatPrice(position.entryPrice))
-                                RailMetric(title: "标记", value: position.markPrice.map(formatPrice) ?? "--")
+                                RailMetric(title: "开仓均价", value: formatPrice(position.entryPrice), emphasized: true)
+                                RailMetric(title: "保证金", value: position.margin.map(formatUSD) ?? "--", emphasized: true)
+                            }
+                            HStack(spacing: 10) {
+                                RailMetric(title: "标记价格", value: position.markPrice.map(formatPrice) ?? "--")
+                                RailMetric(title: "杠杆", value: position.leverage.map { "\(formatPrice($0))x" } ?? "--")
                             }
                             HStack(spacing: 10) {
                                 RailMetric(title: "止盈", value: protection.takeProfit.map(formatPrice) ?? "--")
                                 RailMetric(title: "止损", value: protection.stopLoss.map(formatPrice) ?? "--")
-                                if let leverage = position.leverage {
-                                    RailMetric(title: "杠杆", value: "\(formatPrice(leverage))x")
-                                }
                             }
                         }
                         .padding(.vertical, 2)
@@ -131,6 +146,16 @@ struct RightRail: View {
         }
         return (takeProfit, stopLoss)
     }
+}
+
+/// OKX reports UPL in settlement currency. Showing it relative to the
+/// reported margin gives the same quick return context as the positions
+/// table in the exchange client.
+private func positionReturnPercent(for position: PositionSnapshot) -> Double? {
+    guard let pnl = position.unrealizedPnL,
+          let margin = position.margin,
+          margin > 0 else { return nil }
+    return (pnl / margin * 100).doubleValue
 }
 
 struct AIControlModule: View {
@@ -850,20 +875,45 @@ struct StrategyStatusModule: View {
 
     private var positionRows: some View {
         ForEach(openPositions) { position in
-            let pnl = position.unrealizedPnL ?? 0
+            let pnlColor = position.unrealizedPnL.map { $0 >= 0 ? Color.green : Color.red } ?? Color.secondary
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(position.instrumentID).font(.caption.monospaced())
                     Text(position.side.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                     Text("\(formatContracts(abs(position.quantity))) 张").font(.caption2.monospacedDigit())
                     Spacer()
-                    Text(formatSigned(pnl)).font(.caption2.monospacedDigit()).foregroundStyle(pnl >= 0 ? .green : .red)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("持仓收益").font(.caption2).foregroundStyle(.secondary)
+                        Text(position.unrealizedPnL.map(formatSignedUSD) ?? "--")
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(pnlColor)
+                        if let returnPercent = positionReturnPercent(for: position) {
+                            Text(formatSignedPercent(returnPercent))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(pnlColor)
+                        }
+                    }
+                }
+                HStack(spacing: 8) {
+                    strategyPositionMetric("开仓均价", value: formatPrice(position.entryPrice), emphasized: true)
+                    strategyPositionMetric("保证金", value: position.margin.map(formatUSD) ?? "--", emphasized: true)
                 }
                 if let protection = protectionText(for: position) {
                     Text(protection).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         }
+    }
+
+    private func strategyPositionMetric(_ title: String, value: String, emphasized: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value)
+                .font(emphasized ? .caption.monospacedDigit().weight(.semibold) : .caption2.monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var footer: some View {
@@ -948,6 +998,13 @@ struct RailRow<Content: View>: View {
 private struct RailMetric: View {
     let title: String
     let value: String
+    let emphasized: Bool
+
+    init(title: String, value: String, emphasized: Bool = false) {
+        self.title = title
+        self.value = value
+        self.emphasized = emphasized
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -955,7 +1012,7 @@ private struct RailMetric: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.caption2.monospacedDigit())
+                .font(emphasized ? .caption.monospacedDigit().weight(.semibold) : .caption2.monospacedDigit())
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
