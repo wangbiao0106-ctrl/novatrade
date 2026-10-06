@@ -109,11 +109,10 @@ struct RightRail: View {
                     HStack(spacing: 8) {
                         RailMetric(title: "保证金", value: position.margin.map(formatUSD) ?? "--", emphasized: true)
                         RailMetric(title: "开仓均价", value: formatPrice(position.entryPrice), emphasized: true)
-                        RailMetric(title: "标记价格", value: position.markPrice.map(formatPrice) ?? "--")
-                    }
-                    HStack(spacing: 12) {
-                        RailInlineMetric(title: "止盈", value: protection.takeProfit.map(formatPrice) ?? "--")
-                        RailInlineMetric(title: "止损", value: protection.stopLoss.map(formatPrice) ?? "--")
+                        RailMetric(
+                            title: "止盈 / 止损",
+                            value: "\(protection.takeProfit.map(formatPrice) ?? "--") / \(protection.stopLoss.map(formatPrice) ?? "--")"
+                        )
                     }
                 }
                 .padding(.vertical, 4)
@@ -231,6 +230,13 @@ private struct PositionSummaryHeader: View {
                         .font(.caption.monospaced())
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
+                    Text(position.markPrice.map(formatPrice) ?? "--")
+                        .font(.caption.monospacedDigit().weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                HStack(spacing: 5) {
                     PositionTag(direction.label, color: direction.color)
                     if let leverage = position.leverage {
                         PositionTag("\(formatPrice(leverage))x", color: .secondary)
@@ -241,6 +247,7 @@ private struct PositionSummaryHeader: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 1) {
                 Text("持仓收益")
                     .font(.caption2)
