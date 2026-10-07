@@ -72,6 +72,14 @@
 - `inputTokens`、端到端延迟和失败率有真实差异数据；
 - 未获得真实 usage 前，P0 只能标记为“启动参数已验证”，不能宣称已节省固定 token。
 
+### 启动契约（已实测）
+
+`acp` 与 `agent-loop` 都是必需插件：前者注入 `sessionPersistence`（只有 `session-persistence-jsonl` 提供该服务），后者注入 `tools`。因此这两行都不能 `disabled: true`，否则 dsh 直接启动失败（`dsh: startup failed: 1 required plugin did not activate`），表现为每轮 AI 决策在 `initialize` 阶段就退出。
+
+- 优化 overlay 保留 `session-persistence-jsonl` 并把 `root` 重定向到 `$DSH_HOME/novatrade-deepseek/sessions`；ACP 适配器在该轮 `session/prompt` 结束后（成功、失败或取消）按 session project key 删除本轮产物，账户与风控状态不会留在共享 `$DSH_HOME/sessions`。
+- 安全 overlay 只关闭 `session-log-deepseek`、`session-projection-cache` 这类非服务行的诊断缓存，保留 vendor 提示面，作为 patch 被拒绝时的可启动回退。
+- 任何 provider 元数据都必须合并进 workflow 元数据（`stage`、`completedGroups` 等），否则失败信息会被 `KeyError` 覆盖成 `'stage'`，这正是 2026-10-07 23:36 日志里的误导条目。
+
 ## 3. P1：无损紧凑编码
 
 ### 3.1 本地计算与模型输入分离

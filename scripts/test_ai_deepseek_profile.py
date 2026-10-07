@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from backend import deepseek_harness  # noqa: E402
 from backend import deepseek_profile  # noqa: E402
 from backend.deepseek_harness import DeepSeekHarnessError, DeepSeekHarnessRunner  # noqa: E402
 
@@ -49,9 +50,31 @@ class DecisionProfileTemplateTests(unittest.TestCase):
         for kept in ("llm", "agent", "agent-loop", "tools", "llm-deepseek"):
             self.assertNotIn(f"- id: {kept}\n  disabled: true", deepseek_profile.PATCH_YAML)
 
-    def test_safety_overlay_disables_tools_and_session_persistence(self):
+    def test_overlays_never_disable_a_required_service_row(self):
+        # ``acp`` needs the ``sessionPersistence`` service and the required
+        # ``agent-loop`` needs ``tools``; disabling either made dsh refuse to
+        # start with "1 required plugin did not activate".
+        for template in (deepseek_profile.PATCH_YAML, deepseek_profile.SAFETY_PATCH_YAML):
+            self.assertNotIn("- id: session-persistence-jsonl\n  disabled: true", template)
+            self.assertNotIn("- id: tools\n  disabled: true", template)
+
+    def test_overlays_redirect_the_session_root_inside_novatrade(self):
+        for template in (deepseek_profile.PATCH_YAML, deepseek_profile.SAFETY_PATCH_YAML):
+            self.assertIn(
+                "\n- id: session-persistence-jsonl\n"
+                "  config:\n"
+                f"    root: !!js dshHomePath('{deepseek_profile.SESSION_ROOT_SUBPATH}')\n",
+                template,
+            )
+        self.assertEqual(
+            deepseek_profile.SESSION_ROOT_SUBPATH,
+            f"{deepseek_profile.PROFILE_DIRECTORY_NAME}/sessions",
+        )
+
+    def test_safety_overlay_disables_only_session_caches(self):
         for row_id in deepseek_profile.SAFETY_ROWS:
             self.assertIn(f"- id: {row_id}\n  disabled: true", deepseek_profile.SAFETY_PATCH_YAML)
+        self.assertEqual(deepseek_profile.SAFETY_ROWS, ("session-log-deepseek", "session-projection-cache"))
         self.assertNotIn("system-prompt", deepseek_profile.SAFETY_PATCH_YAML)
 
 
@@ -216,6 +239,68 @@ class HarnessRunnerProfileTests(unittest.TestCase):
         self.assertEqual(metadata["profileFallback"], "acp-safety")
         self.assertIn("unknown profile", metadata["profileFallbackReason"])
 
+    def test_session_project_key_matches_the_installed_backend(self):
+        # Vectors taken from the session directories earlier ACP runs created
+        # under the vendor sessions tree, before the root was redirected.
+        vectors = {
+            "/private/var/folders/ys/gscnzv_j4h57n7zzxpyj97sh0000gn/T/novatrade-deepseek-03dumo3p":
+                "--private-var-folders-ys-gscnzv_j4h57n7zzxpyj97sh0000gn-T-novatrade-deepseek-03dumo3p--",
+            "/Users/bill/Desktop/Codex/交易软件": "--Users-bill-Desktop-Codex-~4EA4~6613~8F6F~4EF6--",
+        }
+        for cwd, expected in vectors.items():
+            self.assertEqual(deepseek_harness.session_project_key(cwd), expected)
+
+    def test_session_project_key_is_bounded_and_rejects_empty_paths(self):
+        self.assertEqual(deepseek_harness.session_project_key("/"), "--root--")
+        self.assertEqual(len(deepseek_harness.session_project_key("/" + "a" * 400)), 255)
+        with self.assertRaises(ValueError):
+            deepseek_harness.session_project_key("")
+
+    def test_session_artifacts_are_discarded_for_one_run_only(self):
+        with tempfile.TemporaryDirectory() as home:
+            base = Path(home)
+            cwd = "/private/var/folders/ys/gscnzv_j4h57n7zzxpyj97sh0000gn/T/novatrade-deepseek-03dumo3p"
+            fingerprint = deepseek_harness.session_project_key(cwd)
+            own = base / deepseek_profile.SESSION_ROOT_SUBPATH / fingerprint
+            other = base / deepseek_profile.SESSION_ROOT_SUBPATH / deepseek_harness.session_project_key("/Users/bill/Desktop/Codex/交易软件")
+            # A profile that ignored the redirect writes into the vendor tree;
+            # that artifact is purged as well.
+            legacy = base / "sessions" / fingerprint
+            for directory in (own / "session-1", other / "session-2", legacy / "session-1"):
+                directory.mkdir(parents=True)
+                (directory / "log.jsonl").write_text("{}", encoding="utf-8")
+            deepseek_harness.discard_session_artifacts(cwd, home=base)
+            self.assertFalse(own.exists())
+            self.assertFalse((base / "sessions").exists())
+            self.assertTrue(other.exists())
+
+    def test_session_artifacts_are_discarded_after_a_prompt_attempt(self):
+        async def run() -> None:
+            with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {"DSH_HOME": home}, clear=False):
+                child = (
+                    "import sys; sys.stderr.write('dsh: startup failed: 1 required plugin did not activate'); "
+                    "raise SystemExit(1)"
+                )
+                runner = DeepSeekHarnessRunner(executable=[sys.executable, "-c", child])
+                recorded: list[str] = []
+                original = deepseek_harness.discard_session_artifacts
+
+                def record(cwd, home=None):
+                    recorded.append(cwd)
+                    return original(cwd, home)
+
+                with patch.object(deepseek_harness, "discard_session_artifacts", side_effect=record):
+                    with self.assertRaises(DeepSeekHarnessError) as caught:
+                        await runner.run_prompt("decision", cwd=home, timeout_seconds=30)
+                self.assertEqual(len(recorded), 1)
+                self.assertEqual(Path(recorded[0]), Path(home).resolve())
+                message = str(caught.exception)
+                self.assertIn("exited while waiting for initialize", message)
+                self.assertIn("1 required plugin did not activate", message)
+                self.assertIn("1 required plugin did not activate", runner.last_run_metadata["stderr"])
+
+        asyncio.run(run())
+
     def test_safe_environment_does_not_forward_exchange_credentials(self):
         with patch.dict(os.environ, {
             "OKX_API_KEY": "okx-secret",
@@ -248,7 +333,10 @@ class HarnessRunnerProfileTests(unittest.TestCase):
         asyncio.run(run())
 
     def test_missing_launcher_still_reports_unavailable(self):
-        with patch("backend.deepseek_harness._profile_dsh_command", return_value=None):
+        # Keep the overlay bootstrap inside a writable temporary DSH_HOME so the
+        # check never depends on the operator's real Harness home.
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {"DSH_HOME": home}, clear=False), \
+             patch("backend.deepseek_harness._profile_dsh_command", return_value=None):
             runner = DeepSeekHarnessRunner()
         self.assertIsNone(runner.launch_command)
 

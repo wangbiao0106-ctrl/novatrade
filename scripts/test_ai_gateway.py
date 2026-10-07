@@ -19,7 +19,8 @@ sys.path.insert(0, str(ROOT))
 
 from backend.ai_policy import PolicyState, snapshot_freshness, validate_decision  # noqa: E402
 from backend.ai_schema import AIDecision, AIInstrumentAssessment, AIChatResponse, AIConfig, AISnapshot, SchemaError, decision_json_schema, normalize_ai_chat_patch  # noqa: E402
-from backend.ai_worker import AIWorker, CodexError, CodexRunner, _prompt_snapshot  # noqa: E402
+from backend.ai_worker import AIWorker, CodexError, CodexRunner, DeepSeekHarnessRunner, _prompt_snapshot  # noqa: E402
+from backend.deepseek_harness import DeepSeekHarnessError  # noqa: E402
 from backend.order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError  # noqa: E402
 
 
@@ -202,6 +203,49 @@ class AIGatewayTests(unittest.TestCase):
             with patch.object(runner, "_run_prompt", side_effect=invoke), self.assertRaises(CodexError):
                 await runner.run(snapshot, AIConfig())
             self.assertEqual(len(cancelled), 3)
+
+        asyncio.run(run())
+
+    def test_provider_failure_reports_the_real_reason_after_metadata_replacement(self):
+        """A provider that swaps the telemetry dict must not mask its own error.
+
+        The DeepSeek adapter publishes its own metadata after every call. When
+        it replaced the workflow dict, the failure path read a missing key and
+        the strategy log showed ``'stage'`` instead of the provider reason.
+        """
+        snapshot = self.grouped_snapshot()
+
+        async def run():
+            runner = DeepSeekHarnessRunner(executable=["/usr/bin/fake-dsh"])
+            reason = "DeepSeek Harness ACP exited while waiting for initialize: plugin did not activate"
+
+            async def invoke(prompt, schema, config, **kwargs):
+                runner.last_run_metadata = {"provider": "deepseek-official", "outcome": "error", "error": reason}
+                raise CodexError(reason)
+
+            with patch.object(runner, "_run_prompt", side_effect=invoke), self.assertRaises(CodexError) as caught:
+                await runner.run(snapshot, AIConfig(cliTimeoutSeconds=.5))
+            message = str(caught.exception)
+            self.assertIn("analysis phase failed (0/4 groups complete)", message)
+            self.assertIn("plugin did not activate", message)
+            self.assertNotIn("'stage'", message)
+            self.assertEqual(runner.last_run_metadata["failureStage"], "analysis")
+            self.assertEqual(runner.last_run_metadata["stage"], "failed")
+
+        asyncio.run(run())
+
+    def test_deepseek_prompt_merges_provider_telemetry_without_losing_the_stage(self):
+        async def run():
+            runner = DeepSeekHarnessRunner(executable=["/usr/bin/fake-dsh"])
+            runner.last_run_metadata = {"workflow": "grouped", "stage": "analysis", "completedGroups": 3}
+            runner.adapter.last_run_metadata = {"provider": "deepseek-official", "outcome": "error"}
+            with patch.object(runner.adapter, "run_json", AsyncMock(side_effect=DeepSeekHarnessError("ACP exited"))):
+                with self.assertRaises(CodexError) as caught:
+                    await runner._run_prompt("prompt", {}, AIConfig())
+            self.assertEqual(str(caught.exception), "ACP exited")
+            self.assertEqual(runner.last_run_metadata["stage"], "analysis")
+            self.assertEqual(runner.last_run_metadata["completedGroups"], 3)
+            self.assertEqual(runner.last_run_metadata["provider"], "deepseek-official")
 
         asyncio.run(run())
 

@@ -557,8 +557,12 @@ class CodexRunner:
                 decisions = await asyncio.wait_for(batch, timeout=max(0, analysis_deadline - clock.time()))
             except (asyncio.TimeoutError, CodexError) as error:
                 self.last_run_metadata.update(failureStage="analysis")
+                # A provider adapter may replace the telemetry dict mid-run, so
+                # every workflow field is read defensively: a missing counter
+                # must never hide the real failure behind a KeyError.
+                completed = self.last_run_metadata.get("completedGroups", 0)
                 raise CodexError(
-                    f"{getattr(self, 'provider_label', 'Codex')} analysis phase failed ({self.last_run_metadata['completedGroups']}/{len(groups)} groups complete): "
+                    f"{getattr(self, 'provider_label', 'Codex')} analysis phase failed ({completed}/{len(groups)} groups complete): "
                     f"{str(error) or 'timed out'}"
                 ) from error
             finally:
@@ -637,7 +641,7 @@ class CodexRunner:
             self.last_run_metadata["stage"] = "cancelled"
             raise
         except Exception:
-            self.last_run_metadata.setdefault("failureStage", self.last_run_metadata["stage"])
+            self.last_run_metadata.setdefault("failureStage", self.last_run_metadata.get("stage", "starting"))
             self.last_run_metadata["stage"] = "failed"
             raise
         finally:
@@ -784,6 +788,19 @@ class DeepSeekHarnessRunner(CodexRunner):
         self.adapter = DeepSeekACP(executable=executable)
         self.last_run_metadata: dict[str, Any] = {}
 
+    def _merge_adapter_metadata(self) -> None:
+        """Merge provider telemetry into the workflow metadata in place.
+
+        ``CodexRunner.run`` publishes the workflow fields (stage, group counts,
+        phase durations) on this dict before any provider call starts. Replacing
+        the dict with the adapter's telemetry made a later read of a workflow
+        field raise ``KeyError``, which replaced the real provider failure with
+        ``'stage'`` in the strategy log; provider telemetry is merged instead.
+        """
+        metadata = getattr(self.adapter, "last_run_metadata", None)
+        if isinstance(metadata, Mapping):
+            self.last_run_metadata.update(metadata)
+
     @staticmethod
     def runtime_identity() -> dict[str, str]:
         return {
@@ -811,7 +828,8 @@ class DeepSeekHarnessRunner(CodexRunner):
             raise CodexError(
                 f"DeepSeek decision prompt exceeds {_MAX_DECISION_PROMPT_BYTES} UTF-8 bytes"
             )
-        self.last_run_metadata = {}
+        # Workflow metadata published by CodexRunner.run is preserved here: the
+        # provider telemetry is merged in below instead of replacing it.
         try:
             with tempfile.TemporaryDirectory(prefix="novatrade-deepseek-") as workdir:
                 raw = await self.adapter.run_json(
@@ -820,10 +838,10 @@ class DeepSeekHarnessRunner(CodexRunner):
                     timeout_seconds=remaining,
                     max_output_bytes=config.maxOutputBytes,
                 )
-            self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
+            self._merge_adapter_metadata()
             return raw
         except DeepSeekHarnessError as error:
-            self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
+            self._merge_adapter_metadata()
             raise CodexError(str(error)) from error
 
     async def run_chat(self, message: str, config: AIConfig) -> AIChatResponse:
@@ -833,7 +851,6 @@ class DeepSeekHarnessRunner(CodexRunner):
             "SCHEMA:\n" + dumps(ai_chat_json_schema()) + "\nCURRENT CONFIG:\n" + dumps(config)
             + "\nUSER MESSAGE:\n" + message
         )
-        self.last_run_metadata = {}
         try:
             with tempfile.TemporaryDirectory(prefix="novatrade-deepseek-chat-") as workdir:
                 text = await self.adapter.run_prompt(
@@ -842,10 +859,10 @@ class DeepSeekHarnessRunner(CodexRunner):
                     timeout_seconds=config.cliTimeoutSeconds,
                     max_output_bytes=config.maxOutputBytes,
                 )
-            self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
+            self._merge_adapter_metadata()
             return CodexRunner._decode_chat_response(text)
         except DeepSeekHarnessError as error:
-            self.last_run_metadata.update(getattr(self.adapter, "last_run_metadata", {}))
+            self._merge_adapter_metadata()
             raise CodexError(str(error)) from error
 
 

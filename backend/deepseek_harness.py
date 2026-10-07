@@ -24,12 +24,14 @@ from typing import Any
 
 try:
     from .deepseek_profile import dsh_home as _dsh_home
+    from .deepseek_profile import PROFILE_DIRECTORY_NAME as _PROFILE_DIRECTORY_NAME
     from .deepseek_profile import PROFILE_NAME as _DECISION_PROFILE_NAME
     from .deepseek_profile import ensure_patch_file as _ensure_profile_patch
     from .deepseek_profile import ensure_safety_patch_file as _ensure_safety_patch
     from .deepseek_profile import launcher_arguments as _profile_launcher_arguments
 except ImportError:  # bundled backend modules are launched as scripts
     from deepseek_profile import dsh_home as _dsh_home
+    from deepseek_profile import PROFILE_DIRECTORY_NAME as _PROFILE_DIRECTORY_NAME
     from deepseek_profile import PROFILE_NAME as _DECISION_PROFILE_NAME
     from deepseek_profile import ensure_patch_file as _ensure_profile_patch
     from deepseek_profile import ensure_safety_patch_file as _ensure_safety_patch
@@ -61,6 +63,78 @@ _USAGE_ALIASES = {
     "cacheWriteTokens": ("cacheWriteTokens", "cache_write_tokens", "cachedOutputTokens", "cached_output_tokens"),
 }
 
+# Path-segment characters the session-persistence backend keeps verbatim. The
+# escape below is the backend's own ``~XXXX`` UTF-16 form, so the adapter can
+# name the exact directory one run wrote into.
+_SESSION_KEY_CHARACTERS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+)
+_SESSION_KEY_LIMIT = 251
+
+
+def _utf16_code_units(text: str) -> list[int]:
+    """Return ``text`` as JavaScript-style UTF-16 code units."""
+    units: list[int] = []
+    for character in text:
+        code = ord(character)
+        if code > 0xFFFF:
+            code -= 0x10000
+            units.append(0xD800 + (code >> 10))
+            units.append(0xDC00 + (code & 0x3FF))
+        else:
+            units.append(code)
+    return units
+
+
+def session_project_key(cwd: str) -> str:
+    """Return the persistence backend's project directory key for ``cwd``.
+
+    This mirrors ``projectKey`` in ``@deepseek-ai/dsh-session-persistence-jsonl``
+    so one ACP run can delete exactly the session artifacts it produced. It is a
+    pure path encoding: it reads no files and grants no access.
+    """
+    if not cwd:
+        raise ValueError("cannot encode an empty project path")
+    readable: list[str] = []
+    separator_run = False
+    for code in _utf16_code_units(cwd):
+        character = chr(code)
+        if character in "/\\:":
+            if not separator_run:
+                readable.append("-")
+            separator_run = True
+        elif character in _SESSION_KEY_CHARACTERS:
+            readable.append(character)
+            separator_run = False
+        else:
+            readable.append(f"~{code:04X}")
+            separator_run = False
+    key = "".join(readable).lstrip("-") or "root"
+    return f"--{key[:_SESSION_KEY_LIMIT]}--"
+
+
+def discard_session_artifacts(cwd: str, home: Path | None = None) -> None:
+    """Delete the session artifacts one ACP run wrote for ``cwd``.
+
+    The decision overlay redirects persistence into a NovaTrade-owned root, but
+    the vendor default is purged as well so a profile that ignored the override
+    cannot leave an account/risk prompt behind in the shared sessions tree.
+    Every run uses its own temporary working directory, so this removes only
+    that run's directory: a concurrent group or the dsh GUI's own sessions use
+    different project keys.
+    """
+    try:
+        key = session_project_key(cwd)
+    except ValueError:
+        return
+    base = Path(home) if home is not None else _dsh_home()
+    for root in (base / _PROFILE_DIRECTORY_NAME / "sessions", base / "sessions"):
+        shutil.rmtree(root / key, ignore_errors=True)
+        try:
+            root.rmdir()
+        except OSError:
+            pass
+
 
 def _decision_profile_arguments() -> tuple[list[str], str | None]:
     """Return the launcher flags for the prompt-only decision profile.
@@ -69,8 +143,8 @@ def _decision_profile_arguments() -> tuple[list[str], str | None]:
     tool schemas, workspace instructions and runtime boilerplate are re-sent
     on every model request even though a decision prompt forbids tool use.
     The bundled overlay removes that overhead. If the optimized overlay cannot
-    be written, use the smaller safety overlay instead of starting a profile
-    that can persist account and risk prompts.
+    be written, use the safety overlay, which keeps the vendor prompt surface
+    and only redirects durable session storage away from the shared tree.
     """
     patch = _ensure_profile_patch()
     if patch is not None:
@@ -517,15 +591,23 @@ class DeepSeekHarnessRunner:
             raise
         except Exception as error:
             metadata["outcome"] = "error"
-            metadata["error"] = str(error)[:500]
             metadata["totalSeconds"] = round(asyncio.get_running_loop().time() - started, 3)
             metadata.update({field: usage.get(field) for field in _USAGE_ALIASES})
             metadata.update({key: value for key, value in output.items() if key != "maxOutputBytes"})
             detail = self._stderr_detail(stderr_buffer)
-            if detail and not metadata.get("error"):
-                metadata["error"] = detail
+            message = str(error) or error.__class__.__name__
+            if detail:
+                # A launcher that dies during startup explains itself only on
+                # stderr (for example a rejected profile patch or a missing
+                # plugin). Surface that reason instead of the bare "exited
+                # while waiting for initialize" symptom.
+                metadata["stderr"] = detail
+                if detail not in message:
+                    message = f"{message}: {detail}"
+            message = message[:500]
+            metadata["error"] = message
             self.last_run_metadata = metadata
-            raise
+            raise DeepSeekHarnessError(message) from error
         finally:
             if process is not None:
                 await self._stop_process(process)
@@ -538,6 +620,9 @@ class DeepSeekHarnessRunner:
                         await stderr_task
                     except (asyncio.CancelledError, ConnectionError):
                         pass
+            # No decision round may leave its prompt (account and risk state) in
+            # the session store, whether it succeeded, failed or was cancelled.
+            discard_session_artifacts(workspace)
 
     @staticmethod
     def _is_profile_error(error: Exception) -> bool:
