@@ -309,6 +309,19 @@ class WorkerEventDrivenTests(unittest.TestCase):
             "pendingOrders": None, "pendingOrdersKnown": False,
         })))
 
+    def test_unknown_positions_force_evaluation_even_when_pending_orders_are_known(self) -> None:
+        self.assertTrue(data_quality_requires_evaluation(snapshot(account={
+            "authenticated": True, "todayLossCount": 0,
+            "positions": [], "positionsKnown": False,
+            "pendingOrders": [], "pendingOrdersKnown": True,
+        })))
+        self.assertTrue(data_quality_requires_evaluation(snapshot(account={
+            "authenticated": True, "todayLossCount": 0,
+            "positions": [], "positionsKnown": True,
+            "pendingOrders": [], "pendingOrdersKnown": True,
+            "dataQuality": {"positionsAvailable": False, "positionsError": "timeout"},
+        })))
+
     def test_pending_order_change_forces_evaluation(self) -> None:
         async def run() -> int:
             runner = _CountingRunner()

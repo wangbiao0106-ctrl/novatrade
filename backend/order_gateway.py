@@ -593,10 +593,26 @@ class OrderGateway:
                     raise OrderGatewayError("order mode does not match reservation")
             result = await cancel()
             if reservation is not None:
-                self.reservations.pop(order_id, None)
-                client_id = reservation.get("clientOrderID")
-                if client_id:
-                    self._state.setdefault("clientOrderIDs", {}).pop(str(client_id), None)
+                # A cancel request can be acknowledged before the exchange
+                # transitions the order out of ``live``.  Keep the local
+                # exposure reservation until a terminal state is explicit;
+                # the exchange-owned pending-order check then blocks a race
+                # where a replacement entry lands before cancellation.
+                response_rows = result.get("data") if isinstance(result, dict) else None
+                response_row = response_rows[0] if isinstance(response_rows, list) and response_rows and isinstance(response_rows[0], dict) else {}
+                cancel_state = str(
+                    (result.get("status") if isinstance(result, dict) else None)
+                    or (result.get("state") if isinstance(result, dict) else None)
+                    or response_row.get("status") or response_row.get("state") or ""
+                ).lower()
+                terminal = {"canceled", "cancelled", "rejected", "expired", "mmp_canceled"}
+                if cancel_state in terminal:
+                    self.reservations.pop(order_id, None)
+                    client_id = reservation.get("clientOrderID")
+                    if client_id:
+                        self._state.setdefault("clientOrderIDs", {}).pop(str(client_id), None)
+                else:
+                    reservation["cancelRequestedAt"] = _now()
             self._state.setdefault("audit", []).append({
                 "at": _now(), "type": "cancelled", "orderID": order_id,
                 "instrumentID": instrument_id, "demo": demo,

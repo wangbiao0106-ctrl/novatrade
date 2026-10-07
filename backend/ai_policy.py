@@ -22,6 +22,8 @@ MIN_OPEN_RISK_REWARD_RATIO = 2.0
 _OPEN_CANDLE_INTERVALS = ("5m", "15m", "1H", "4H")
 _ACTIVE_PENDING_ORDER_STATES = {"live", "partially_filled", "waiting", "pending", "open", "queued"}
 _TERMINAL_ORDER_STATES = {"filled", "canceled", "cancelled", "rejected", "failed", "expired", "mmp_canceled"}
+_EXIT_REASON_CODES = {"THESIS_INVALIDATED", "ORDER_MISTAKE"}
+_MIN_EXIT_REASON_LENGTH = 8
 
 
 def _exposure_quantity(row: dict[str, Any], keys: tuple[str, ...]) -> float | None:
@@ -235,6 +237,51 @@ def _take_profit_targets(item: Any) -> list[float]:
     return prices
 
 
+def _nearest_take_profit_target(direction: str | None, targets: list[float]) -> float | None:
+    """Return the first target reached in the profitable direction.
+
+    Risk/reward gates must use the least profitable staged tranche. Using the
+    farthest target could admit a plan whose initial partial exit is below the
+    configured minimum while a later target makes the aggregate ratio look
+    acceptable.
+    """
+    if not targets:
+        return None
+    if direction == "long":
+        return min(targets)
+    if direction == "short":
+        return max(targets)
+    return None
+
+
+def _check_staged_target_geometry(
+    *, instrument_id: str, direction: str | None, entry: Any,
+    stop_loss: Any, item: Any,
+) -> str | None:
+    """Validate every staged target, rather than only the outermost target.
+
+    The execution layer submits one protection order for each staged level.
+    Checking only ``max``/``min`` can therefore admit a mixed-direction plan
+    whose first or intermediate target is already on the wrong side of the
+    entry.  Each actual order target must satisfy the same geometry as a
+    single-target plan.
+    """
+    targets = _take_profit_targets(item)
+    if len(targets) <= 1:
+        return None
+    for target in targets:
+        error = _check_protection_geometry(
+            instrument_id=instrument_id,
+            direction=direction,
+            entry=entry,
+            stop_loss=stop_loss,
+            take_profit=target,
+        )
+        if error:
+            return f"staged take-profit geometry is invalid: {error}"
+    return None
+
+
 def _validate_cancel_scope(snapshot: AISnapshot, instrument_id: str, order_id: str) -> str | None:
     """Require a cancel intent to name a current, cancellable order."""
     if not _is_current_snapshot(snapshot):
@@ -256,6 +303,55 @@ def _validate_cancel_scope(snapshot: AISnapshot, instrument_id: str, order_id: s
             return "cancel order is no longer cancellable"
         return None
     return "cancel order is not a current pending order"
+
+
+def _position_direction(row: dict[str, Any]) -> str | None:
+    side = str(row.get("side") or row.get("positionSide") or row.get("posSide") or row.get("direction") or "").lower()
+    if side in {"long", "short"}:
+        return side
+    quantity = _exposure_quantity(row, ("quantity", "pos", "size"))
+    if quantity is None or quantity == 0:
+        return None
+    raw = row.get("quantity", row.get("pos", row.get("size")))
+    try:
+        return "short" if float(raw) < 0 else "long"
+    except (TypeError, ValueError):
+        return None
+
+
+def _validate_close_scope(snapshot: AISnapshot, instrument_id: str, direction: str) -> str | None:
+    """Require a close intent to name a current, same-direction position."""
+    if not _is_current_snapshot(snapshot):
+        return None
+    account = snapshot.account if isinstance(snapshot.account, dict) else {}
+    if account.get("positionsKnown") is not True or not isinstance(account.get("positions"), list):
+        return "current position state is unavailable"
+    for row in account["positions"]:
+        if not isinstance(row, dict):
+            continue
+        candidate = str(row.get("instrumentID") or row.get("instId") or "")
+        if candidate != instrument_id:
+            continue
+        quantity = _exposure_quantity(row, ("quantity", "pos", "size"))
+        if quantity is None:
+            return "current position state is unavailable"
+        if quantity <= 0:
+            continue
+        if _position_direction(row) != direction:
+            return "close direction does not match the current position"
+        return None
+    return "close target is not a current position"
+
+
+def _validate_exit_reason(snapshot: AISnapshot, decision: AIDecision) -> str | None:
+    """Require an auditable reason for current-account close/cancel actions."""
+    if not _is_current_snapshot(snapshot):
+        return None
+    if decision.reasonCode not in _EXIT_REASON_CODES:
+        return "current exit requires reasonCode THESIS_INVALIDATED or ORDER_MISTAKE"
+    if len(decision.reason.strip()) < _MIN_EXIT_REASON_LENGTH:
+        return f"current exit reason must be at least {_MIN_EXIT_REASON_LENGTH} characters"
+    return None
 
 
 def utc_now() -> datetime:
@@ -407,7 +503,16 @@ def validate_decision(
                 if parsed_config.requireStopLoss and item.stopLossPrice is None:
                     return reject(f"eligible assessment requires a stop loss: {item.instrumentID}", parsed_snapshot.snapshotId)
             target_prices = _take_profit_targets(item)
-            target_price = (max(target_prices) if item.direction == "long" else min(target_prices)) if target_prices else None
+            staged_geometry_error = _check_staged_target_geometry(
+                instrument_id=item.instrumentID,
+                direction=item.direction,
+                entry=item.limitPrice,
+                stop_loss=item.stopLossPrice,
+                item=item,
+            )
+            if staged_geometry_error:
+                return reject(staged_geometry_error, parsed_snapshot.snapshotId)
+            target_price = _nearest_take_profit_target(item.direction, target_prices)
             if item.direction in {"long", "short"} and item.limitPrice is not None and item.stopLossPrice is not None and target_price is not None:
                 geometry_error = _check_protection_geometry(
                     instrument_id=item.instrumentID, direction=item.direction,
@@ -471,12 +576,17 @@ def validate_decision(
                 proposed = getattr(selected, key)
                 action_value = getattr(parsed_decision, key)
                 same = proposed is None and action_value is None
-                if proposed is not None and action_value is not None:
+                if key == "takeProfitLevels" and proposed is not None and action_value is not None:
+                    # Staged levels are structured arrays; applying
+                    # math.isclose to them raises TypeError and used to turn
+                    # malformed model output into an execution-path error.
+                    same = proposed == action_value
+                elif proposed is not None and action_value is not None:
                     same = math.isclose(proposed, action_value, rel_tol=1e-9, abs_tol=1e-12)
                 if not same:
                     return reject(f"open {key} does not match the selected assessment", parsed_snapshot.snapshotId)
             selected_targets = _take_profit_targets(selected)
-            selected_target = (max(selected_targets) if selected.direction == "long" else min(selected_targets)) if selected_targets else None
+            selected_target = _nearest_take_profit_target(selected.direction, selected_targets)
             if selected.limitPrice is not None and selected.stopLossPrice is not None and selected_target is not None:
                 gross_ratio = abs(selected_target - selected.limitPrice) / abs(selected.limitPrice - selected.stopLossPrice)
                 # Fees may reduce the gross ratio, never improve it. Allow
@@ -495,6 +605,15 @@ def validate_decision(
             )
             if geometry_error:
                 return reject(geometry_error, parsed_snapshot.snapshotId)
+            staged_geometry_error = _check_staged_target_geometry(
+                instrument_id=selected.instrumentID,
+                direction=selected.direction,
+                entry=entry_price,
+                stop_loss=selected.stopLossPrice,
+                item=selected,
+            )
+            if staged_geometry_error:
+                return reject(staged_geometry_error, parsed_snapshot.snapshotId)
         freshness = snapshot_freshness(parsed_snapshot, parsed_config, now=clock)
         if not freshness["valid"]:
             return reject(str(freshness["error"]), parsed_snapshot.snapshotId)
@@ -547,17 +666,34 @@ def validate_decision(
             instrument_id=parsed_decision.instrumentID, direction=parsed_decision.direction,
             entry=entry_price, stop_loss=parsed_decision.stopLossPrice,
             take_profit=(
-                max(_take_profit_targets(parsed_decision)) if parsed_decision.direction == "long" and _take_profit_targets(parsed_decision)
-                else min(_take_profit_targets(parsed_decision)) if parsed_decision.direction == "short" and _take_profit_targets(parsed_decision)
+                _nearest_take_profit_target(parsed_decision.direction, _take_profit_targets(parsed_decision))
+                if _take_profit_targets(parsed_decision)
                 else parsed_decision.takeProfitPrice
             ),
         )
         if geometry_error:
             return reject(geometry_error, parsed_snapshot.snapshotId)
+        staged_geometry_error = _check_staged_target_geometry(
+            instrument_id=parsed_decision.instrumentID,
+            direction=parsed_decision.direction,
+            entry=entry_price,
+            stop_loss=parsed_decision.stopLossPrice,
+            item=parsed_decision,
+        )
+        if staged_geometry_error:
+            return reject(staged_geometry_error, parsed_snapshot.snapshotId)
     if parsed_decision.action == "close" and parsed_decision.direction is None:
         return reject("close requires direction", parsed_snapshot.snapshotId)
     if parsed_decision.action == "cancel" and not parsed_decision.orderID:
         return reject("cancel requires orderID", parsed_snapshot.snapshotId)
+    if parsed_decision.action in {"close", "cancel"}:
+        exit_reason_error = _validate_exit_reason(parsed_snapshot, parsed_decision)
+        if exit_reason_error:
+            return reject(exit_reason_error, parsed_snapshot.snapshotId)
+    if parsed_decision.action == "close":
+        close_error = _validate_close_scope(parsed_snapshot, parsed_decision.instrumentID, parsed_decision.direction)
+        if close_error:
+            return reject(close_error, parsed_snapshot.snapshotId)
     if parsed_decision.action == "cancel":
         cancel_error = _validate_cancel_scope(parsed_snapshot, parsed_decision.instrumentID, parsed_decision.orderID)
         if cancel_error:
@@ -566,6 +702,13 @@ def validate_decision(
         gate_error = _open_snapshot_gate(parsed_snapshot, parsed_decision.instrumentID)
         if gate_error:
             return reject(gate_error, parsed_snapshot.snapshotId)
+        # Runtime entries must carry the complete per-contract analysis
+        # produced for this snapshot. Without this gate a caller could bypass
+        # the assessment-to-intent consistency checks by submitting only
+        # top-level prices and confidence. Credential-free historical callers
+        # remain compatible because they do not carry execution metadata.
+        if _is_current_snapshot(parsed_snapshot) and not parsed_decision.assessments:
+            return reject("current entry requires complete per-contract assessments", parsed_snapshot.snapshotId)
     return PolicyResult(True, parsed_decision, "accepted")
 
 

@@ -217,7 +217,18 @@ def data_quality_requires_evaluation(snapshot: AISnapshot) -> bool:
         return True
     if account.get("todayLossCount") is None:
         return True
+    # A successful account HTTP response can still contain an unusable
+    # positions payload. Treat that as an evaluation event so event-driven
+    # polling cannot skip the cycle that should restore protection or refuse
+    # a new entry. Older credential-free snapshots omit these fields.
+    if "positionsKnown" in account and account.get("positionsKnown") is not True:
+        return True
     if account.get("pendingOrdersKnown") is not True or not isinstance(account.get("pendingOrders"), list):
+        return True
+    account_quality = account.get("dataQuality") if isinstance(account.get("dataQuality"), Mapping) else {}
+    if account_quality.get("positionsAvailable") is False or account_quality.get("positionsError"):
+        return True
+    if account_quality.get("pendingOrdersAvailable") is False or account_quality.get("pendingOrdersError"):
         return True
     risk = snapshot.risk if isinstance(snapshot.risk, Mapping) else {}
     quality = risk.get("dataQuality") if isinstance(risk.get("dataQuality"), Mapping) else {}

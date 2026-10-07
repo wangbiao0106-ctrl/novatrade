@@ -64,6 +64,8 @@ class ExitAuditTests(unittest.TestCase):
             if path == "/trade/order":
                 self.assertEqual(params.get("ordId"), "child-1")
                 return {"data": [{"ordId": "child-1", "state": "filled", "accFillSz": "10", "fillPx": "1.1901"}]}
+            if path == "/account/positions":
+                return {"data": []}
             if path == "/account/positions-history":
                 return {"data": [{
                     "instId": "FIL-USDT-SWAP", "posId": "position-1", "uTime": "1700000000000",
@@ -79,6 +81,7 @@ class ExitAuditTests(unittest.TestCase):
         self.assertEqual(event["triggerPriceType"], "mark")
         self.assertEqual(event["fillPrice"], 1.1901)
         self.assertEqual(event["realizedPnL"], -2.75)
+        self.assertEqual(event["type"], "exit-settled")
         self.assertIn("止盈(TP)", str(event["message"]))
 
     def test_mismatched_instrument_or_client_is_ignored(self):
@@ -106,6 +109,8 @@ class ExitAuditTests(unittest.TestCase):
                 return {"data": [history_row()]}
             if path == "/trade/order":
                 return {"data": [{"ordId": "child-1", "state": "filled", "accFillSz": "10", "fillPx": "1.1901"}]}
+            if path == "/account/positions":
+                return {"data": []}
             return {"data": []}
 
         first = asyncio.run(sync_native_protection_exits(gateway, demo=True, private_request=request))
@@ -113,6 +118,51 @@ class ExitAuditTests(unittest.TestCase):
         self.assertEqual(len(first), 1)
         self.assertEqual(second, [])
         self.assertEqual(len(gateway.events), 1)
+
+    def test_filled_staged_take_profit_with_remaining_position_is_not_settled(self):
+        gateway = FakeGateway([{
+            "instrumentID": "FIL-USDT-SWAP", "orderID": "entry-1", "clientOrderID": "aidecision123",
+            "decisionID": "decision-1", "strategyID": "codex", "demo": True,
+        }])
+
+        async def request(method: str, path: str, *, params=None, body=None):
+            if path == "/trade/orders-algo-history":
+                return {"data": [history_row()]}
+            if path == "/trade/order":
+                return {"data": [{"ordId": "child-1", "state": "filled", "accFillSz": "10", "fillPx": "1.1901"}]}
+            if path == "/account/positions":
+                return {"data": [{"instId": "FIL-USDT-SWAP", "pos": "10"}]}
+            if path == "/account/positions-history":
+                return {"data": []}
+            raise AssertionError(path)
+
+        events = asyncio.run(sync_native_protection_exits(gateway, demo=True, private_request=request))
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "exit-partial")
+        self.assertTrue(events[0]["positionOpen"])
+        self.assertEqual(gateway.events[0]["type"], "exit-partial")
+
+    def test_filled_exit_with_malformed_matching_position_is_not_settled(self):
+        gateway = FakeGateway([{
+            "instrumentID": "FIL-USDT-SWAP", "orderID": "entry-1", "clientOrderID": "aidecision123",
+            "decisionID": "decision-1", "strategyID": "codex", "demo": True,
+        }])
+
+        async def request(method: str, path: str, *, params=None, body=None):
+            if path == "/trade/orders-algo-history":
+                return {"data": [history_row()]}
+            if path == "/trade/order":
+                return {"data": [{"ordId": "child-1", "state": "filled", "accFillSz": "10", "fillPx": "1.1901"}]}
+            if path == "/account/positions":
+                return {"data": [{"instId": "FIL-USDT-SWAP", "pos": "unknown"}]}
+            if path == "/account/positions-history":
+                return {"data": []}
+            raise AssertionError(path)
+
+        events = asyncio.run(sync_native_protection_exits(gateway, demo=True, private_request=request))
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "exit-fill-unconfirmed")
+        self.assertIsNone(events[0]["positionOpen"])
 
     def test_effective_oco_with_canceled_child_and_open_position_is_protection_failure(self):
         gateway = FakeGateway([{

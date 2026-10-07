@@ -189,6 +189,40 @@ class GatewayContractTests(unittest.TestCase):
         })
         self.assertEqual([call[2]["ordType"] for call in calls], ["conditional", "oco", "trigger"])
 
+    def test_pending_position_protections_marks_partial_lookup_incomplete(self):
+        async def fake_request(method, path, *, params=None, body=None):
+            if params["ordType"] == "conditional":
+                raise RuntimeError("temporary OKX timeout")
+            return {"data": []}
+
+        previous = main.okx_private_request
+        main.okx_private_request = fake_request
+        try:
+            protections = asyncio.run(main._pending_position_protections(include_details=True))
+        finally:
+            main.okx_private_request = previous
+
+        self.assertFalse(protections["_meta"]["lookupComplete"])
+        self.assertIn("conditional:", protections["_meta"]["lookupErrors"][0])
+
+    def test_pending_position_protections_marks_unowned_algo_unmanaged(self):
+        async def fake_request(method, path, *, params=None, body=None):
+            if params["ordType"] == "oco":
+                return {"data": [{
+                    "instId": "FIL-USDT-SWAP", "posSide": "net", "algoId": "manual-1",
+                    "tpTriggerPx": "1.1899", "slTriggerPx": "1.1439",
+                }]}
+            return {"data": []}
+
+        previous = main.okx_private_request
+        main.okx_private_request = fake_request
+        try:
+            protections = asyncio.run(main._pending_position_protections(include_details=True))
+        finally:
+            main.okx_private_request = previous
+
+        self.assertTrue(protections["FIL-USDT-SWAP|net"]["unmanagedOrders"])
+
     def test_staged_take_profit_schema_requires_full_position_allocation(self):
         payload = {
             "schemaVersion": 1, "decisionId": "staged-1", "snapshotId": "snap-1",

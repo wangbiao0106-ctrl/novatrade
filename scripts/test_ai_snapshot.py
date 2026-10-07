@@ -257,6 +257,32 @@ class AISubmissionFreshnessTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertTrue(all("_aiEntryDeadline" not in call.kwargs.get("body", {}) for call in writes.await_args_list))
 
+    async def test_staged_take_profit_is_deferred_instead_of_silently_attaching_first_target(self):
+        captured, _, clock_type = self.fake_clock()
+        writes = AsyncMock(return_value={"data": [{"ordId": "order-staged"}]})
+        request = self.entry_request((captured + timedelta(seconds=90)).timestamp())
+        request.update({
+            # Legacy top-level TP may still be populated by the model; staged
+            # execution must ignore it rather than attach only that target.
+            "takeProfitTriggerPrice": 110,
+            "stopLossTriggerPrice": 90,
+            "takeProfitLevels": [
+                {"price": 110, "quantityPercent": 50},
+                {"price": 120, "quantityPercent": 50},
+            ],
+        })
+        with patch.object(main, "private_ready", return_value=True), \
+             patch.object(main, "OKX_DEMO", True), \
+             patch.object(main, "datetime", clock_type), \
+             patch.object(main, "okx_private_request", new=writes):
+            result = await main.submit_order(request, demo=True)
+        order_call = next(call for call in writes.await_args_list if call.args[1] == "/trade/order")
+        attached = order_call.kwargs["body"].get("attachAlgoOrds")
+        self.assertEqual(result["orderID"], "order-staged")
+        self.assertEqual(len(attached), 1)
+        self.assertNotIn("tpTriggerPx", attached[0])
+        self.assertEqual(attached[0]["slTriggerPx"], 90)
+
     async def test_expired_or_invalid_deadline_never_starts_a_write(self):
         captured, _, clock_type = self.fake_clock()
         for deadline in ((captured + timedelta(seconds=19)).timestamp(), None, True, "invalid", float("nan")):

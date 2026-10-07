@@ -457,6 +457,115 @@ class AIGatewayTests(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(SchemaError):
                 AIInstrumentAssessment.from_dict(self.assessment(**changes))
 
+    def test_decision_schema_rejects_non_contract_instrument(self):
+        with self.assertRaises(SchemaError):
+            AIDecision.from_dict(self.decision(instrumentID="BTC"))
+
+    def test_staged_take_profit_rejects_duplicate_prices(self):
+        with self.assertRaises(SchemaError):
+            AIDecision.from_dict(self.decision(takeProfitLevels=[
+                {"price": 110, "quantityPercent": 40},
+                {"price": 110, "quantityPercent": 60},
+            ]))
+
+    def test_staged_take_profit_checks_every_target_and_conservative_rr(self):
+        config = AIConfig(enabled=True, mode="shadow", allowedInstruments=("BTC-USDT-SWAP",))
+        mixed = self.decision(
+            action="hold",
+            instrumentID=None,
+            assessments=[self.assessment(
+                takeProfitLevels=[{"price": 120, "quantityPercent": 50}, {"price": 80, "quantityPercent": 50}],
+            )],
+        )
+        result = validate_decision(mixed, self.snapshot(), config)
+        self.assertFalse(result.accepted)
+        self.assertIn("staged take-profit geometry", result.reason)
+
+        levels = [{"price": 103, "quantityPercent": 50}, {"price": 160, "quantityPercent": 50}]
+        low_payload = self.decision(orderType="limit", limitPrice=100, takeProfitPrice=120, takeProfitLevels=levels)
+        low_payload["assessments"] = [self.assessment(takeProfitLevels=levels)]
+        low_first_target = AIDecision.from_dict(low_payload)
+        result = validate_decision(low_first_target, self.snapshot(), config)
+        self.assertFalse(result.accepted)
+        self.assertIn("exceeds its proposed price setup", result.reason)
+
+    def test_current_open_requires_complete_assessments(self):
+        instrument = "BTC-USDT-SWAP"
+        snapshot = AISnapshot(
+            snapshotId="current-entry", capturedAt=iso(datetime.now(timezone.utc)),
+            instruments=[{"id": instrument}],
+            account={
+                "authenticated": True, "pendingOrdersKnown": True,
+                "availableEquityUSD": 1000, "todayLossCount": 0,
+                "positions": [], "pendingOrders": [],
+                "dataQuality": {"dailyBillsAvailable": True, "pendingOrdersAvailable": True},
+            },
+            risk={"killSwitch": False, "dailyPnLPercent": 0,
+                  "dataQuality": {"accountRefreshError": None, "accountRefreshRetryable": False}},
+            ai={"tradingAvailability": {instrument: {"available": True}}},
+            tickers={instrument: {"last": 100}},
+            candles={
+                f"{instrument}/{interval}": [{"confirmed": True, "close": 100}]
+                for interval in ("5m", "15m", "1H", "4H")
+            },
+            dataFreshness={"maxAgeSeconds": 90, "availability": {}},
+        )
+        result = validate_decision(
+            self.decision(snapshotId=snapshot.snapshotId, instrumentID=instrument),
+            snapshot,
+            AIConfig(enabled=True, mode="shadow", allowedInstruments=(instrument,)),
+        )
+        self.assertFalse(result.accepted)
+        self.assertIn("complete per-contract assessments", result.reason)
+
+    def test_current_close_cancel_require_reason_and_live_target(self):
+        instrument = "BTC-USDT-SWAP"
+        base = AISnapshot(
+            snapshotId="current-exit", capturedAt=iso(datetime.now(timezone.utc)),
+            instruments=[{"id": instrument}],
+            account={
+                "authenticated": True, "pendingOrdersKnown": True, "positionsKnown": True,
+                "availableEquityUSD": 1000, "todayLossCount": 0,
+                "positions": [{"instrumentID": instrument, "quantity": 1, "side": "long"}],
+                "pendingOrders": [{"id": "pending-1", "instrumentID": instrument, "status": "live", "quantity": 1}],
+                "dataQuality": {"dailyBillsAvailable": True, "pendingOrdersAvailable": True},
+            },
+            risk={"killSwitch": False, "dailyPnLPercent": 0,
+                  "dataQuality": {"accountRefreshError": None, "accountRefreshRetryable": False}},
+            ai={"tradingAvailability": {instrument: {"available": True}}},
+            dataFreshness={"maxAgeSeconds": 90, "availability": {}},
+        )
+        bad_close = self.decision(
+            snapshotId=base.snapshotId, action="close", instrumentID=instrument,
+            direction="long", winRate=None, riskRewardRatio=None, confidence=0,
+        )
+        result = validate_decision(bad_close, base, AIConfig(enabled=True, mode="shadow", allowedInstruments=(instrument,)))
+        self.assertFalse(result.accepted)
+        self.assertIn("reasonCode", result.reason)
+
+        good_close = self.decision(
+            snapshotId=base.snapshotId, action="close", instrumentID=instrument,
+            direction="long", winRate=None, riskRewardRatio=None, confidence=0,
+            reasonCode="THESIS_INVALIDATED", reason="趋势结构已发生重大反转",
+        )
+        self.assertTrue(validate_decision(good_close, base, AIConfig(enabled=True, mode="shadow", allowedInstruments=(instrument,))).accepted)
+
+        wrong_cancel = self.decision(
+            snapshotId=base.snapshotId, action="cancel", instrumentID=instrument,
+            direction=None, orderType=None, orderID="pending-1", winRate=None, riskRewardRatio=None, confidence=0,
+            reasonCode="ORDER_MISTAKE", reason="误下单",
+        )
+        result = validate_decision(wrong_cancel, base, AIConfig(enabled=True, mode="shadow", allowedInstruments=(instrument,)))
+        self.assertFalse(result.accepted)
+        self.assertIn("at least", result.reason)
+
+        good_cancel = self.decision(
+            snapshotId=base.snapshotId, action="cancel", instrumentID=instrument,
+            direction=None, orderType=None, orderID="pending-1", winRate=None, riskRewardRatio=None, confidence=0,
+            reasonCode="ORDER_MISTAKE", reason="此前入场条件判断错误",
+        )
+        self.assertTrue(validate_decision(good_cancel, base, AIConfig(enabled=True, mode="shadow", allowedInstruments=(instrument,))).accepted)
+
     def test_full_16_contract_hold_covers_each_observed_id(self):
         ids = [f"COIN{index}-USDT-SWAP" for index in range(16)]
         rows = [self.assessment(

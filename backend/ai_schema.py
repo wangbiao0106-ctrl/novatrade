@@ -165,6 +165,7 @@ def _take_profit_levels(value: Any, name: str) -> list[dict[str, float]] | None:
         raise SchemaError(f"{name} must contain between 1 and 4 levels")
     result: list[dict[str, float]] = []
     total = 0.0
+    seen_prices: set[float] = set()
     for index, item in enumerate(rows):
         row = _mapping(item, f"{name}[{index}]")
         _reject_extra(row, {"price", "quantityPercent"}, f"{name}[{index}]")
@@ -175,6 +176,9 @@ def _take_profit_levels(value: Any, name: str) -> list[dict[str, float]] | None:
         )
         if price <= 0 or percent <= 0:
             raise SchemaError(f"{name}[{index}] price and quantityPercent must be positive")
+        if price in seen_prices:
+            raise SchemaError(f"{name} must not contain duplicate target prices")
+        seen_prices.add(price)
         total += percent
         result.append({"price": price, "quantityPercent": percent})
     if not math.isclose(total, 100.0, rel_tol=0.0, abs_tol=1e-6):
@@ -294,6 +298,8 @@ class AIDecision:
         decision_id = _str(_required(row, "decisionId", "decision"), "decision.decisionId")
         snapshot_id = _str(_required(row, "snapshotId", "decision"), "decision.snapshotId")
         instrument = None if row.get("instrumentID") is None else _str(row.get("instrumentID"), "decision.instrumentID")
+        if instrument is not None and not _CONTRACT_ID_RE.fullmatch(instrument):
+            raise SchemaError("decision.instrumentID must be an exact *-USDT-SWAP contract ID")
         direction = row.get("direction")
         if direction is not None:
             direction = _str(direction, "decision.direction")
@@ -701,7 +707,7 @@ def decision_json_schema(
         "properties": {
             "schemaVersion": {"type": "integer", "const": 1}, "decisionId": {"type": "string", "minLength": 1},
             "snapshotId": {"type": "string", "minLength": 1}, "action": {"type": "string", "enum": ["hold", "open", "close", "cancel"]},
-            "instrumentID": {"type": ["string", "null"]}, "direction": {"type": ["string", "null"], "enum": ["long", "short", None]},
+            "instrumentID": {"type": ["string", "null"], "pattern": "^[A-Z0-9]+-USDT-SWAP$"}, "direction": {"type": ["string", "null"], "enum": ["long", "short", None]},
             "orderType": {"type": ["string", "null"], "enum": ["market", "limit", None]}, "riskBudgetPercent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
             "limitPrice": {"type": ["number", "null"], "minimum": 0}, "stopLossPrice": {"type": ["number", "null"], "minimum": 0},
             "takeProfitPrice": {"type": ["number", "null"], "minimum": 0}, "leverage": {"type": ["number", "null"], "minimum": 0}, "confidence": {"type": "number", "minimum": 0, "maximum": 1},

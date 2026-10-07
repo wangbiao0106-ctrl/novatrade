@@ -801,8 +801,16 @@ def _position_protection_key(row: dict[str, Any]) -> str:
 
 
 async def _pending_position_protections(*, include_details: bool = False) -> dict[str, dict[str, Any]]:
-    """Best-effort lookup of standalone position protection algorithms."""
+    """Read standalone protection algorithms, retaining lookup completeness.
+
+    A failed algorithm endpoint must never be interpreted as an empty set:
+    doing so lets the reconciliation loop attach duplicate OCOs to a live
+    position.  The regular account projection keeps its historical shape;
+    callers that are about to write protection request ``include_details``
+    and inspect the private ``_meta`` marker below.
+    """
     result: dict[str, dict[str, Any]] = {}
+    lookup_errors: list[str] = []
     # OKX requires `ordType` for this endpoint. Attached TP/SL orders are
     # commonly represented as OCO algorithms after the parent order fills;
     # conditional and trigger orders are valid representations as well.
@@ -812,7 +820,11 @@ async def _pending_position_protections(*, include_details: bool = False) -> dic
                 "GET", "/trade/orders-algo-pending",
                 params={"instType": "SWAP", "ordType": order_type},
             )
-        except Exception:
+        except Exception as error:
+            lookup_errors.append(f"{order_type}: {error}")
+            continue
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            lookup_errors.append(f"{order_type}: invalid response")
             continue
         for row in payload.get("data", []) if isinstance(payload, dict) else []:
             if not isinstance(row, dict) or not row.get("instId"):
@@ -822,9 +834,15 @@ async def _pending_position_protections(*, include_details: bool = False) -> dic
                 continue
             key = _position_protection_key(row)
             algo_id = str(row.get("algoId") or row.get("algoID") or "").strip()
+            owner_id = str(
+                row.get("algoClOrdId") or row.get("algoClOrdID")
+                or row.get("attachAlgoClOrdId") or row.get("attachAlgoClOrdID") or ""
+            ).strip().lower()
+            managed_by_ai = owner_id.startswith(("ai", "aip"))
             current = result.setdefault(key, {
                 "takeProfitPrice": None, "stopLossPrice": None,
                 "takeProfitPrices": [], "stopLossPrices": [], "algoIDs": [], "orders": [],
+                "unmanagedOrders": False,
             })
             current["takeProfitPrice"] = current["takeProfitPrice"] or take_profit
             current["stopLossPrice"] = current["stopLossPrice"] or stop_loss
@@ -835,11 +853,14 @@ async def _pending_position_protections(*, include_details: bool = False) -> dic
             if algo_id and algo_id not in current["algoIDs"]:
                 current["algoIDs"].append(algo_id)
             current["orders"].append(dict(row))
+            if not algo_id or not managed_by_ai:
+                current["unmanagedOrders"] = True
             # A missing posSide is common for net-mode algorithms. Keep an
             # instrument-only fallback for the corresponding position row.
             fallback = result.setdefault(f"{row.get('instId')}|net", {
                 "takeProfitPrice": None, "stopLossPrice": None,
                 "takeProfitPrices": [], "stopLossPrices": [], "algoIDs": [], "orders": [],
+                "unmanagedOrders": False,
             })
             fallback["takeProfitPrice"] = fallback["takeProfitPrice"] or take_profit
             fallback["stopLossPrice"] = fallback["stopLossPrice"] or stop_loss
@@ -850,7 +871,13 @@ async def _pending_position_protections(*, include_details: bool = False) -> dic
             if algo_id and algo_id not in fallback["algoIDs"]:
                 fallback["algoIDs"].append(algo_id)
             fallback["orders"].append(dict(row))
+            if not algo_id or not managed_by_ai:
+                fallback["unmanagedOrders"] = True
     if include_details:
+        result["_meta"] = {
+            "lookupComplete": not lookup_errors,
+            "lookupErrors": lookup_errors,
+        }
         return result
     return {
         key: {
@@ -890,6 +917,25 @@ def _assessment_targets(assessment: Any) -> list[dict[str, float]]:
     return [{"price": price, "quantityPercent": 100.0}] if price > 0 else []
 
 
+def _active_assessment_targets(position: dict[str, Any], assessment: Any) -> list[dict[str, float]]:
+    """Keep only staged targets that are still reachable from the current mark.
+
+    A fast move can cross one or more targets before the next reconciliation
+    cycle. Those targets cannot create a useful new trigger; the remaining
+    position must be allocated across the targets still beyond the mark.
+    """
+    targets = _assessment_targets(assessment)
+    direction = _position_direction(position)
+    mark = as_float(position.get("markPrice"))
+    if mark <= 0:
+        mark = as_float(position.get("entryPrice"))
+    if direction not in {"long", "short"} or mark <= 0:
+        return targets
+    if direction == "long":
+        return [target for target in targets if target["price"] > mark]
+    return [target for target in targets if target["price"] < mark]
+
+
 def _position_assessment(decision: AIDecision, position: dict[str, Any]) -> Any | None:
     instrument = str(position.get("instrumentID") or "")
     direction = _position_direction(position)
@@ -915,8 +961,8 @@ def _protection_is_reasonable(position: dict[str, Any], assessment: Any) -> bool
     mark = as_float(position.get("markPrice"))
     reference = mark if mark > 0 else entry
     stop = as_float(getattr(assessment, "stopLossPrice", None))
-    targets = _assessment_targets(assessment)
-    if direction not in {"long", "short"} or reference <= 0 or stop <= 0 or not targets:
+    targets = _active_assessment_targets(position, assessment)
+    if direction not in {"long", "short"} or reference <= 0 or stop <= 0:
         return False
     prices = [row["price"] for row in targets]
     if direction == "long":
@@ -945,41 +991,90 @@ async def _submit_position_protection(
     if size_total < spec.minSize:
         return []
     stop = spec.aligned_price(as_float(getattr(assessment, "stopLossPrice", None)))
-    targets = _assessment_targets(assessment)
+    targets = _active_assessment_targets(position, assessment)
     margin_mode = str(position.get("marginMode") or "isolated").lower()
     if margin_mode not in {"cross", "isolated"}:
         margin_mode = "isolated"
     pos_side = str(position.get("side") or "net").lower()
     if pos_side not in {"long", "short"}:
         pos_side = ""
+    if stop is None or stop <= 0:
+        return []
+    aligned_targets: list[dict[str, float]] = []
+    for target in targets:
+        target_price = spec.aligned_price(target["price"])
+        if target_price is None or target_price <= 0:
+            continue
+        duplicate = next((row for row in aligned_targets if math.isclose(row["price"], target_price, rel_tol=0.0, abs_tol=1e-12)), None)
+        if duplicate is None:
+            aligned_targets.append({"price": target_price, "quantityPercent": target["quantityPercent"]})
+        else:
+            duplicate["quantityPercent"] += target["quantityPercent"]
+    targets = aligned_targets
     results: list[dict[str, Any]] = []
     remaining = size_total
-    for index, target in enumerate(targets):
-        target_price = spec.aligned_price(target["price"])
-        if target_price is None or stop is None:
-            continue
-        tranche = size_total if index == len(targets) - 1 else math.floor(size_total * target["quantityPercent"] / 100 / spec.lotSize) * spec.lotSize
-        tranche = min(max(tranche, 0), remaining)
-        if tranche < spec.minSize:
-            continue
-        remaining = round(remaining - tranche, 12)
-        client_seed = f"{instrument_id}:{position.get('id')}:{decision.decisionId}:{index}:{target_price}:{stop}:{tranche}"
-        client_id = "aip" + hashlib.sha256(client_seed.encode("utf-8")).hexdigest()[:29]
-        body: dict[str, Any] = {
-            "instId": instrument_id, "tdMode": margin_mode,
-            "side": "sell" if direction == "long" else "buy", "ordType": "oco",
-            "sz": tranche, "tpTriggerPx": target_price, "tpOrdPx": "-1", "tpTriggerPxType": "mark",
-            "slTriggerPx": stop, "slOrdPx": "-1", "slTriggerPxType": "mark",
-            "reduceOnly": "true", "algoClOrdId": client_id,
-        }
-        if pos_side:
-            body["posSide"] = pos_side
-        response = await okx_private_request("POST", "/trade/order-algo", body=body)
-        row = (response.get("data") or [{}])[0] if isinstance(response, dict) else {}
-        algo_id = row.get("algoId") if isinstance(row, dict) else None
-        if not algo_id:
-            raise HTTPException(status_code=502, detail="OKX protection order did not include algoId")
-        results.append({"algoID": algo_id, "clientOrderID": client_id, "quantity": tranche, "takeProfitPrice": target_price, "stopLossPrice": stop})
+    created_algo_ids: list[str] = []
+    try:
+        # If every proposed target has already been crossed, retain a stop on
+        # the live position rather than leaving it unprotected. OKX accepts a
+        # conditional algorithm with only the stop-loss leg.
+        if not targets:
+            client_seed = f"{instrument_id}:{position.get('id')}:{decision.decisionId}:stop:{stop}:{size_total}"
+            client_id = "aip" + hashlib.sha256(client_seed.encode("utf-8")).hexdigest()[:29]
+            body: dict[str, Any] = {
+                "instId": instrument_id, "tdMode": margin_mode,
+                "side": "sell" if direction == "long" else "buy", "ordType": "conditional",
+                "sz": size_total, "slTriggerPx": stop, "slOrdPx": "-1", "slTriggerPxType": "mark",
+                "reduceOnly": "true", "algoClOrdId": client_id,
+            }
+            if pos_side:
+                body["posSide"] = pos_side
+            response = await okx_private_request("POST", "/trade/order-algo", body=body)
+            row = (response.get("data") or [{}])[0] if isinstance(response, dict) else {}
+            algo_id = row.get("algoId") if isinstance(row, dict) else None
+            if not algo_id:
+                raise HTTPException(status_code=502, detail="OKX protection order did not include algoId")
+            return [{"algoID": algo_id, "clientOrderID": client_id, "quantity": size_total,
+                     "takeProfitPrice": None, "stopLossPrice": stop}]
+        percent_total = sum(target["quantityPercent"] for target in targets)
+        for index, target in enumerate(targets):
+            target_price = target["price"]
+            normalized_percent = target["quantityPercent"] / percent_total * 100
+            tranche = size_total if index == len(targets) - 1 else math.floor(size_total * normalized_percent / 100 / spec.lotSize) * spec.lotSize
+            tranche = min(max(tranche, 0), remaining)
+            if tranche < spec.minSize:
+                continue
+            remaining = round(remaining - tranche, 12)
+            client_seed = f"{instrument_id}:{position.get('id')}:{decision.decisionId}:{index}:{target_price}:{stop}:{tranche}"
+            client_id = "aip" + hashlib.sha256(client_seed.encode("utf-8")).hexdigest()[:29]
+            body: dict[str, Any] = {
+                "instId": instrument_id, "tdMode": margin_mode,
+                "side": "sell" if direction == "long" else "buy", "ordType": "oco",
+                "sz": tranche, "tpTriggerPx": target_price, "tpOrdPx": "-1", "tpTriggerPxType": "mark",
+                "slTriggerPx": stop, "slOrdPx": "-1", "slTriggerPxType": "mark",
+                "reduceOnly": "true", "algoClOrdId": client_id,
+            }
+            if pos_side:
+                body["posSide"] = pos_side
+            response = await okx_private_request("POST", "/trade/order-algo", body=body)
+            row = (response.get("data") or [{}])[0] if isinstance(response, dict) else {}
+            algo_id = row.get("algoId") if isinstance(row, dict) else None
+            if not algo_id:
+                raise HTTPException(status_code=502, detail="OKX protection order did not include algoId")
+            created_algo_ids.append(str(algo_id))
+            results.append({"algoID": algo_id, "clientOrderID": client_id, "quantity": tranche, "takeProfitPrice": target_price, "stopLossPrice": stop})
+    except Exception:
+        # A staged set is only useful as a whole.  If a later tranche fails,
+        # remove successful earlier tranches so the next cycle can retry a
+        # complete set without stacking orphaned OCOs.
+        if created_algo_ids:
+            try:
+                await _cancel_position_protections(instrument_id, {"algoIDs": created_algo_ids})
+            except Exception:
+                # The original exchange error remains the useful diagnostic;
+                # reconciliation will fail closed if cancellation is unknown.
+                pass
+        raise
     return results
 
 
@@ -1006,7 +1101,7 @@ def _protection_needs_adjustment(
         return False
     if len(str(getattr(decision, "reason", "") or "").strip()) < 8 or len(str(getattr(assessment, "reason", "") or "").strip()) < 8:
         return False
-    targets = [row["price"] for row in _assessment_targets(assessment)]
+    targets = [row["price"] for row in _active_assessment_targets(position, assessment)]
     current_targets = [as_float(value) for value in protection.get("takeProfitPrices", [])]
     current_targets = [value for value in current_targets if value > 0]
     proposed_stop = as_float(getattr(assessment, "stopLossPrice", None))
@@ -1038,6 +1133,15 @@ async def _reconcile_position_protections(decision: AIDecision, snapshot: AISnap
         # Read the exchange-owned algorithm set again immediately before any
         # write, preventing a stale AI snapshot from creating duplicates.
         pending = await _pending_position_protections(include_details=True)
+        lookup_meta = pending.get("_meta") if isinstance(pending, dict) else None
+        if not isinstance(lookup_meta, dict) or lookup_meta.get("lookupComplete") is not True:
+            # Fail closed.  An unavailable algorithm endpoint is not evidence
+            # that a position lacks protection; wait for the next cycle.
+            append_runtime_event(
+                "warning", "持仓保护状态无法完整核验，跳过本轮补挂",
+                {"type": "position-protection-state-unknown", "errors": (lookup_meta or {}).get("lookupErrors", [])},
+            )
+            return []
         for position in positions:
             if not isinstance(position, dict) or as_float(position.get("quantity")) == 0:
                 continue
@@ -1049,17 +1153,33 @@ async def _reconcile_position_protections(decision: AIDecision, snapshot: AISnap
                 continue
             has_tp = bool(current and current.get("takeProfitPrice")) or bool(position.get("takeProfitPrice"))
             has_sl = bool(current and current.get("stopLossPrice")) or bool(position.get("stopLossPrice"))
+            # New entries with staged targets attach only the stop on the
+            # parent order; once filled, the first protection query can show
+            # a one-sided/one-target set.  Complete a demonstrably short
+            # target set even when a line move would otherwise require high
+            # confidence.  This is restoration of the requested plan, not a
+            # discretionary price adjustment.
+            expected_target_count = len(_active_assessment_targets(position, assessment))
+            current_target_count = len(
+                [value for value in (current or {}).get("takeProfitPrices", []) if as_float(value) > 0]
+            )
+            needs_completion = bool(
+                current and has_tp and has_sl
+                and expected_target_count > current_target_count
+            )
             needs_adjustment = bool(
                 current and has_tp and has_sl
                 and _protection_needs_adjustment(position, current, assessment, decision)
             )
-            if has_tp and has_sl and not needs_adjustment:
+            if has_tp and has_sl and not needs_adjustment and not needs_completion:
                 continue
             try:
                 canceled_ids: list[str] = []
-                if current and (needs_adjustment or not (has_tp and has_sl)):
+                if current and (needs_adjustment or needs_completion or not (has_tp and has_sl)):
                     # A partial or one-sided protection set must be replaced
                     # as a unit so the stop and all targets remain consistent.
+                    if current.get("unmanagedOrders") or not current.get("algoIDs"):
+                        raise HTTPException(status_code=409, detail="现有持仓保护单缺少可撤销的算法ID，跳过替换")
                     canceled_ids = await _cancel_position_protections(instrument, current)
                 rows = await _submit_position_protection(position, assessment, decision=decision)
             except Exception as error:
@@ -1255,9 +1375,21 @@ async def submit_order(request: dict[str, Any], *, demo: bool) -> dict[str, Any]
             # No order POST has been sent. Even a leverage timeout cannot
             # create a position, so the gateway must release this reservation.
             raise OrderNotSubmittedError(f"设置杠杆失败，订单未提交：{error}") from error
-    tp = request.get("takeProfitTriggerPrice")
-    if tp is None:
-        levels = request.get("takeProfitLevels")
+    levels = request.get("takeProfitLevels")
+    staged_levels = (
+        isinstance(levels, list)
+        and len(levels) > 1
+        and all(isinstance(level, dict) for level in levels)
+    )
+    # Never attach a single top-level TP when the request carries multiple
+    # staged levels; callers may still populate the legacy field for schema
+    # compatibility, but doing so would silently discard the other targets.
+    tp = None if staged_levels else request.get("takeProfitTriggerPrice")
+    if tp is None and not staged_levels:
+        # A single legacy target is supported directly by OKX's attached
+        # algorithm.  Multiple targets are deferred to standalone OCOs after
+        # the entry is visible as a position; attaching only the first target
+        # would silently discard the remaining staged plan.
         if isinstance(levels, list) and levels:
             first = levels[0]
             if isinstance(first, dict):
@@ -1832,7 +1964,10 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
         decision_targets = _assessment_targets(decision)
         decision_take_profit = decision.takeProfitPrice
         if decision_targets:
-            decision_take_profit = max(row["price"] for row in decision_targets) if decision.direction == "long" else min(row["price"] for row in decision_targets)
+            # Risk/reward admission is based on the first reachable tranche;
+            # using the farthest target could admit a staged plan whose first
+            # partial exit does not meet the configured minimum ratio.
+            decision_take_profit = min(row["price"] for row in decision_targets) if decision.direction == "long" else max(row["price"] for row in decision_targets)
         geometry_error = _check_protection_geometry(
             instrument_id=decision.instrumentID, direction=decision.direction,
             entry=entry_price, stop_loss=decision.stopLossPrice,

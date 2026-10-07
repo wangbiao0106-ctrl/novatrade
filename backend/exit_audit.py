@@ -181,16 +181,22 @@ async def _current_position_quantity(
     if not isinstance(rows, list):
         return None, None
     quantities: list[float] = []
+    matched = False
     for position in rows:
         if not isinstance(position, dict):
             continue
         if _text(position, "instId", "instrumentID") != instrument_id:
             continue
+        matched = True
         quantity = _signed_number(position, "pos", "quantity", "positionQty", "sz")
-        if quantity is not None:
-            quantities.append(quantity)
+        if quantity is None:
+            # A matching but malformed row is not proof that the position is
+            # flat. Keep the exit unsettled until a later account read is
+            # parseable.
+            return None, None
+        quantities.append(quantity)
     if not quantities:
-        return 0.0, False
+        return (0.0, False) if not matched else (None, None)
     total = sum(abs(value) for value in quantities)
     return total, total > 0
 
@@ -284,7 +290,9 @@ async def _closed_position_details(
 
 def _event_from_row(row: dict[str, Any], entry: dict[str, Any], *, fill_price: float | None,
                     quantity: float | None, pnl: float | None, fill_time: str | None,
-                    closed: dict[str, Any] | None = None) -> dict[str, Any] | None:
+                    closed: dict[str, Any] | None = None,
+                    position_quantity: float | None = None,
+                    position_open: bool | None = None) -> dict[str, Any] | None:
     instrument_id = _text(row, "instId", "instrumentID") or str(entry.get("instrumentID") or "")
     actual_side = (_text(row, "actualSide") or "").lower()
     if actual_side not in {"tp", "sl"} or not instrument_id:
@@ -307,8 +315,18 @@ def _event_from_row(row: dict[str, Any], entry: dict[str, Any], *, fill_price: f
     fill_price = fill_price or history_exit
     quantity = quantity or history_quantity
     pnl = pnl if pnl is not None else history_pnl
+    # A filled child can represent one tranche of a staged take-profit.  Only
+    # an explicit flat position proves that the complete entry is closed and
+    # allows the gateway to release its entry reservation.  Unknown position
+    # state is deliberately kept non-settled so a transient account failure
+    # cannot permit a duplicate entry.
+    event_type = (
+        "exit-settled" if position_open is False
+        else "exit-partial" if position_open is True
+        else "exit-fill-unconfirmed"
+    )
     event = {
-        "type": "exit-settled",
+        "type": event_type,
         "source": "exchange-native-oco",
         "instrumentID": instrument_id,
         "entryOrderID": str(entry.get("orderID") or "") or None,
@@ -329,10 +347,12 @@ def _event_from_row(row: dict[str, Any], entry: dict[str, Any], *, fill_price: f
         "entryPrice": history_entry,
         "exitPrice": history_exit,
         "state": _text(row, "state", "status") or "effective",
+        "positionQuantity": position_quantity,
+        "positionOpen": position_open,
     }
     side_label = "止盈(TP)" if actual_side == "tp" else "止损(SL)"
     event["message"] = (
-        f"原生 OCO 平仓：{instrument_id} / {side_label} / 触发价 {trigger if trigger is not None else 'unknown'} "
+        f"原生 OCO {'平仓完成' if event_type == 'exit-settled' else '分批止盈' if event_type == 'exit-partial' else '成交待确认'}：{instrument_id} / {side_label} / 触发价 {trigger if trigger is not None else 'unknown'} "
         f"/ 触发类型 {trigger_type or 'unknown'} / 数量 {quantity if quantity is not None else 'unknown'} "
         f"/ 成交价 {fill_price if fill_price is not None else 'unknown'} "
         f"/ PnL {pnl if pnl is not None else 'unknown'} / positionID {position_id or 'unknown'} / entryOrderID {entry.get('orderID') or 'unknown'} "
@@ -424,15 +444,25 @@ async def sync_native_protection_exits(
         )
         fill_price = child.get("fillPrice") or fill_price
         quantity = child.get("quantity") or quantity
+        # Never infer full account closure from the child order alone.  A
+        # staged TP child is expected to fill while other tranches remain.
+        position_quantity, position_open = await _current_position_quantity(
+            instrument_id=instrument_id, private_request=private_request,
+        )
         closed = await _closed_position_details(row, instrument_id=instrument_id, private_request=private_request)
-        event = _event_from_row(row, entry, fill_price=fill_price, quantity=quantity, pnl=pnl, fill_time=fill_time, closed=closed)
+        event = _event_from_row(
+            row, entry, fill_price=fill_price, quantity=quantity, pnl=pnl,
+            fill_time=fill_time, closed=closed,
+            position_quantity=position_quantity, position_open=position_open,
+        )
         if event is None:
             continue
         algo_id = str(event.get("algoID") or "")
         identity = algo_id or _text(row, "attachAlgoClOrdId", "algoClOrdId", "clOrdId") or ",".join(event.get("childOrderIDs") or [])
         event_key = ":".join([
             "oco", "demo" if demo else "live", identity or "unknown",
-            str(event.get("actualSide") or "unknown"), str(event.get("triggerTime") or "unknown"),
+            str(event.get("actualSide") or "unknown"), str(event.get("type") or "unknown"),
+            str(event.get("triggerTime") or "unknown"),
             str(event.get("entryOrderID") or "unknown"),
         ])
         if await gateway.record_event(event, event_key=event_key):
