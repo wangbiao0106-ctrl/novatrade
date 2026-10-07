@@ -4,7 +4,7 @@
 
 每个策略目录遵循以下职责：
 
-- `STRATEGY.md` 是唯一的人类可读规则真源，记录版本、信号、范围、风控和生产实现位置。
+- 普通策略的 `STRATEGY.md` 是唯一的人类可读规则真源，记录版本、信号、范围、风控和生产实现位置；Codex/DeepSeek AI 决策包的公共门禁见 [`spec/AI_DECISION_POLICY.md`](../spec/AI_DECISION_POLICY.md)，其 `STRATEGY.md` 记录 provider 差异。
 - `config/strategy.json` 是由规则真源维护的机器参数真源，必须与 `STRATEGY.md` 的版本和参数一致。
 - `research/` 保存回测、扫描器和验证证据；研究结果是证据，不是规则来源。
 - `README.md` 记录策略状态、入口和运行时实现位置。
@@ -25,7 +25,9 @@ git diff --check
 | --- | --- | --- |
 | 山寨币二次扫顶（v1.4） | 54 笔，资金池终值 2.720x；已实现回撤 43.49% | [`sweep_reversal_short/STRATEGY.md`](sweep_reversal_short/STRATEGY.md) |
 
-AI 决策策略由 backend 配置中心单独管理，实验室包只保存规则、参数和验收口径：
+AI 决策策略由 backend 配置中心单独管理，实验室包只保存 provider 差异、参数和验收口径。
+Codex 与 DeepSeek 共用的规则、门禁和保护单语义集中在
+[`spec/AI_DECISION_POLICY.md`](../spec/AI_DECISION_POLICY.md)：
 
 - [`codex_ai_decision/`](codex_ai_decision/)：Codex / `gpt-6-luna` 决策策略，配置中心 ID 为 `codex`，当前为候选规则。
 - [`deepseek_ai_decision/`](deepseek_ai_decision/)：DeepSeek Harness / `deepseek-v4-pro` 决策策略，配置中心 ID 为 `deepseek`，当前为候选规则。
@@ -33,7 +35,7 @@ AI 决策策略由 backend 配置中心单独管理，实验室包只保存规�
 全历史结果仅说明规则已同步。年度分布属于条件预测，不能把历史期望当作收益保证；其他目录保持研究候选或归档状态。
 
 - [`sweep_reversal_short/`](sweep_reversal_short/)：山寨币二次扫顶，已接入策略引擎。生产范围（v1.4）是每 30 秒刷新、24h 报价成交额不低于 300 万 USDT 且排名前 100 的合规山寨币（`dynamic.sweepCandidates`）；`config/universe_recommended.json` 的 177 个标的只用于历史回测基线，不是运行时绑定名单。
-- [`codex_ai_decision/`](codex_ai_decision/) 与 [`deepseek_ai_decision/`](deepseek_ai_decision/)：AI 决策候选包。两者共享服务端 policy、订单网关和 live trading 闸门；DeepSeek 的 profile/编码与事件预筛必须先通过 usage 和回放验收，不能把实验室配置当作运行时文件读取。
+- [`codex_ai_decision/`](codex_ai_decision/) 与 [`deepseek_ai_decision/`](deepseek_ai_decision/)：AI 决策候选包。两者共享公共决策规则、服务端 policy、订单网关和 live trading 闸门；Codex 的分组协调与 DeepSeek 的 profile/编码、事件预筛保留在各自策略入口中，不能把实验室配置当作运行时文件读取。
 - [`ema_3line_pullback/`](ema_3line_pullback/)：三线突破回踩，EMA 20/60/120 四方向历史研究归档，不是规则真源，未接入运行时。
 - [`range_rejection_confirmation_short/`](range_rejection_confirmation_short/)：冲高阴线确认，突破近期高点后出现大实体阴线、收盘回到 EMA20 附近，等待右侧确认再做空的研究候选；未接入运行时。
 - [`intraday_pump_retest_short/`](intraday_pump_retest_short/)：缩量二次拉升，山寨日内涨幅超过 60% 后，高点回落再突涨并缩量收高的研究候选；未接入运行时。

@@ -1,6 +1,6 @@
 # NovaTrade DeepSeek AI 策略省 Token 方案 v2
 
-> 状态：P0、P1 的安全基础和 P3 事件预筛已落地；P2 单调用仲裁、P4 冷却预筛仍保持关闭，必须在真实 usage 和回放基线通过后再启用。
+> 状态：P0、P1 的安全基础和 P3 事件预筛已落地；P2 单调用仲裁仍保持关闭，P4 的时间冷却预筛已废弃。当前重复开仓只由实时持仓和活动挂单门禁控制。
 >
 > 本方案不把 UTF-8 字节数当作 token，也不把传输压缩当作模型费用节省。所有收益数字必须来自 DeepSeek usage、端到端延迟和决策回放。
 
@@ -12,7 +12,7 @@
 
 - 服务端仍是唯一的决策校验和下单入口；模型不能直接调用交易工具。
 - 快照、决策、拒绝原因和模型路由继续写入审计记录。
-- 开仓仍须通过 freshness、可交易性、信心、胜率、风险收益比、止损、杠杆、日限额和冷却检查。
+- 开仓仍须通过 freshness、可交易性、信心、胜率、风险收益比、止损、杠杆、日限额和实时敞口检查；同合约固定时间冷却不再是门槛。
 - 平仓、撤单和持仓管理不能因为优化输入而被静默删除。
 - 研究配置放在 `strategies/<strategy_name>/`；运行时不能从 `strategies/` 读取文件。
 
@@ -121,7 +121,7 @@
 
 1. `entryEligible=true` 且无 `unmetConditions`；
 2. 当前配置的 confidence、winRate、riskRewardRatio、止损和价格几何门槛；
-3. freshness、交易可用性、日限额、账户风险和共享冷却状态；
+3. freshness、交易可用性、日限额、账户风险以及当前持仓和活动挂单状态；
 4. 按 `confidence`、`riskRewardRatio`、`winRate`、配置顺序排序，最后用 instrument ID 做稳定 tie-break；
 5. 最多选择一单，没有候选则 hold。
 
@@ -155,13 +155,16 @@
 
 预筛先以 shadow 运行 24 小时，统计应调用但被跳过的漏检率、跳过后下一次真实调用是否出现新的候选或管理动作，以及实际减少的模型调用和 token。
 
-## 6. P4：冷却去重
+## 6. P4：时间冷却已废弃
 
-冷却优化只作为减少无效模型候选的提示层逻辑。共享持久化 `OrderGateway` 的原子检查仍是最终权威，不能删除。
+旧版本曾计划用同合约时间冷却减少重复开仓，但当前规则已经移除该门槛。重复开仓
+只由服务端实时检查当前持仓、活动挂单和未知提交 reservation 控制；撤单或平仓后，
+只有新的快照再次通过完整开仓门禁才允许开仓。持仓、挂单和 reduce-only 管理动作不能
+被任何历史冷却字段屏蔽。
 
-实现一个只读的共享冷却查询，查询和提交使用同一份 durable ledger；必须覆盖已接受订单、未确定响应的 reservation、重启和 Codex/DeepSeek 多 worker 共享网关的情况。冷却命中时仍可分析平仓和撤单，不能屏蔽 reduce-only 动作。
-
-验收标准是 24 小时内没有“模型输出有效 open、随后仅因已知冷却被网关 422”的重复调用，同时网关保留最终防线。
+`cooldownSeconds` 和 `NOVATRADE_DEEPSEEK_COOLDOWN_PREFILTER` 只保留用于读取旧配置
+的兼容信息，不得作为新策略参数、提示词门禁或事件指纹依据。验收应覆盖成交后、
+部分成交、状态未知、重启和 Codex/DeepSeek 共享网关的实时敞口场景。
 
 ## 7. 回放、版本和目录
 
@@ -191,7 +194,6 @@ strategies/deepseek_ai_decision/
 - `NOVATRADE_AI_EVENT_DRIVEN`：0 / 1（当前实现的事件预筛开关，默认关闭）；
 - `NOVATRADE_AI_EVENT_MODE`：off / shadow / on（`shadow` 只审计潜在跳过，不减少模型调用）；
 - `NOVATRADE_AI_EVENT_MAX_SKIP_SECONDS`：连续无变化时的最长模型跳过时间，默认 900 秒；
-- `NOVATRADE_DEEPSEEK_COOLDOWN_PREFILTER`：off / on。
 
 任何 schema 错误、policy 拒绝率、超时率、管理动作漏检或 provider 错误上升，都自动退回上一阶段，并保留失败夹具和 usage 记录。
 
@@ -202,7 +204,7 @@ strategies/deepseek_ai_decision/
 - 实际 input token 相对基线下降至少 35%；stretch 目标为 50%，不预先承诺 70%；
 - output/reasoning token、p95 总延迟和 provider 错误率没有系统性上升；
 - assessment 覆盖率 100%，schema/policy/gateway 测试全部通过；
-- 开仓、平仓、撤单、冷却和账户缺失夹具没有漏放动作；
+- 开仓、平仓、撤单、实时敞口和账户缺失夹具没有漏放动作；
 - 预筛漏检率为 0，或明确保持关闭；
 - 所有线上决策都能通过保存的 snapshot 和规则版本重放。
 

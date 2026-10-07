@@ -622,6 +622,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var decisionIntervalSeconds: Double
     public var cliTimeoutSeconds: Double
     public var maxOutputBytes: Int
+    /// Legacy compatibility field. AI entries are gated by current positions
+    /// and pending orders; this field no longer controls trading.
     public var cooldownSeconds: Double
     public var maxConsecutiveFailures: Int
     public var allowOpen: Bool
@@ -637,7 +639,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
     /// Upper leverage bound. The AI may request a lower leverage per decision.
     public var maxLeverage: Double
 
-    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool = false, mode: AIRunMode = .disabled, allowedInstruments: [String] = [], minimumConfidence: Double = 0.65, decisionIntervalSeconds: Double = 30, cliTimeoutSeconds: Double = 90, maxOutputBytes: Int = 1_000_000, cooldownSeconds: Double = 43_200, maxConsecutiveFailures: Int = 3, allowOpen: Bool = true, allowClose: Bool = true, allowCancel: Bool = true, requireStopLoss: Bool = true, maxDailyOrders: Int = 20, maxDailyLosses: Int = 5, marginPerOrderUSD: Double = 500, maxLeverage: Double = 5) {
+    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool = false, mode: AIRunMode = .disabled, allowedInstruments: [String] = [], minimumConfidence: Double = 0.65, decisionIntervalSeconds: Double = 30, cliTimeoutSeconds: Double = 90, maxOutputBytes: Int = 1_000_000, cooldownSeconds: Double = 0, maxConsecutiveFailures: Int = 3, allowOpen: Bool = true, allowClose: Bool = true, allowCancel: Bool = true, requireStopLoss: Bool = true, maxDailyOrders: Int = 20, maxDailyLosses: Int = 5, marginPerOrderUSD: Double = 500, maxLeverage: Double = 5) {
         self.strategyID = strategyID; self.provider = provider
         self.enabled = enabled; self.mode = mode; self.allowedInstruments = allowedInstruments
         self.minimumConfidence = minimumConfidence; self.decisionIntervalSeconds = decisionIntervalSeconds
@@ -670,7 +672,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
             decisionIntervalSeconds: try container.decodeIfPresent(Double.self, forKey: .decisionIntervalSeconds) ?? 30,
             cliTimeoutSeconds: try container.decodeIfPresent(Double.self, forKey: .cliTimeoutSeconds) ?? 90,
             maxOutputBytes: try container.decodeIfPresent(Int.self, forKey: .maxOutputBytes) ?? 1_000_000,
-            cooldownSeconds: try container.decodeIfPresent(Double.self, forKey: .cooldownSeconds) ?? 43_200,
+            cooldownSeconds: try container.decodeIfPresent(Double.self, forKey: .cooldownSeconds) ?? 0,
             maxConsecutiveFailures: try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveFailures) ?? 3,
             allowOpen: try container.decodeIfPresent(Bool.self, forKey: .allowOpen) ?? true,
             allowClose: try container.decodeIfPresent(Bool.self, forKey: .allowClose) ?? true,

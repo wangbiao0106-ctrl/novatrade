@@ -55,7 +55,7 @@ cp backend/.env.example "$HOME/Library/Application Support/NovaTrade/backend.env
 - AI 交易限制默认是每日最多开仓 20 单、每日最多 5 个亏损单、每笔保证金上限 500 USDT、最大杠杆 5x。每次开仓由 AI 在 `1x` 到配置上限之间选择实际杠杆，名义金额按「单笔保证金 × AI 杠杆」计算，并按实际限价向下取整，因此单笔实际保证金不会超过配置值。OKX `cross` 模式的杠杆按合约和保证金模式生效；同一合约已有持仓或挂单时，服务端禁止切换杠杆，避免交易所重算既有暴露的保证金。达到任一日限额后只拒绝新的 `open`，平仓和撤单仍可执行。每日统计按 UTC 日计算，未知的下单结果会先占用开仓额度，直到订单状态明确。
 - 可交易性与下单规格来自认证账户的 `/account/instruments`，模拟盘只支持部分公开市场合约。每轮快照保留完整固定观察池，同时提供逐币 `tradingAvailability`：不可交易或无法核验的币仍有技术评估，但不能成为开仓对象；服务端和执行前再次检查，不切换交易环境。设置杠杆失败时尚未发送订单 POST，立即释放本次新预留；订单提交后结果未知的预留继续保留。
 - AI 默认关闭，运行模式为 `shadow`、`demo-active` 或人工授权后的 `live-armed`；实盘开关不能由 Codex 修改。状态、决策审计和订单 reservation 位于应用支持目录的 `ai-config.json`、`ai-state.json`、`ai-decisions.jsonl` 和 `order-ledger.json`。
-- AI 配置中心同时提供 `codex` 与 `deepseek` 两个独立策略；对应实验室规则分别见 [`strategies/codex_ai_decision/STRATEGY.md`](strategies/codex_ai_decision/STRATEGY.md) 和 [`strategies/deepseek_ai_decision/STRATEGY.md`](strategies/deepseek_ai_decision/STRATEGY.md)。目录文件只用于研究、版本和验收，运行时通过 `/api/v1/ai/strategies` 的 package/source/runtime/liveGate 元数据管理。
+- AI 配置中心同时提供 `codex` 与 `deepseek` 两个独立策略；共用决策、开仓、持仓管理和保护单规则见 [`spec/AI_DECISION_POLICY.md`](spec/AI_DECISION_POLICY.md)，provider 专属入口分别见 [`strategies/codex_ai_decision/STRATEGY.md`](strategies/codex_ai_decision/STRATEGY.md) 和 [`strategies/deepseek_ai_decision/STRATEGY.md`](strategies/deepseek_ai_decision/STRATEGY.md)。目录文件只用于研究、版本和验收，运行时通过 `/api/v1/ai/strategies` 的 package/source/runtime/liveGate 元数据管理。
 
 ## 多周期行情缓存
 

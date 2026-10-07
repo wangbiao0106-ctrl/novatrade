@@ -39,7 +39,7 @@ spec/                               稳定的工程规范和接口约定
 - 每个策略使用一个稳定的 ASCII `snake_case` 目录名。策略名称变更时同步更新目录 README、命令和引用。
 - 策略研究阶段的全部文件必须留在自己的目录中，不得把策略脚本放回项目级 `scripts/`，也不得把研究结果放进 `data/`。
 - `results/` 可以保存可复现的轻量结果；大体积行情导出或可重建缓存应加入 `.gitignore`，但不能改变数据目录职责。
-- `STRATEGY.md` 是策略实验室中唯一的人类规则真源；`config/strategy.json` 是与其版本对应的机器参数真源。`research/` 中的回测、扫描器和结果只能提供证据，不能反向修改规则定义。
+- 对普通策略，`STRATEGY.md` 是策略实验室中唯一的人类规则真源；`config/strategy.json` 是与其版本对应的机器参数真源。Codex/DeepSeek AI 决策包共用的公共门禁另见 [`spec/AI_DECISION_POLICY.md`](AI_DECISION_POLICY.md)，各自 `STRATEGY.md` 只维护 provider 差异。`research/` 中的回测、扫描器和结果只能提供证据，不能反向修改规则定义。
 - 策略完成并准备接入交易服务时，先在实验室更新 `STRATEGY.md` 和 `config/strategy.json`，再把该版本规则移植到 `Sources/`，同步更新 `Tests/` 和目录 README。运行时源码不能通过相对路径读取 `strategies/`。
 - 删除或替换实验产物时，保留规则说明和能够重现结果的配置；同步修复所有文档、测试和命令路径。
 

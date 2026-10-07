@@ -137,6 +137,10 @@ class FingerprintTests(unittest.TestCase):
             allowOpen=False, maxDailyOrders=1,
         )
         self.assertNotEqual(baseline, decision_fingerprint(snapshot(), changed_config))
+        legacy_cooldown = AIConfig(
+            enabled=True, mode="shadow", allowedInstruments=(BTC,), cooldownSeconds=60,
+        )
+        self.assertEqual(baseline, decision_fingerprint(snapshot(), legacy_cooldown))
 
         with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_MODEL": "deepseek-v4-pro-test"}, clear=False):
             deepseek_config = AIConfig(

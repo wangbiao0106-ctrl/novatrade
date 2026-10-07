@@ -746,15 +746,17 @@ class AIGatewayTests(unittest.TestCase):
         self.assertIn('"allowOpen":false', prompt)
         self.assertIn('"requireStopLoss":true', prompt)
         self.assertIn('"todayLossCount":0', prompt)
-        self.assertIn("Assess each contract independently", prompt)
-        self.assertIn("EVERY OBSERVED CONTRACT exactly once", prompt)
-        self.assertIn("Never fabricate source prices", prompt)
-        self.assertIn("at most ONE contract", prompt)
-        self.assertIn("contains a position for a contract", prompt)
-        self.assertIn("latest measured evidence materially invalidates", prompt)
-        self.assertIn("contains a live order", prompt)
-        self.assertIn("copy its real order ID", prompt)
-        self.assertNotIn("fixed 12-hour same-contract entry cooldown", prompt)
+        self.assertNotIn('"cooldownSeconds"', prompt)
+        normalized = prompt.lower()
+        self.assertIn("assess contracts independently", normalized)
+        self.assertIn("every observed contract exactly once", normalized)
+        self.assertIn("never fabricate prices", normalized)
+        self.assertIn("at most one contract", normalized)
+        self.assertIn("current position", normalized)
+        self.assertIn("active pending order", normalized)
+        self.assertIn("materially invalidated", normalized)
+        self.assertIn("real current order id", normalized)
+        self.assertNotIn("fixed 12-hour same-contract entry cooldown", normalized)
 
     def test_hold_and_account_blocks_preserve_conditional_analysis_in_prompt(self):
         snapshot = AISnapshot(
@@ -773,18 +775,16 @@ class AIGatewayTests(unittest.TestCase):
         self.assertIn('"allowOpen":false', prompt)
         self.assertIn('"todayLossCount":null', prompt)
         self.assertIn("PER-CONTRACT ANALYSIS FIRST, EXECUTION ELIGIBILITY SECOND", prompt)
-        self.assertIn("must not erase a contract's technical plan or numerical estimates", prompt)
-        self.assertIn("even when the scenario is not currently ready to trade", prompt)
-        self.assertIn("historical/backtest validation is not required", prompt)
-        self.assertIn("lower numerical winRate and confidence", prompt)
-        self.assertIn("not reasons to return neutral or null", prompt)
-        self.assertIn("contract's measured timeframe/price/trend evidence", prompt)
-        self.assertIn("required structural signal/confirmation still pending remains entryEligible=false", prompt)
-        self.assertIn("limitPrice not yet touched", prompt)
-        self.assertIn("limitPrice not yet touched is not an unmet signal", prompt)
-        self.assertIn("do not assume unavailable account/risk values", prompt)
-        self.assertIn("do not claim the snapshot has expired", prompt)
-        self.assertIn("normal forming candle", prompt)
+        normalized = prompt.lower()
+        for phrase in (
+            "conditional technical plan", "numerical estimates", "execution is blocked",
+            "directional conditional plan", "not ready to trade", "conditional plans, not placed orders",
+            "do not inflate quality values", "genuinely unavailable", "specific concise simplified chinese reason",
+            "entryeligible", "limitprice need not already be touched", "unknown account, risk, freshness",
+            "server policy is authoritative", "a forming candle is context",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, normalized)
 
     def test_prompt_market_facts_cover_observed_pool_without_auxiliary_leakage(self):
         snapshot = AISnapshot(
@@ -804,10 +804,12 @@ class AIGatewayTests(unittest.TestCase):
         # reasoning; auxiliary data does not gain observation authority.
         raw = json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1])
         self.assertEqual(restore_prompt_snapshot(raw), snapshot.to_dict())
-        self.assertIn("deterministic summaries", prompt)
-        self.assertIn("not trading signals or mandatory strategy rules", prompt)
-        self.assertIn("do not recompute their arithmetic", prompt)
-        self.assertIn("no exhaustive search over setups is required", prompt)
+        normalized = prompt.lower()
+        self.assertIn("server market facts", normalized)
+        self.assertIn("measured summaries", normalized)
+        self.assertIn("raw candles", normalized)
+        self.assertIn("resolve ambiguity", normalized)
+        self.assertIn("do not recompute their arithmetic", normalized)
 
     def test_prompt_candle_compaction_is_lossless_for_complete_16_contract_pool(self):
         ids = [f"COIN{index}-USDT-SWAP" for index in range(16)]
@@ -851,7 +853,7 @@ class AIGatewayTests(unittest.TestCase):
             original_prompt = CodexRunner._decision_prompt(snapshot, AIConfig(), now=clock)
         self.assertLess(len(compact_prompt.encode()), len(original_prompt.encode()) * .8)
         self.assertIn("columns:[field names],rows:[[values]]", compact_prompt)
-        self.assertIn("Use the confirmed column to identify closed candles", compact_prompt)
+        self.assertIn("Use confirmed=true candles for closed-candle signals", compact_prompt)
 
     def test_prompt_candle_compaction_preserves_heterogeneous_and_empty_series(self):
         rows = [{"id": 1, "confirmed": True}, {"id": 2, "confirmed": False, "extra": None}]
@@ -1315,8 +1317,8 @@ class AIGatewayTests(unittest.TestCase):
         self.assertEqual(freshness["evaluatedAt"], "2026-10-05T16:28:49Z")
         self.assertEqual(freshness["ageSeconds"], 19)
         self.assertFalse(freshness["isStale"])
-        self.assertIn("Do not guess the current date/time", prompt)
-        self.assertIn("does not invalidate confirmed history or the entire snapshot", prompt)
+        self.assertIn("Use confirmed=true candles for closed-candle signals", prompt)
+        self.assertIn("a forming candle is context", prompt)
         transmitted_snapshot = json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1])
         self.assertEqual(restore_prompt_snapshot(transmitted_snapshot)["candles"]["BTC-USDT-SWAP/5m"], snapshot.candles["BTC-USDT-SWAP/5m"])
 

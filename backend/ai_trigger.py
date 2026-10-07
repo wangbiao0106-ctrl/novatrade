@@ -282,7 +282,6 @@ def decision_fingerprint(snapshot: AISnapshot, config: AIConfig) -> str:
             "maxDailyLosses": config.maxDailyLosses,
             "marginPerOrderUSD": config.marginPerOrderUSD,
             "maxLeverage": config.maxLeverage,
-            "cooldownSeconds": config.cooldownSeconds,
         },
         "route": route,
         "structure": {

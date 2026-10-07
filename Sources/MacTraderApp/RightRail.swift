@@ -407,7 +407,6 @@ struct AISettingsSheet: View {
     @ObservedObject var model: DashboardModel
     let strategy: AIStrategyID
     @Environment(\.dismiss) private var dismiss
-    private let fixedInstrumentCooldownSeconds = 12.0 * 60.0 * 60.0
     @State private var config: AIConfig
     @State private var selectedInstrumentIDs: Set<String>
     @State private var instrumentSearch = ""
@@ -573,12 +572,6 @@ struct AISettingsSheet: View {
                             .frame(width: 72)
                             .multilineTextAlignment(.trailing)
                     }
-                    HStack {
-                        Text("同币种重复下单").frame(width: 120, alignment: .leading)
-                        Spacer()
-                        Text("12 小时（固定）")
-                            .foregroundStyle(.secondary)
-                    }
                 }
 
                 Section("交易限制") {
@@ -624,7 +617,7 @@ struct AISettingsSheet: View {
                     Toggle("允许平仓", isOn: $config.allowClose)
                     Toggle("允许撤单", isOn: $config.allowCancel)
                     Toggle("开仓必须带止损", isOn: $config.requireStopLoss)
-                    Text("允许平仓时，AI 可根据最新行情提前平仓；12 小时限制只约束新开仓。")
+                    Text("每轮复评持仓与挂单；已有持仓或活动挂单时不会重复开仓，重大行情变化或下单错误可触发管理动作。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -667,7 +660,7 @@ struct AISettingsSheet: View {
             minimumConfidence: config.minimumConfidence,
             decisionIntervalSeconds: config.decisionIntervalSeconds,
             cliTimeoutSeconds: config.cliTimeoutSeconds,
-            cooldownSeconds: max(config.cooldownSeconds, fixedInstrumentCooldownSeconds),
+            cooldownSeconds: 0,
             allowOpen: config.allowOpen,
             allowClose: config.allowClose,
             allowCancel: config.allowCancel,
