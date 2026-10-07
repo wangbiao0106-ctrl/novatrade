@@ -41,8 +41,8 @@ def history_row(*, instrument: str = "FIL-USDT-SWAP", client: str = "aidecision1
         "attachAlgoClOrdId": client,
         "actualSide": "tp",
         "state": "effective",
-        "actualTriggerPx": "1.1899",
-        "actualTriggerPxType": "mark",
+        "tpTriggerPx": "1.1899",
+        "tpTriggerPxType": "mark",
         "actualTriggerTime": "1700000000000",
         "actualSz": "10",
         "actualPx": "1.1901",
@@ -59,7 +59,11 @@ class ExitAuditTests(unittest.TestCase):
 
         async def request(method: str, path: str, *, params=None, body=None):
             if path == "/trade/orders-algo-history":
+                self.assertEqual(params.get("state"), "effective")
                 return {"data": [history_row()]}
+            if path == "/trade/order":
+                self.assertEqual(params.get("ordId"), "child-1")
+                return {"data": [{"ordId": "child-1", "state": "filled", "accFillSz": "10", "fillPx": "1.1901"}]}
             if path == "/account/positions-history":
                 return {"data": [{
                     "instId": "FIL-USDT-SWAP", "posId": "position-1", "uTime": "1700000000000",
@@ -71,6 +75,7 @@ class ExitAuditTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         event = events[0]
         self.assertEqual(event["reason"], "take-profit")
+        self.assertEqual(event["triggerPrice"], 1.1899)
         self.assertEqual(event["triggerPriceType"], "mark")
         self.assertEqual(event["fillPrice"], 1.1901)
         self.assertEqual(event["realizedPnL"], -2.75)
@@ -99,6 +104,8 @@ class ExitAuditTests(unittest.TestCase):
         async def request(method: str, path: str, *, params=None, body=None):
             if path == "/trade/orders-algo-history":
                 return {"data": [history_row()]}
+            if path == "/trade/order":
+                return {"data": [{"ordId": "child-1", "state": "filled", "accFillSz": "10", "fillPx": "1.1901"}]}
             return {"data": []}
 
         first = asyncio.run(sync_native_protection_exits(gateway, demo=True, private_request=request))
@@ -106,6 +113,51 @@ class ExitAuditTests(unittest.TestCase):
         self.assertEqual(len(first), 1)
         self.assertEqual(second, [])
         self.assertEqual(len(gateway.events), 1)
+
+    def test_effective_oco_with_canceled_child_and_open_position_is_protection_failure(self):
+        gateway = FakeGateway([{
+            "instrumentID": "FIL-USDT-SWAP", "orderID": "entry-1", "clientOrderID": "aidecision123",
+            "decisionID": "decision-1", "strategyID": "codex", "demo": True,
+        }])
+
+        async def request(method: str, path: str, *, params=None, body=None):
+            if path == "/trade/orders-algo-history":
+                return {"data": [history_row()]}
+            if path == "/trade/order":
+                return {"data": [{
+                    "ordId": "child-1", "state": "canceled", "accFillSz": "0",
+                    "cancelSourceReason": "Order was canceled by system",
+                }]}
+            if path == "/account/positions":
+                return {"data": [{"instId": "FIL-USDT-SWAP", "pos": "10"}]}
+            raise AssertionError(path)
+
+        events = asyncio.run(sync_native_protection_exits(gateway, demo=True, private_request=request))
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["type"], "native-protection-failure")
+        self.assertEqual(events[0]["reason"], "native_protection_child_not_filled")
+        self.assertTrue(events[0]["positionOpen"])
+        self.assertEqual(events[0]["childOrders"][0]["state"], "canceled")
+        self.assertEqual(gateway.events[0]["type"], "native-protection-failure")
+
+    def test_effective_oco_without_child_fill_never_releases_entry_reservation(self):
+        gateway = FakeGateway([{
+            "instrumentID": "FIL-USDT-SWAP", "orderID": "entry-1", "clientOrderID": "aidecision123", "demo": True,
+        }])
+
+        async def request(method: str, path: str, *, params=None, body=None):
+            if path == "/trade/orders-algo-history":
+                return {"data": [history_row()]}
+            if path == "/trade/order":
+                return {"data": [{"ordId": "child-1", "state": "canceled", "accFillSz": "0"}]}
+            if path == "/account/positions":
+                return {"data": [{"instId": "FIL-USDT-SWAP", "pos": "10"}]}
+            raise AssertionError(path)
+
+        events = asyncio.run(sync_native_protection_exits(gateway, demo=True, private_request=request))
+        self.assertEqual(len(events), 1)
+        self.assertNotEqual(events[0]["type"], "exit-settled")
+        self.assertEqual(gateway.events[0]["type"], "native-protection-failure")
 
     def test_gateway_submission_audit_contains_decision_and_aligned_protection(self):
         async def submit(request: dict[str, object], demo: bool) -> dict[str, object]:
@@ -139,6 +191,42 @@ class ExitAuditTests(unittest.TestCase):
             self.assertIn("tp=1.1899", str(runtime_events[-1]["message"]))
             stored = json.loads((Path(directory) / "ledger.json").read_text())
             self.assertEqual(stored["reservations"]["entry-1"]["takeProfitTriggerPrice"], 1.1899)
+
+    def test_settled_exit_releases_entry_reservation_for_a_later_open(self):
+        calls: list[dict[str, object]] = []
+
+        async def submit(request: dict[str, object], demo: bool) -> dict[str, object]:
+            calls.append(request)
+            return {"orderID": f"entry-{len(calls)}", "instrumentID": request["instrumentID"]}
+
+        async def exercise() -> dict[str, dict[str, object]]:
+            with tempfile.TemporaryDirectory() as directory:
+                gateway = OrderGateway(
+                    Path(directory) / "ledger.json", submit=submit,
+                    limits={"minOrderIntervalSeconds": 0},
+                )
+                request = {
+                    "instrumentID": "FIL-USDT-SWAP", "side": "sell", "orderType": "market",
+                    "quantity": 10, "source": "ai", "leverage": 1,
+                }
+                await gateway.submit_intent(
+                    {**request, "clientOrderID": "aifilentry1"}, demo=True,
+                    instrument=InstrumentSpec("FIL-USDT-SWAP", 1), price=1,
+                )
+                self.assertIn("entry-1", gateway.reservations)
+                await gateway.record_event(
+                    {"type": "exit-settled", "entryOrderID": "entry-1", "instrumentID": "FIL-USDT-SWAP"},
+                    event_key="oco-demo-algo-1-tp",
+                )
+                self.assertEqual(gateway.reservations, {})
+                await gateway.submit_intent(
+                    {**request, "clientOrderID": "aifilentry2"}, demo=True,
+                    instrument=InstrumentSpec("FIL-USDT-SWAP", 1), price=1,
+                )
+                return gateway.reservations
+
+        reservations = asyncio.run(exercise())
+        self.assertIn("entry-2", reservations)
 
 
 if __name__ == "__main__":

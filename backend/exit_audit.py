@@ -111,6 +111,149 @@ async def _fill_details(
     return fill_price, quantity, pnl, fill_time
 
 
+async def _child_order_details(
+    row: dict[str, Any],
+    *,
+    instrument_id: str,
+    private_request: PrivateRequest,
+) -> dict[str, Any]:
+    """Verify that an OCO child order really executed.
+
+    OKX can leave an OCO history row in ``effective`` state after the trigger
+    fires even when the generated reduce-only child is cancelled.  The parent
+    history row is therefore not execution evidence.  Query every linked child
+    order and only treat a filled state or positive accumulated fill as proof.
+    """
+    child_ids = _all_ids(row, "ordIdList", "ordIDList", "ordId", "ordID", "childOrderIDs")
+    result: dict[str, Any] = {
+        "verified": False,
+        "orders": [],
+        "fillPrice": None,
+        "quantity": None,
+    }
+    if not instrument_id or not child_ids:
+        return result
+    for child_id in child_ids:
+        try:
+            payload = await private_request(
+                "GET", "/trade/order",
+                params={"instId": instrument_id, "ordId": child_id},
+            )
+        except Exception as error:
+            result["orders"].append({"orderID": child_id, "state": "lookup-error", "error": str(error)})
+            continue
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        details = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
+        if details is None:
+            result["orders"].append({"orderID": child_id, "state": "lookup-empty"})
+            continue
+        state = (_text(details, "state", "status") or "unknown").lower()
+        quantity = _number(details, "accFillSz", "fillSz", "fillQty", "actualSz")
+        fill_price = _number(details, "fillPx", "fillPrice", "avgPx", "actualPx")
+        result["orders"].append({
+            "orderID": child_id,
+            "state": state,
+            "accFillSz": quantity,
+            "fillPrice": fill_price,
+        })
+        if state == "filled" or quantity is not None:
+            result["verified"] = True
+            result["fillPrice"] = fill_price
+            result["quantity"] = quantity
+            return result
+    return result
+
+
+async def _current_position_quantity(
+    *,
+    instrument_id: str,
+    private_request: PrivateRequest,
+) -> tuple[float | None, bool | None]:
+    """Return current position size and whether the exchange confirms it open."""
+    try:
+        payload = await private_request(
+            "GET", "/account/positions",
+            params={"instType": "SWAP", "instId": instrument_id},
+        )
+    except Exception:
+        return None, None
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return None, None
+    quantities: list[float] = []
+    for position in rows:
+        if not isinstance(position, dict):
+            continue
+        if _text(position, "instId", "instrumentID") != instrument_id:
+            continue
+        quantity = _signed_number(position, "pos", "quantity", "positionQty", "sz")
+        if quantity is not None:
+            quantities.append(quantity)
+    if not quantities:
+        return 0.0, False
+    total = sum(abs(value) for value in quantities)
+    return total, total > 0
+
+
+def _protection_failure_event(
+    row: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    instrument_id: str,
+    child: dict[str, Any],
+    position_quantity: float | None,
+    position_open: bool | None,
+) -> dict[str, Any] | None:
+    """Build a durable event when an OCO trigger has no executed child."""
+    actual_side = (_text(row, "actualSide") or "").lower()
+    if actual_side not in {"tp", "sl"} or not instrument_id:
+        return None
+    trigger_names = (
+        ("actualTriggerPx", "triggerPx", "triggerPrice", "tpTriggerPx", "tpTriggerPrice")
+        if actual_side == "tp"
+        else ("actualTriggerPx", "triggerPx", "triggerPrice", "slTriggerPx", "slTriggerPrice")
+    )
+    trigger = _number(row, *trigger_names)
+    trigger_type = _text(row, "actualTriggerPxType", "triggerPxType", "tpTriggerPxType", "slTriggerPxType")
+    trigger_time = _text(row, "actualTriggerTime", "triggerTime", "ts")
+    algo_id = _text(row, "algoId", "algoID")
+    child_ids = _all_ids(row, "ordIdList", "ordIDList", "ordId", "ordID", "childOrderIDs")
+    side_label = "止盈(TP)" if actual_side == "tp" else "止损(SL)"
+    position_label = (
+        str(position_quantity) if position_quantity is not None else "unknown"
+    )
+    state_label = ", ".join(
+        f"{order.get('orderID')}: {order.get('state')}"
+        for order in child.get("orders", [])
+        if isinstance(order, dict)
+    ) or "unknown"
+    return {
+        "type": "native-protection-failure",
+        "source": "exchange-native-oco",
+        "instrumentID": instrument_id,
+        "entryOrderID": str(entry.get("orderID") or "") or None,
+        "clientOrderID": str(entry.get("clientOrderID") or "") or None,
+        "decisionID": entry.get("decisionID"),
+        "strategyID": entry.get("strategyID"),
+        "algoID": algo_id,
+        "childOrderIDs": child_ids,
+        "actualSide": actual_side,
+        "reason": "native_protection_child_not_filled",
+        "triggerPrice": trigger,
+        "triggerPriceType": trigger_type,
+        "triggerTime": trigger_time,
+        "childOrders": child.get("orders", []),
+        "positionQuantity": position_quantity,
+        "positionOpen": position_open,
+        "state": _text(row, "state", "status") or "effective",
+        "message": (
+            f"原生 OCO {side_label} 已触发，但平仓子单未成交：{instrument_id} / "
+            f"触发价 {trigger if trigger is not None else 'unknown'} / 子单 {state_label} / "
+            f"当前持仓 {position_label}；未标记为平仓成功"
+        ),
+    }
+
+
 async def _closed_position_details(
     row: dict[str, Any], *, instrument_id: str, private_request: PrivateRequest,
 ) -> dict[str, Any] | None:
@@ -146,7 +289,12 @@ def _event_from_row(row: dict[str, Any], entry: dict[str, Any], *, fill_price: f
     actual_side = (_text(row, "actualSide") or "").lower()
     if actual_side not in {"tp", "sl"} or not instrument_id:
         return None
-    trigger = _number(row, "actualTriggerPx", "triggerPx", "triggerPrice")
+    trigger_names = (
+        ("actualTriggerPx", "triggerPx", "triggerPrice", "tpTriggerPx", "tpTriggerPrice")
+        if actual_side == "tp"
+        else ("actualTriggerPx", "triggerPx", "triggerPrice", "slTriggerPx", "slTriggerPrice")
+    )
+    trigger = _number(row, *trigger_names)
     trigger_type = _text(row, "actualTriggerPxType", "triggerPxType", "tpTriggerPxType", "slTriggerPxType")
     trigger_time = _text(row, "actualTriggerTime", "triggerTime", "ts") or fill_time
     algo_id = _text(row, "algoId", "algoID")
@@ -205,7 +353,7 @@ async def sync_native_protection_exits(
         return []
     payload = await private_request(
         "GET", "/trade/orders-algo-history",
-        params={"instType": "SWAP", "ordType": "oco", "limit": "100"},
+        params={"instType": "SWAP", "ordType": "oco", "state": "effective", "limit": "100"},
     )
     rows = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(rows, list):
@@ -244,9 +392,38 @@ async def sync_native_protection_exits(
                 await gateway.record_event(unknown, event_key=event_key)
             continue
         instrument_id = _text(row, "instId", "instrumentID") or str(entry.get("instrumentID") or "")
+        child = await _child_order_details(
+            row, instrument_id=instrument_id, private_request=private_request,
+        )
+        if not child.get("verified"):
+            position_quantity, position_open = await _current_position_quantity(
+                instrument_id=instrument_id, private_request=private_request,
+            )
+            failure = _protection_failure_event(
+                row,
+                entry,
+                instrument_id=instrument_id,
+                child=child,
+                position_quantity=position_quantity,
+                position_open=position_open,
+            )
+            if failure is not None:
+                identity = str(failure.get("algoID") or "") or ",".join(failure.get("childOrderIDs") or [])
+                event_key = ":".join([
+                    "oco-failure", "demo" if demo else "live", identity or "unknown",
+                    str(failure.get("actualSide") or "unknown"),
+                    str(failure.get("triggerTime") or "unknown"),
+                    str(failure.get("entryOrderID") or "unknown"),
+                ])
+                if await gateway.record_event(failure, event_key=event_key):
+                    failure = {**failure, "eventKey": event_key}
+                    created.append(failure)
+            continue
         fill_price, quantity, pnl, fill_time = await _fill_details(
             row, instrument_id=instrument_id, private_request=private_request,
         )
+        fill_price = child.get("fillPrice") or fill_price
+        quantity = child.get("quantity") or quantity
         closed = await _closed_position_details(row, instrument_id=instrument_id, private_request=private_request)
         event = _event_from_row(row, entry, fill_price=fill_price, quantity=quantity, pnl=pnl, fill_time=fill_time, closed=closed)
         if event is None:

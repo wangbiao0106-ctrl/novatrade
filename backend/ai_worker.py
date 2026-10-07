@@ -32,7 +32,7 @@ from typing import Any, Protocol
 
 try:
     from .ai_market_facts import market_facts
-    from .ai_trigger import decision_fingerprint, structure_identity, trigger_reason
+    from .ai_trigger import decision_fingerprint, managed_state, structure_identity, trigger_reason
     from .deepseek_harness import DeepSeekHarnessError, DeepSeekHarnessRunner as DeepSeekACP
     from .ai_policy import MIN_OPEN_WIN_RATE, MIN_OPEN_RISK_REWARD_RATIO, PolicyResult, PolicyState, record_decision, snapshot_freshness, validate_decision
     from .ai_schema import (
@@ -44,7 +44,7 @@ try:
     )
 except ImportError:  # launched from bundled backend/main.py as a script
     from ai_market_facts import market_facts
-    from ai_trigger import decision_fingerprint, structure_identity, trigger_reason
+    from ai_trigger import decision_fingerprint, managed_state, structure_identity, trigger_reason
     from deepseek_harness import DeepSeekHarnessError, DeepSeekHarnessRunner as DeepSeekACP
     from ai_policy import MIN_OPEN_WIN_RATE, MIN_OPEN_RISK_REWARD_RATIO, PolicyResult, PolicyState, record_decision, snapshot_freshness, validate_decision
     from ai_schema import (
@@ -489,11 +489,18 @@ class CodexRunner:
             "no unmetConditions. When SERVER ENTRY GATES.tradingAvailability is present, the selected contract must "
             "also have available=true in the current authenticated account; false/unknown cannot open even if "
             "an assessment says eligible. Copy its instrumentID, direction, winRate, riskRewardRatio, confidence, stopLossPrice, "
-            "takeProfitPrice and (for a limit order) limitPrice EXACTLY into this decision. Its setup must meet every current "
+            "takeProfitPrice, optional takeProfitLevels and (for a limit order) limitPrice EXACTLY into this decision. Its setup must meet every current "
             "SERVER ENTRY GATE, including allowed opening, confidence/winRate/RR, required stop, margin/leverage and daily loss/order limits. "
             "A justified resting limit order does not require the market to have touched its entry price. "
             "Closing/cancelling existing positions/orders remain possible under allowClose/allowCancel even if no new entry is eligible. "
-            "When the latest market evidence changes the setup, allow an early close before the original take-profit or stop-loss. "
+            "When a current position exists, do not choose another open action for that instrument; first evaluate whether the "
+            "latest market evidence has materially invalidated the setup or exposed an earlier order mistake. In that case, "
+            "choose close with the actual position direction and explain the evidence. When a current pending order exists, "
+            "evaluate whether the setup has materially changed or the order was mistaken; in that case choose cancel with "
+            "the actual pending order ID. Early close/cancel is allowed before the original take-profit or stop-loss only for "
+            "one of those reasons, never as a routine duplicate replacement. "
+            "For existing positions, missing protection should be restored from the latest assessment. Adjusting an existing "
+            "protection line requires high confidence and clear materially changed evidence; ordinary noise is insufficient. "
             "Use the actual account positions and pending order IDs for close/cancel; never fabricate an order ID. "
             "SERVER FRESHNESS is authoritative; when valid=true and isStale=false do not claim snapshot expiry. "
             "No missing private/risk count may be assumed zero. Unknown or blocked entry gates require hold for new entries. "
@@ -677,7 +684,8 @@ class CodexRunner:
             "Assess each contract independently: a valid opportunity does not require the entire pool or all timeframes to agree. "
             "A missing resource for one contract does not automatically invalidate the other contracts' complete data. "
             "For each assessment give long/short/neutral direction, estimated winRate, riskRewardRatio, "
-            "a suggested limitPrice (the pending-order entry level), stopLossPrice, takeProfitPrice, confidence, "
+            "a suggested limitPrice (the pending-order entry level), stopLossPrice, takeProfitPrice, and optional takeProfitLevels "
+            "(one to four {price,quantityPercent} targets whose percentages sum to 100), confidence, "
             "entryEligible, unmetConditions and a specific Simplified Chinese reason. "
             "PER-CONTRACT ANALYSIS FIRST, EXECUTION ELIGIBILITY SECOND. These are conditional trading plans, not placed orders. "
             "Use SERVER MARKET FACTS to read each contract's measured price, confirmed-candle trends/ranges and depth quickly; "
@@ -722,15 +730,25 @@ class CodexRunner:
             "Do not drop an observed contract, replace the fixed pool or switch trading environment to bypass this gate. "
             "A conditional hypothesis with a required structural signal/confirmation still pending remains entryEligible=false "
             "even when its estimated numerical quality passes the thresholds. Keep its directional plan and numerical values visible. "
-            "A justified limit order may be placed away from the current market price: limitPrice not yet touched "
-            "or an unfilled limit order alone is NOT an unmet signal/confirmation and does not prevent entryEligible=true "
-            "or action=open when the actual entry gates and established setup pass. "
+            "When SNAPSHOT.account.positions contains a position for a contract, that contract must not be selected for action=open. "
+            "Re-evaluate the existing position first: select action=close only when the latest measured evidence materially "
+            "invalidates the setup or shows the earlier order was a mistake, and state that evidence in reason. "
+            "For an existing position, compare its current stop-loss/take-profit protection with the latest assessment. "
+            "If protection is missing, provide valid replacement levels in that assessment so the server can attach protection. "
+            "A high-confidence position may have its existing protection adjusted only when the latest measured evidence is clear "
+            "and materially changes the trade thesis; ordinary small price noise must not move either line. State this evidence. "
+            "Staged takeProfitLevels are allowed for partial profit-taking; keep the stop-loss valid for the whole remaining position. "
+            "When SNAPSHOT.account.pendingOrders contains a live order, do not create a replacement open for that contract. "
+            "Select action=cancel only when the setup materially changed or the earlier order was mistaken, and copy its real order ID. "
+            "A routine duplicate replacement is not a valid reason to close or cancel. Only one action is allowed per round. "
+            "A proposed limit level may be away from the current market price: limitPrice not yet touched is not an unmet "
+            "signal by itself. A real current pending order is different: it blocks a replacement open until it is cancelled. "
             "Use SERVER ENTRY GATES exactly: allowOpen must be true, confidence >= minimumConfidence, "
             "winRate >= minimumWinRate and riskRewardRatio >= minimumRiskRewardRatio. "
             "When requireStopLoss=true, a positive stopLossPrice is required. Limit orders require a positive limitPrice. "
             "todayLossCount must be available, finite, nonnegative and below maxDailyLosses; "
             "do not assume unavailable account/risk values or daily counters are zero. "
-            "Respect reported risk blocks, maximum daily orders, the fixed 12-hour same-contract entry cooldown and fixed margin/leverage limits. "
+            "Respect reported risk blocks, maximum daily orders, the current-position entry gate and fixed margin/leverage limits. "
             "Otherwise list specific unmet conditions per contract. Calculate riskRewardRatio using the same proposed entry, "
             "stop loss and take profit, accounting for trading costs if supported; do not mix different setups. "
             "When prices are supplied, use stopLossPrice < limitPrice < takeProfitPrice for long, "
@@ -1514,11 +1532,20 @@ class AIWorker:
             )
             # Keep the evaluated setup visible even if the downstream gateway
             # fails. Its assessments must stay paired with this snapshot.
-            if result.accepted and result.decision.action != "hold" and self.order_gateway is not None and self.config.mode != "shadow":
+            # A hold is still a complete model evaluation. The execution
+            # gateway uses that cycle to reconcile existing positions and
+            # restore missing protection; it must not be treated as a no-op.
+            should_reconcile = (
+                result.accepted
+                and self.order_gateway is not None
+                and self.config.mode != "shadow"
+                and (result.decision.action != "hold" or managed_state(parsed_snapshot))
+            )
+            if should_reconcile:
                 await self.order_gateway(result.decision, parsed_snapshot)
                 # A gateway return is the only point at which an entry is
                 # known to have been submitted. In particular, an
-                # OrderNotSubmittedError must leave the entry cooldown free.
+                # OrderNotSubmittedError must not record a submitted entry.
                 record_decision(self.policy_state, result, at=evaluated_at)
             if fingerprint is not None:
                 self.status = replace(

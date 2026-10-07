@@ -30,13 +30,13 @@ import uvicorn
 import websockets
 
 try:
-    from .ai_policy import _check_protection_geometry, parse_time, snapshot_freshness
+    from .ai_policy import _check_protection_geometry, entry_exposure_error, parse_time, snapshot_freshness
     from .ai_schema import AIDecision, AIChatRequest, AIConfig, AISnapshot, SchemaError, normalize_contract_ids
     from .ai_worker import AIWorker, CodexError
     from .exit_audit import sync_native_protection_exits
     from .order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError
 except ImportError:  # bundled backend/main.py is launched as a script
-    from ai_policy import _check_protection_geometry, parse_time, snapshot_freshness
+    from ai_policy import _check_protection_geometry, entry_exposure_error, parse_time, snapshot_freshness
     from ai_schema import AIDecision, AIChatRequest, AIConfig, AISnapshot, SchemaError, normalize_contract_ids
     from ai_worker import AIWorker, CodexError
     from exit_audit import sync_native_protection_exits
@@ -151,6 +151,9 @@ ai_workers: dict[str, AIWorker] = {}
 order_gateway: OrderGateway | None = None
 native_exit_task: asyncio.Task | None = None
 native_exit_sync_lock = asyncio.Lock()
+# Protection reconciliation can run from both AI workers. Serialize the
+# exchange write so two strategies cannot attach duplicate OCOs to one leg.
+position_protection_lock = asyncio.Lock()
 
 # The API configuration center owns the two decision providers.  Keep this
 # catalog explicit so the UI can show where a strategy is defined and which
@@ -371,7 +374,7 @@ def okx_signature(timestamp: str, method: str, request_path: str, payload: str) 
     return base64.b64encode(hmac.new(OKX_SECRET_KEY.encode(), message, "sha256").digest()).decode()
 
 
-async def okx_private_request(method: str, path: str, *, params: dict[str, str] | None = None, body: dict[str, Any] | None = None) -> dict[str, Any]:
+async def okx_private_request(method: str, path: str, *, params: dict[str, str] | None = None, body: Any = None) -> dict[str, Any]:
     if not private_ready():
         raise HTTPException(status_code=503, detail="OKX private REST credentials are not configured")
     query = f"?{urlencode(params)}" if params else ""
@@ -503,8 +506,10 @@ def append_runtime_event(level: str, message: str, fields: dict[str, Any] | None
 
 
 async def _gateway_runtime_sink(value: dict[str, Any]) -> None:
+    event_type = str(value.get("type") or "")
+    level = "error" if event_type in {"native-protection-failure", "position-protection-failure"} else str(value.get("level") or "info")
     append_runtime_event(
-        str(value.get("level") or "info"),
+        level,
         str(value.get("message") or value.get("type") or "gateway event"),
         value,
     )
@@ -672,7 +677,42 @@ async def account() -> dict[str, Any]:
         assets.append({"id": currency, "currency": currency, "equity": equity,
                        "available": as_float(row.get("availEq"), as_float(row.get("availBal"), max(0, equity - as_float(row.get("frozenBal"))))),
                        "usdValue": as_float(row.get("eqUsd")) if row.get("eqUsd") is not None else None})
-    positions = [position_snapshot(row) for row in position_payload.get("data", [])]
+    position_rows = position_payload.get("data") if isinstance(position_payload, dict) else None
+    positions: list[dict[str, Any]] = []
+    positions_available = isinstance(position_rows, list)
+    positions_error = None
+    # Attached OCOs are converted to standalone algorithm orders after an
+    # entry fills. Read those orders while building the AI snapshot so a
+    # position is not incorrectly reported as unprotected.
+    position_protections = await _pending_position_protections() if positions_available else {}
+    if positions_available:
+        for row in position_rows:
+            if not isinstance(row, dict):
+                positions_available = False
+                positions_error = "OKX position row is invalid"
+                continue
+            raw_quantity = row.get("pos")
+            try:
+                parsed_quantity = float(raw_quantity)
+                if not math.isfinite(parsed_quantity):
+                    raise ValueError
+            except (TypeError, ValueError):
+                # A missing or malformed quantity cannot prove that this row
+                # is flat. Fail closed instead of looking like no position to
+                # the AI entry gate.
+                positions_available = False
+                positions_error = "OKX position quantity is invalid"
+                continue
+            if parsed_quantity == 0:
+                continue
+            item = position_snapshot(row, protection=position_protections.get(_position_protection_key(row)))
+            if item is None:
+                positions_available = False
+                positions_error = "OKX position row is incomplete"
+                continue
+            positions.append(item)
+    else:
+        positions_error = "OKX position response is invalid"
     pending_orders: list[dict[str, Any]] | None = None
     pending_orders_error = None
     pending_orders_retryable = False
@@ -717,11 +757,13 @@ async def account() -> dict[str, Any]:
                 "dailyBillsError": daily_bills_error,
                 "dailyBillsRetryable": daily_bills_retryable,
                 "dailyBillsPaginationComplete": daily_bills_complete,
+                "positionsAvailable": positions_available,
+                "positionsError": positions_error,
                 "pendingOrdersAvailable": pending_orders is not None,
                 "pendingOrdersError": pending_orders_error,
                 "pendingOrdersRetryable": pending_orders_retryable,
             },
-            "assets": assets, "positions": [item for item in positions if item],
+            "assets": assets, "positions": positions, "positionsKnown": positions_available,
             "pendingOrders": pending_orders, "pendingOrdersKnown": pending_orders is not None,
             "updatedAt": now_iso()}
 
@@ -758,9 +800,9 @@ def _position_protection_key(row: dict[str, Any]) -> str:
     return f"{row.get('instId', '')}|{str(row.get('posSide') or 'net').lower()}"
 
 
-async def _pending_position_protections() -> dict[str, dict[str, float | None]]:
+async def _pending_position_protections(*, include_details: bool = False) -> dict[str, dict[str, Any]]:
     """Best-effort lookup of standalone position protection algorithms."""
-    result: dict[str, dict[str, float | None]] = {}
+    result: dict[str, dict[str, Any]] = {}
     # OKX requires `ordType` for this endpoint. Attached TP/SL orders are
     # commonly represented as OCO algorithms after the parent order fills;
     # conditional and trigger orders are valid representations as well.
@@ -779,15 +821,266 @@ async def _pending_position_protections() -> dict[str, dict[str, float | None]]:
             if take_profit is None and stop_loss is None:
                 continue
             key = _position_protection_key(row)
-            current = result.setdefault(key, {"takeProfitPrice": None, "stopLossPrice": None})
+            algo_id = str(row.get("algoId") or row.get("algoID") or "").strip()
+            current = result.setdefault(key, {
+                "takeProfitPrice": None, "stopLossPrice": None,
+                "takeProfitPrices": [], "stopLossPrices": [], "algoIDs": [], "orders": [],
+            })
             current["takeProfitPrice"] = current["takeProfitPrice"] or take_profit
             current["stopLossPrice"] = current["stopLossPrice"] or stop_loss
+            if take_profit is not None and take_profit not in current["takeProfitPrices"]:
+                current["takeProfitPrices"].append(take_profit)
+            if stop_loss is not None and stop_loss not in current["stopLossPrices"]:
+                current["stopLossPrices"].append(stop_loss)
+            if algo_id and algo_id not in current["algoIDs"]:
+                current["algoIDs"].append(algo_id)
+            current["orders"].append(dict(row))
             # A missing posSide is common for net-mode algorithms. Keep an
             # instrument-only fallback for the corresponding position row.
-            fallback = result.setdefault(f"{row.get('instId')}|net", {"takeProfitPrice": None, "stopLossPrice": None})
+            fallback = result.setdefault(f"{row.get('instId')}|net", {
+                "takeProfitPrice": None, "stopLossPrice": None,
+                "takeProfitPrices": [], "stopLossPrices": [], "algoIDs": [], "orders": [],
+            })
             fallback["takeProfitPrice"] = fallback["takeProfitPrice"] or take_profit
             fallback["stopLossPrice"] = fallback["stopLossPrice"] or stop_loss
-    return result
+            if take_profit is not None and take_profit not in fallback["takeProfitPrices"]:
+                fallback["takeProfitPrices"].append(take_profit)
+            if stop_loss is not None and stop_loss not in fallback["stopLossPrices"]:
+                fallback["stopLossPrices"].append(stop_loss)
+            if algo_id and algo_id not in fallback["algoIDs"]:
+                fallback["algoIDs"].append(algo_id)
+            fallback["orders"].append(dict(row))
+    if include_details:
+        return result
+    return {
+        key: {
+            "takeProfitPrice": value.get("takeProfitPrice"),
+            "stopLossPrice": value.get("stopLossPrice"),
+        }
+        for key, value in result.items()
+    }
+
+
+def _position_direction(position: dict[str, Any]) -> str | None:
+    """Resolve a signed net/side position to the direction used by AI."""
+    side = str(position.get("side") or position.get("positionSide") or position.get("posSide") or "net").lower()
+    if side in {"long", "short"}:
+        return side
+    quantity = as_float(position.get("quantity", position.get("pos")), math.nan)
+    if not math.isfinite(quantity) or quantity == 0:
+        return None
+    return "short" if quantity < 0 else "long"
+
+
+def _assessment_targets(assessment: Any) -> list[dict[str, float]]:
+    """Normalize legacy single TP and optional staged targets for execution."""
+    levels = getattr(assessment, "takeProfitLevels", None)
+    if isinstance(levels, list):
+        result: list[dict[str, float]] = []
+        for row in levels:
+            if not isinstance(row, dict):
+                continue
+            price = as_float(row.get("price"))
+            percent = as_float(row.get("quantityPercent"))
+            if price > 0 and 0 < percent <= 100:
+                result.append({"price": price, "quantityPercent": percent})
+        if result:
+            return result
+    price = as_float(getattr(assessment, "takeProfitPrice", None))
+    return [{"price": price, "quantityPercent": 100.0}] if price > 0 else []
+
+
+def _position_assessment(decision: AIDecision, position: dict[str, Any]) -> Any | None:
+    instrument = str(position.get("instrumentID") or "")
+    direction = _position_direction(position)
+    if not instrument or direction not in {"long", "short"}:
+        return None
+    for assessment in decision.assessments:
+        if assessment.instrumentID == instrument and assessment.direction == direction:
+            return assessment
+    return None
+
+
+def _protection_is_reasonable(position: dict[str, Any], assessment: Any) -> bool:
+    """Check protection against the current position price when available.
+
+    A position may have moved into profit since it opened. Comparing a
+    replacement stop/target only with ``entryPrice`` rejects valid trailing
+    protection (for example, a short stop below entry but above the current
+    mark). New or incomplete snapshots without a usable mark still fall back
+    to entry so the execution gate remains conservative.
+    """
+    direction = _position_direction(position)
+    entry = as_float(position.get("entryPrice"))
+    mark = as_float(position.get("markPrice"))
+    reference = mark if mark > 0 else entry
+    stop = as_float(getattr(assessment, "stopLossPrice", None))
+    targets = _assessment_targets(assessment)
+    if direction not in {"long", "short"} or reference <= 0 or stop <= 0 or not targets:
+        return False
+    prices = [row["price"] for row in targets]
+    if direction == "long":
+        return stop < reference and all(price > reference for price in prices)
+    return stop > reference and all(price < reference for price in prices)
+
+
+async def _submit_position_protection(
+    position: dict[str, Any], assessment: Any, *, decision: AIDecision,
+) -> list[dict[str, Any]]:
+    """Attach one OCO per staged target to an existing position.
+
+    Each target owns its percentage of the position. This permits partial
+    take-profit fills while keeping a stop on every tranche. Existing active
+    algorithms are checked by the caller before this function is reached.
+    """
+    if not private_ready() or not _protection_is_reasonable(position, assessment):
+        return []
+    instrument_id = str(position.get("instrumentID") or "")
+    direction = _position_direction(position)
+    quantity = abs(as_float(position.get("quantity")))
+    if not instrument_id or direction not in {"long", "short"} or quantity <= 0:
+        return []
+    spec = await _instrument_spec(instrument_id)
+    size_total = math.floor(quantity / spec.lotSize) * spec.lotSize
+    if size_total < spec.minSize:
+        return []
+    stop = spec.aligned_price(as_float(getattr(assessment, "stopLossPrice", None)))
+    targets = _assessment_targets(assessment)
+    margin_mode = str(position.get("marginMode") or "isolated").lower()
+    if margin_mode not in {"cross", "isolated"}:
+        margin_mode = "isolated"
+    pos_side = str(position.get("side") or "net").lower()
+    if pos_side not in {"long", "short"}:
+        pos_side = ""
+    results: list[dict[str, Any]] = []
+    remaining = size_total
+    for index, target in enumerate(targets):
+        target_price = spec.aligned_price(target["price"])
+        if target_price is None or stop is None:
+            continue
+        tranche = size_total if index == len(targets) - 1 else math.floor(size_total * target["quantityPercent"] / 100 / spec.lotSize) * spec.lotSize
+        tranche = min(max(tranche, 0), remaining)
+        if tranche < spec.minSize:
+            continue
+        remaining = round(remaining - tranche, 12)
+        client_seed = f"{instrument_id}:{position.get('id')}:{decision.decisionId}:{index}:{target_price}:{stop}:{tranche}"
+        client_id = "aip" + hashlib.sha256(client_seed.encode("utf-8")).hexdigest()[:29]
+        body: dict[str, Any] = {
+            "instId": instrument_id, "tdMode": margin_mode,
+            "side": "sell" if direction == "long" else "buy", "ordType": "oco",
+            "sz": tranche, "tpTriggerPx": target_price, "tpOrdPx": "-1", "tpTriggerPxType": "mark",
+            "slTriggerPx": stop, "slOrdPx": "-1", "slTriggerPxType": "mark",
+            "reduceOnly": "true", "algoClOrdId": client_id,
+        }
+        if pos_side:
+            body["posSide"] = pos_side
+        response = await okx_private_request("POST", "/trade/order-algo", body=body)
+        row = (response.get("data") or [{}])[0] if isinstance(response, dict) else {}
+        algo_id = row.get("algoId") if isinstance(row, dict) else None
+        if not algo_id:
+            raise HTTPException(status_code=502, detail="OKX protection order did not include algoId")
+        results.append({"algoID": algo_id, "clientOrderID": client_id, "quantity": tranche, "takeProfitPrice": target_price, "stopLossPrice": stop})
+    return results
+
+
+async def _cancel_position_protections(instrument_id: str, protection: dict[str, Any]) -> list[str]:
+    """Cancel the exchange-owned algo legs before replacing protection."""
+    algo_ids = [str(value) for value in protection.get("algoIDs", []) if str(value).strip()]
+    if not algo_ids:
+        return []
+    body = [{"instId": instrument_id, "algoId": algo_id} for algo_id in dict.fromkeys(algo_ids)]
+    await okx_private_request("POST", "/trade/cancel-algos", body=body)
+    return list(dict.fromkeys(algo_ids))
+
+
+def _protection_needs_adjustment(
+    position: dict[str, Any], protection: dict[str, Any], assessment: Any, decision: AIDecision,
+) -> bool:
+    """Permit line changes only for a high-confidence, material re-evaluation."""
+    direction = _position_direction(position)
+    if direction not in {"long", "short"} or not protection.get("algoIDs"):
+        return False
+    model_confidence = as_float(getattr(decision, "confidence", 0))
+    assessment_confidence = as_float(getattr(assessment, "confidence", 0))
+    if model_confidence < 0.80 or assessment_confidence < 0.80:
+        return False
+    if len(str(getattr(decision, "reason", "") or "").strip()) < 8 or len(str(getattr(assessment, "reason", "") or "").strip()) < 8:
+        return False
+    targets = [row["price"] for row in _assessment_targets(assessment)]
+    current_targets = [as_float(value) for value in protection.get("takeProfitPrices", [])]
+    current_targets = [value for value in current_targets if value > 0]
+    proposed_stop = as_float(getattr(assessment, "stopLossPrice", None))
+    current_stops = [as_float(value) for value in protection.get("stopLossPrices", [])]
+    current_stops = [value for value in current_stops if value > 0]
+    if not targets or not current_targets or not current_stops or proposed_stop <= 0:
+        return False
+
+    def materially_different(left: list[float], right: list[float]) -> bool:
+        if len(left) != len(right):
+            return True
+        return any(abs(a - b) / max(abs(a), abs(b), 1e-12) >= 0.01 for a, b in zip(sorted(left), sorted(right)))
+
+    return materially_different(targets, current_targets) or materially_different([proposed_stop], current_stops)
+
+
+async def _reconcile_position_protections(decision: AIDecision, snapshot: AISnapshot) -> list[dict[str, Any]]:
+    """Every model cycle restores missing protection on known positions."""
+    if not OKX_DEMO and not bool(read_state("live-trading.json", {}).get("enabled", False)):
+        return []
+    account_data = snapshot.account if isinstance(snapshot.account, dict) else {}
+    if account_data.get("authenticated") is not True or account_data.get("positionsKnown", True) is not True:
+        return []
+    positions = account_data.get("positions")
+    if not isinstance(positions, list):
+        return []
+    created: list[dict[str, Any]] = []
+    async with position_protection_lock:
+        # Read the exchange-owned algorithm set again immediately before any
+        # write, preventing a stale AI snapshot from creating duplicates.
+        pending = await _pending_position_protections(include_details=True)
+        for position in positions:
+            if not isinstance(position, dict) or as_float(position.get("quantity")) == 0:
+                continue
+            instrument = str(position.get("instrumentID") or "")
+            key = _position_protection_key({"instId": instrument, "posSide": position.get("side")})
+            current = pending.get(key) or pending.get(f"{instrument}|net")
+            assessment = _position_assessment(decision, position)
+            if assessment is None or not _protection_is_reasonable(position, assessment):
+                continue
+            has_tp = bool(current and current.get("takeProfitPrice")) or bool(position.get("takeProfitPrice"))
+            has_sl = bool(current and current.get("stopLossPrice")) or bool(position.get("stopLossPrice"))
+            needs_adjustment = bool(
+                current and has_tp and has_sl
+                and _protection_needs_adjustment(position, current, assessment, decision)
+            )
+            if has_tp and has_sl and not needs_adjustment:
+                continue
+            try:
+                canceled_ids: list[str] = []
+                if current and (needs_adjustment or not (has_tp and has_sl)):
+                    # A partial or one-sided protection set must be replaced
+                    # as a unit so the stop and all targets remain consistent.
+                    canceled_ids = await _cancel_position_protections(instrument, current)
+                rows = await _submit_position_protection(position, assessment, decision=decision)
+            except Exception as error:
+                append_runtime_event(
+                    "error", f"{instrument} 持仓保护单补挂失败",
+                    {"type": "position-protection-failure", "instrumentID": instrument, "error": str(error), "decisionID": decision.decisionId},
+                )
+                continue
+            if rows:
+                created.extend([{**row, "instrumentID": instrument, "decisionID": decision.decisionId} for row in rows])
+                append_runtime_event(
+                    "info", f"{instrument} {'已调整' if needs_adjustment else '已补挂'}持仓止盈止损",
+                    {
+                        "type": "position-protection-adjusted" if needs_adjustment else "position-protection-restored",
+                        "instrumentID": instrument, "decisionID": decision.decisionId,
+                        "orders": rows, "canceledAlgoIDs": canceled_ids,
+                        "decisionReason": decision.reason,
+                        "assessmentReason": getattr(assessment, "reason", ""),
+                    },
+                )
+    return created
 
 
 def position_snapshot(row: dict[str, Any], *, protection: dict[str, float | None] | None = None) -> dict[str, Any] | None:
@@ -869,17 +1162,17 @@ def _assert_ai_entry_current(request: dict[str, Any]) -> None:
 
 
 async def _guard_ai_leverage_change(request: dict[str, Any]) -> None:
-    """Keep positions and pending orders on one instrument leverage.
+    """Recheck that no exposure appeared before an AI entry POST.
 
-    OKX applies ``set-leverage`` to the instrument/margin-mode scope. Changing
-    it before a new AI order could reprice existing exposure and make its
-    reported margin exceed the fixed entry budget.
+    The worker refreshes account state before building an order, but another
+    order can fill while the gateway is preparing the request. This final
+    exchange-owned check closes that race. Any current position or pending
+    order blocks a new AI entry, even when its leverage happens to match.
     """
     if request.get("source") != "ai" or request.get("reduceOnly") or request.get("leverage") is None:
         return
     instrument = str(request.get("instrumentID") or "")
-    requested = _positive_field({"value": request.get("leverage")}, "value")
-    if requested is None:
+    if _positive_field({"value": request.get("leverage")}, "value") is None:
         raise OrderNotSubmittedError("AI leverage is unavailable or invalid")
     try:
         positions, pending = await asyncio.gather(
@@ -887,23 +1180,43 @@ async def _guard_ai_leverage_change(request: dict[str, Any]) -> None:
             okx_private_request("GET", "/trade/orders-pending", params={"instType": "SWAP"}),
         )
     except Exception as error:
-        raise OrderNotSubmittedError(f"核验当前合约杠杆失败，订单未提交：{error}") from error
+        raise OrderNotSubmittedError(f"核验当前合约持仓或挂单失败，订单未提交：{error}") from error
 
-    rows: list[tuple[str, dict[str, Any]]] = []
-    for row in positions.get("data", []) if isinstance(positions, dict) else []:
-        if isinstance(row, dict) and row.get("instId") == instrument and as_float(row.get("pos")) != 0:
-            rows.append(("position", row))
-    for row in pending.get("data", []) if isinstance(pending, dict) else []:
-        if isinstance(row, dict) and row.get("instId") == instrument and as_float(row.get("sz")) > 0:
-            rows.append(("pending order", row))
-    for label, row in rows:
-        current = _positive_field(row, "lever", "leverage")
-        if current is None:
-            raise OrderNotSubmittedError(f"无法核验现有{label}的杠杆，订单未提交")
-        if not math.isclose(current, requested, rel_tol=0, abs_tol=1e-9):
-            raise OrderNotSubmittedError(
-                f"当前合约已有{label}使用 {current:g}x，不能切换为 {requested:g}x；请先处理现有暴露后再开仓"
-            )
+    position_rows = positions.get("data") if isinstance(positions, dict) else None
+    pending_rows = pending.get("data") if isinstance(pending, dict) else None
+    if not isinstance(position_rows, list) or not isinstance(pending_rows, list):
+        raise OrderNotSubmittedError("无法核验当前持仓或挂单，订单未提交")
+    for row in position_rows:
+        if not isinstance(row, dict):
+            raise OrderNotSubmittedError("无法核验当前持仓，订单未提交")
+        if row.get("instId") != instrument:
+            continue
+        try:
+            quantity = float(row.get("pos"))
+            if not math.isfinite(quantity):
+                raise ValueError
+        except (TypeError, ValueError):
+            raise OrderNotSubmittedError("无法核验当前持仓，订单未提交")
+        if quantity != 0:
+            raise OrderNotSubmittedError("当前合约已有持仓，订单未提交；请先平仓")
+    for row in pending_rows:
+        if not isinstance(row, dict):
+            raise OrderNotSubmittedError("无法核验当前挂单，订单未提交")
+        if row.get("instId") != instrument:
+            continue
+        status = str(row.get("state") or row.get("status") or "").lower()
+        if status in {"canceled", "cancelled", "filled", "rejected", "failed", "expired", "mmp_canceled"}:
+            continue
+        if status not in {"live", "partially_filled", "waiting", "pending", "open", "queued"}:
+            raise OrderNotSubmittedError("当前合约挂单状态不可核验，订单未提交")
+        try:
+            quantity = float(row.get("sz"))
+            if not math.isfinite(quantity):
+                raise ValueError
+        except (TypeError, ValueError):
+            raise OrderNotSubmittedError("无法核验当前挂单，订单未提交")
+        if quantity > 0:
+            raise OrderNotSubmittedError("当前合约已有挂单，订单未提交；请先撤单")
 
 
 async def submit_order(request: dict[str, Any], *, demo: bool) -> dict[str, Any]:
@@ -943,6 +1256,12 @@ async def submit_order(request: dict[str, Any], *, demo: bool) -> dict[str, Any]
             # create a position, so the gateway must release this reservation.
             raise OrderNotSubmittedError(f"设置杠杆失败，订单未提交：{error}") from error
     tp = request.get("takeProfitTriggerPrice")
+    if tp is None:
+        levels = request.get("takeProfitLevels")
+        if isinstance(levels, list) and levels:
+            first = levels[0]
+            if isinstance(first, dict):
+                tp = first.get("price")
     sl = request.get("stopLossTriggerPrice")
     if tp is not None or sl is not None:
         algo: dict[str, Any] = {"attachAlgoClOrdId": client_order_id}
@@ -954,6 +1273,13 @@ async def submit_order(request: dict[str, Any], *, demo: bool) -> dict[str, Any]
     # Price/spec reads, gateway lock waits and the leverage request may have
     # crossed the deadline since the worker admitted this entry intent.
     _assert_ai_entry_current(request)
+    # Setting leverage is a separate exchange request.  A different worker
+    # can fill or place an order during that request, after the first
+    # exposure check above. Recheck immediately before the order POST so the
+    # entry gate covers that final race window as well.
+    if request.get("leverage") is not None and not request.get("reduceOnly"):
+        await _guard_ai_leverage_change(request)
+        _assert_ai_entry_current(request)
     result = await okx_private_request("POST", "/trade/order", body=body)
     row = (result.get("data") or [{}])[0]
     order_id = row.get("ordId")
@@ -1021,9 +1347,11 @@ async def _lookup_order(instrument_id: str, client_order_id: str, demo: bool) ->
     try:
         payload = await okx_private_request("GET", "/trade/order", params={"instId": instrument_id, "clOrdId": client_order_id})
     except HTTPException as error:
-        # OKX 51603 means the client order id is definitely absent. Other
-        # failures must remain unresolved and keep the reservation.
-        if getattr(error, "exchange_code", "") == "51603":
+        # OKX 51603 means the client order id is absent. 51001 means the
+        # instrument itself does not exist, which also proves an order for
+        # that instrument was never accepted. Other failures remain
+        # unresolved and keep the reservation.
+        if getattr(error, "exchange_code", "") in {"51603", "51001"}:
             return None
         raise
     rows = payload.get("data")
@@ -1056,9 +1384,23 @@ async def _sync_native_protection_once() -> list[dict[str, Any]]:
             return []
 
 
+async def _reconcile_order_gateway_once() -> None:
+    """Resolve durable unknown submissions without stopping the worker loop."""
+    if not private_ready():
+        return
+    try:
+        await _get_order_gateway().reconcile(demo=OKX_DEMO)
+    except Exception as error:
+        append_runtime_event(
+            "error", "订单状态对账失败：未确认的开仓继续保留，请检查 OKX 订单查询和凭据",
+            {"type": "order-ledger-reconcile-error", "source": "order-gateway", "error": str(error)},
+        )
+
+
 async def _native_protection_loop() -> None:
     """Low-frequency native exit sync; the persisted audit performs dedupe."""
     while True:
+        await _reconcile_order_gateway_once()
         await _sync_native_protection_once()
         await asyncio.sleep(60)
 
@@ -1404,13 +1746,35 @@ async def _ai_cancel(decision: AIDecision, snapshot: AISnapshot, *, demo: bool) 
 
 async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: str = "codex") -> dict[str, Any]:
     """Apply current account/risk state immediately before submitting an AI intent."""
+    # Protection reconciliation is intentionally independent of the selected
+    # top-level action. A hold/cancel round still evaluates every existing
+    # position and restores missing OCO legs from the complete assessments.
     if decision.action == "cancel":
+        await _reconcile_position_protections(decision, snapshot)
         return await _ai_cancel(decision, snapshot, demo=OKX_DEMO)
+    if decision.action == "hold":
+        restored = await _reconcile_position_protections(decision, snapshot)
+        return {"action": "hold", "status": "reconciled", "protectionOrders": restored, "decisionID": decision.decisionId}
     if not decision.instrumentID or decision.direction not in {"long", "short"}:
         raise HTTPException(status_code=422, detail="AI action requires an instrument and direction")
+    if decision.action == "close":
+        account_data = snapshot.account if isinstance(snapshot.account, dict) else {}
+        current_snapshot = any(key in account_data for key in ("authenticated", "pendingOrdersKnown")) or (
+            isinstance(snapshot.dataFreshness, dict) and "availability" in snapshot.dataFreshness
+        )
+        if current_snapshot:
+            try:
+                snapshot = replace(snapshot, account=await account())
+            except (HTTPException, httpx.HTTPError, ValueError, TypeError) as error:
+                raise HTTPException(status_code=409, detail="无法刷新持仓状态，平仓已拒绝") from error
+        # A close decision can target one position while other positions still
+        # need missing or updated protection. Reconcile the full account after
+        # the fresh position read so every AI cycle keeps all managed positions
+        # protected.
+        await _reconcile_position_protections(decision, snapshot)
     if decision.action == "open":
-        account = snapshot.account if isinstance(snapshot.account, dict) else {}
-        current_snapshot = any(key in account for key in ("authenticated", "pendingOrdersKnown")) or (
+        account_data = snapshot.account if isinstance(snapshot.account, dict) else {}
+        current_snapshot = any(key in account_data for key in ("authenticated", "pendingOrdersKnown")) or (
             isinstance(snapshot.dataFreshness, dict) and "availability" in snapshot.dataFreshness
         )
         if current_snapshot:
@@ -1418,7 +1782,6 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
                 snapshot = replace(snapshot, account=await account(), risk=await risk())
             except (HTTPException, httpx.HTTPError, ValueError, TypeError) as error:
                 raise HTTPException(status_code=409, detail="无法刷新账户或风险状态，开仓已拒绝") from error
-            account = snapshot.account if isinstance(snapshot.account, dict) else {}
             risk_quality = snapshot.risk.get("dataQuality") if isinstance(snapshot.risk, dict) else None
             daily_pnl = as_float(snapshot.risk.get("dailyPnLPercent"), math.nan) if isinstance(snapshot.risk, dict) else math.nan
             if not isinstance(risk_quality, dict) or risk_quality.get("equitySource") != "okx" or risk_quality.get("accountRefreshError") or risk_quality.get("accountRefreshRetryable"):
@@ -1427,6 +1790,12 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
                 raise HTTPException(status_code=409, detail="risk state is unavailable")
             if snapshot.risk.get("killSwitch") or daily_pnl <= -5:
                 raise HTTPException(status_code=409, detail="risk kill switch is active")
+        account_data = snapshot.account if isinstance(snapshot.account, dict) else {}
+        await _reconcile_position_protections(decision, snapshot)
+        if current_snapshot or "positions" in account_data or "pendingOrders" in account_data:
+            exposure_error = entry_exposure_error(account_data, decision.instrumentID)
+            if exposure_error:
+                raise HTTPException(status_code=409, detail=exposure_error)
     worker = ai_workers.get(strategy_id) or (ai_worker if strategy_id == "codex" else None)
     config = worker.config if worker is not None else AIConfig()
     entry_deadline = None
@@ -1460,10 +1829,14 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
     last = await _ticker_last(decision.instrumentID)
     if decision.action == "open":
         entry_price = decision.limitPrice if decision.orderType == "limit" else last
+        decision_targets = _assessment_targets(decision)
+        decision_take_profit = decision.takeProfitPrice
+        if decision_targets:
+            decision_take_profit = max(row["price"] for row in decision_targets) if decision.direction == "long" else min(row["price"] for row in decision_targets)
         geometry_error = _check_protection_geometry(
             instrument_id=decision.instrumentID, direction=decision.direction,
             entry=entry_price, stop_loss=decision.stopLossPrice,
-            take_profit=decision.takeProfitPrice,
+            take_profit=decision_take_profit,
         )
         if geometry_error:
             raise HTTPException(status_code=422, detail=geometry_error)
@@ -1488,6 +1861,11 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
             if not isinstance(position, dict) or position.get("instrumentID") != decision.instrumentID:
                 continue
             position_side = str(position.get("side") or position.get("positionSide") or position.get("posSide") or "net").lower()
+            if position_side == "net":
+                signed_quantity = as_float(position.get("quantity"), 0)
+                if signed_quantity == 0:
+                    continue
+                position_side = "short" if signed_quantity < 0 else "long"
             if position_side in {"long", "short"} and position_side != decision.direction:
                 continue
             matching_positions.append(position)
@@ -1501,7 +1879,14 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
         if position_quantity <= 0 and current_snapshot:
             raise HTTPException(status_code=409, detail="当前持仓数量不可用")
         position_side = str(position.get("side") or position.get("positionSide") or position.get("posSide") or "net").lower()
-        if current_snapshot and position_side not in {"net", "long", "short"}:
+        if position_side == "net":
+            signed_quantity = as_float(position.get("quantity"), 0)
+            if signed_quantity == 0:
+                if current_snapshot:
+                    raise HTTPException(status_code=409, detail="当前持仓方向不可用")
+            else:
+                position_side = "short" if signed_quantity < 0 else "long"
+        if current_snapshot and position_side not in {"long", "short"}:
             raise HTTPException(status_code=409, detail="当前持仓方向不可用")
         if position_side in {"long", "short"}:
             position_margin_mode = str(position.get("marginMode") or "").lower()
@@ -1518,7 +1903,11 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
     request = {
         "instrumentID": decision.instrumentID, "side": side, "orderType": decision.orderType or "market",
         "targetNotional": target_notional, "price": decision.limitPrice,
-        "takeProfitTriggerPrice": decision.takeProfitPrice, "stopLossTriggerPrice": decision.stopLossPrice,
+        "takeProfitTriggerPrice": decision.takeProfitPrice or (
+            _assessment_targets(decision)[0]["price"] if _assessment_targets(decision) else None
+        ),
+        "takeProfitLevels": decision.takeProfitLevels,
+        "stopLossTriggerPrice": decision.stopLossPrice,
         # AI entries are always isolated. A reduce-only close follows the
         # existing position's mode so an older cross position can still be
         # closed safely while new AI exposure stays isolated.
@@ -1543,8 +1932,9 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
         request["quantity"] = position_quantity
         if position_side in {"long", "short"}:
             request["positionSide"] = position_side
+    gateway = _get_order_gateway()
     try:
-        return await _get_order_gateway().submit_intent(
+        return await gateway.submit_intent(
             request, demo=demo, instrument=spec, price=last,
             available_equity=equity, daily_order_limit=config.maxDailyOrders,
         )
@@ -1606,9 +1996,7 @@ async def start_ai_worker() -> None:
     # Initialize the cloned strategy on first launch. A persisted DeepSeek
     # file always wins on later launches, so user changes are preserved.
     await _ensure_ai_worker("deepseek")
-    if private_ready():
-        with contextlib.suppress(Exception):
-            await _get_order_gateway().reconcile(demo=OKX_DEMO)
+    await _reconcile_order_gateway_once()
     if native_exit_task is None or native_exit_task.done():
         native_exit_task = asyncio.create_task(_native_protection_loop())
 

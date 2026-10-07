@@ -641,6 +641,11 @@ class AIGatewayTests(unittest.TestCase):
         self.assertIn("EVERY OBSERVED CONTRACT exactly once", prompt)
         self.assertIn("Never fabricate source prices", prompt)
         self.assertIn("at most ONE contract", prompt)
+        self.assertIn("contains a position for a contract", prompt)
+        self.assertIn("latest measured evidence materially invalidates", prompt)
+        self.assertIn("contains a live order", prompt)
+        self.assertIn("copy its real order ID", prompt)
+        self.assertNotIn("fixed 12-hour same-contract entry cooldown", prompt)
 
     def test_hold_and_account_blocks_preserve_conditional_analysis_in_prompt(self):
         snapshot = AISnapshot(
@@ -667,7 +672,7 @@ class AIGatewayTests(unittest.TestCase):
         self.assertIn("contract's measured timeframe/price/trend evidence", prompt)
         self.assertIn("required structural signal/confirmation still pending remains entryEligible=false", prompt)
         self.assertIn("limitPrice not yet touched", prompt)
-        self.assertIn("NOT an unmet signal/confirmation", prompt)
+        self.assertIn("limitPrice not yet touched is not an unmet signal", prompt)
         self.assertIn("do not assume unavailable account/risk values", prompt)
         self.assertIn("do not claim the snapshot has expired", prompt)
         self.assertIn("normal forming candle", prompt)
@@ -848,10 +853,10 @@ class AIGatewayTests(unittest.TestCase):
         self.assertEqual(defaults.maxDailyLosses, 5)
         self.assertEqual(defaults.marginPerOrderUSD, 500)
         self.assertEqual(defaults.maxLeverage, 5)
-        self.assertEqual(defaults.cooldownSeconds, 43_200)
+        self.assertEqual(defaults.cooldownSeconds, 0)
         self.assertEqual(defaults.cliTimeoutSeconds, 90.0)
         self.assertEqual(AIConfig.from_dict({"cliTimeoutSeconds": 45}).cliTimeoutSeconds, 45.0)
-        self.assertEqual(AIConfig.from_dict({"cooldownSeconds": 60}).cooldownSeconds, 43_200)
+        self.assertEqual(AIConfig.from_dict({"cooldownSeconds": 60}).cooldownSeconds, 0)
         with self.assertRaises(SchemaError):
             AIConfig.from_dict({"allowedInstruments": ["BTC"]})
         with self.assertRaises(SchemaError):
@@ -1317,20 +1322,49 @@ class AIGatewayTests(unittest.TestCase):
         )
         self.assertTrue(cancel.accepted)
 
-    def test_policy_does_not_apply_entry_cooldown_to_exits(self):
+    def test_policy_allows_reassessment_open_without_time_cooldown(self):
         snapshot = self.snapshot()
         config = AIConfig(enabled=True, mode="shadow", cooldownSeconds=60)
         state = PolicyState()
         open_result = validate_decision(self.decision(), snapshot, config, state)
         self.assertTrue(open_result.accepted)
         state.remember(open_result.decision)
-        close = validate_decision(
-            self.decision(action="close", decisionId="decision-close", winRate=None, riskRewardRatio=None, confidence=0),
+        second_open = validate_decision(
+            self.decision(decisionId="decision-open-again"),
             snapshot,
             config,
             state,
         )
-        self.assertTrue(close.accepted)
+        self.assertTrue(second_open.accepted)
+
+    def test_policy_blocks_open_for_current_position(self):
+        instrument = "BTC-USDT-SWAP"
+        snapshot = AISnapshot(
+            snapshotId="current-position", capturedAt=iso(datetime.now(timezone.utc)),
+            instruments=[{"id": instrument}],
+            candles={f"{instrument}/{interval}": [{"confirmed": True, "close": 100}]
+                     for interval in ("5m", "15m", "1H", "4H")},
+            tickers={instrument: {"last": 100}},
+            account={
+                "authenticated": True, "availableEquityUSD": 1000, "todayLossCount": 0,
+                "pendingOrdersKnown": True, "pendingOrders": [],
+                "positions": [{"instrumentID": instrument, "quantity": 1, "side": "long"}],
+                "dataQuality": {
+                    "dailyBillsAvailable": True, "pendingOrdersAvailable": True,
+                },
+            },
+            risk={"killSwitch": False, "dailyPnLPercent": 0,
+                  "dataQuality": {"accountRefreshError": None, "accountRefreshRetryable": False}},
+            ai={"tradingAvailability": {instrument: {"available": True}}},
+            dataFreshness={"maxAgeSeconds": 90, "availability": {}},
+        )
+        result = validate_decision(
+            self.decision(snapshotId=snapshot.snapshotId, instrumentID=instrument),
+            snapshot,
+            AIConfig(enabled=True, mode="shadow", allowedInstruments=(instrument,)),
+        )
+        self.assertFalse(result.accepted)
+        self.assertIn("already has a position", result.reason)
 
     def test_status_exposes_current_observation_set_and_restores_it(self):
         class HoldRunner:
@@ -1812,6 +1846,29 @@ class AIGatewayTests(unittest.TestCase):
         snapshot = asyncio.run(run())
         self.assertIn("unresolved-aiunknown", snapshot["reservations"])
 
+    def test_gateway_does_not_repost_same_unknown_client_id_without_lookup(self):
+        calls = []
+
+        async def submit(payload, demo):
+            calls.append(payload)
+            raise TimeoutError("unknown order result")
+
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                gateway = OrderGateway(Path(directory) / "ledger.json", submit=submit)
+                spec = InstrumentSpec("BTC-USDT-SWAP", ctVal=1, lotSize=1, minSize=1)
+                request = {"instrumentID": "BTC-USDT-SWAP", "side": "buy", "quantity": 1,
+                           "source": "ai", "clientOrderID": "aiunknownsame"}
+                with self.assertRaises(TimeoutError):
+                    await gateway.submit_intent(request, demo=True, instrument=spec, price=100)
+                with self.assertRaises(OrderGatewayError) as context:
+                    await gateway.submit_intent(request, demo=True, instrument=spec, price=100)
+                return str(context.exception)
+
+        message = asyncio.run(run())
+        self.assertIn("未确认", message)
+        self.assertEqual(len(calls), 1)
+
     def test_gateway_counts_unknown_ai_entry_against_daily_limit(self):
         async def submit(payload, demo):
             raise TimeoutError("network timeout")
@@ -1846,7 +1903,7 @@ class AIGatewayTests(unittest.TestCase):
                 request = {"instrumentID": "BTC-USDT-SWAP", "side": "buy", "quantity": 1, "source": "ai", "clientOrderID": "aideadline"}
                 with self.assertRaises(OrderNotSubmittedError):
                     await gateway.submit_intent(request, demo=True, instrument=spec, price=100, daily_order_limit=1)
-                restored = OrderGateway(ledger, submit=submit)
+                restored = OrderGateway(ledger, submit=submit, limits={"minOrderIntervalSeconds": 0})
                 self.assertEqual(restored.reservations, {})
                 self.assertEqual(restored.daily_order_count(), 0)
                 self.assertEqual(restored._state.get("submissionTimes", []), [])
@@ -1873,7 +1930,7 @@ class AIGatewayTests(unittest.TestCase):
                 with self.assertRaises(TimeoutError):
                     await gateway.submit_intent(request, demo=True, instrument=spec, price=100)
                 previous = gateway.reservations["unresolved-aiolderunknown"].copy()
-                with self.assertRaises(OrderNotSubmittedError):
+                with self.assertRaises(OrderGatewayError):
                     await gateway.submit_intent(request, demo=True, instrument=spec, price=100)
                 self.assertEqual(gateway.reservations["unresolved-aiolderunknown"], previous)
                 self.assertEqual(gateway.daily_order_count(), 1)
@@ -1901,7 +1958,7 @@ class AIGatewayTests(unittest.TestCase):
 
         asyncio.run(run())
 
-    def test_gateway_blocks_same_ai_instrument_for_twelve_hours_but_allows_close(self):
+    def test_gateway_blocks_same_ai_instrument_while_position_or_order_is_active(self):
         calls = []
 
         async def submit(payload, demo):
@@ -1916,18 +1973,108 @@ class AIGatewayTests(unittest.TestCase):
                     "instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "market",
                     "quantity": 1, "source": "ai", "leverage": 1,
                 }
-                gateway = OrderGateway(ledger, submit=submit)
-                await gateway.submit_intent({**request, "clientOrderID": "aitwelve1"}, demo=True, instrument=spec, price=100)
-                with self.assertRaisesRegex(OrderGatewayError, "12 小时"):
-                    await gateway.submit_intent({**request, "clientOrderID": "aitwelve2"}, demo=True, instrument=spec, price=100)
-                restored = OrderGateway(ledger, submit=submit)
-                with self.assertRaisesRegex(OrderGatewayError, "12 小时"):
-                    await restored.submit_intent({**request, "clientOrderID": "aitwelve3"}, demo=True, instrument=spec, price=100)
+                gateway = OrderGateway(ledger, submit=submit, limits={"minOrderIntervalSeconds": 0})
+                await gateway.submit_intent({**request, "clientOrderID": "aiactive1"}, demo=True, instrument=spec, price=100)
+                with self.assertRaisesRegex(OrderGatewayError, "已有持仓或挂单"):
+                    await gateway.submit_intent({**request, "clientOrderID": "aiactive2"}, demo=True, instrument=spec, price=100)
+                restored = OrderGateway(ledger, submit=submit, limits={"minOrderIntervalSeconds": 0})
+                with self.assertRaisesRegex(OrderGatewayError, "已有持仓或挂单"):
+                    await restored.submit_intent({**request, "clientOrderID": "aiactive3"}, demo=True, instrument=spec, price=100)
+                # A confirmed cancellation releases the local order/position
+                # reservation, so a later AI reassessment can open again.
+                await restored.cancel_order(
+                    instrument_id="BTC-USDT-SWAP", order_id="ord-1", demo=True,
+                    cancel=lambda: asyncio.sleep(0, result={"status": "cancelled"}),
+                )
+                await restored.submit_intent({**request, "clientOrderID": "aiactive3"}, demo=True, instrument=spec, price=100)
                 await restored.submit_intent(
                     {"instrumentID": "BTC-USDT-SWAP", "side": "sell", "orderType": "market", "quantity": 1,
-                     "source": "ai", "reduceOnly": True, "clientOrderID": "aitwelveclose"},
+                     "source": "ai", "reduceOnly": True, "clientOrderID": "aiactiveclose"},
                     demo=True, instrument=spec, price=100,
                 )
+
+        asyncio.run(run())
+
+    def test_gateway_releases_canceled_entry_before_retrying_same_instrument(self):
+        calls = []
+        lookup_calls = []
+
+        async def submit(payload, demo):
+            calls.append(payload)
+            return {"orderID": f"ord-{len(calls)}", "status": "submitted"}
+
+        async def lookup(instrument_id, client_order_id, demo):
+            lookup_calls.append((instrument_id, client_order_id, demo))
+            return {"orderID": "ord-1", "clientOrderID": "aiactive1", "status": "canceled"}
+
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                gateway = OrderGateway(
+                    Path(directory) / "ledger.json", submit=submit, lookup=lookup,
+                    limits={"minOrderIntervalSeconds": 0},
+                )
+                spec = InstrumentSpec("BTC-USDT-SWAP", ctVal=1, lotSize=1, minSize=1)
+                request = {
+                    "instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "market",
+                    "quantity": 1, "source": "ai", "leverage": 1,
+                }
+                await gateway.submit_intent({**request, "clientOrderID": "aiactive1"}, demo=True, instrument=spec, price=100)
+                await gateway.submit_intent({**request, "clientOrderID": "aiactive2"}, demo=True, instrument=spec, price=100)
+                return lookup_calls, gateway.reservations
+
+        lookup_calls, reservations = asyncio.run(run())
+        self.assertEqual(lookup_calls, [("BTC-USDT-SWAP", "aiactive1", True)])
+        self.assertNotIn("ord-1", reservations)
+        self.assertIn("ord-2", reservations)
+
+    def test_gateway_keeps_filled_entry_until_exit_settlement(self):
+        calls = []
+
+        async def submit(payload, demo):
+            calls.append(payload)
+            return {"orderID": f"ord-{len(calls)}", "status": "submitted"}
+
+        async def lookup(instrument_id, client_order_id, demo):
+            return {"orderID": "ord-1", "clientOrderID": "aifilled1", "status": "filled"}
+
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                gateway = OrderGateway(
+                    Path(directory) / "ledger.json", submit=submit, lookup=lookup,
+                    limits={"minOrderIntervalSeconds": 0},
+                )
+                spec = InstrumentSpec("BTC-USDT-SWAP", ctVal=1, lotSize=1, minSize=1)
+                request = {
+                    "instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "market",
+                    "quantity": 1, "source": "ai", "leverage": 1,
+                }
+                await gateway.submit_intent({**request, "clientOrderID": "aifilled1"}, demo=True, instrument=spec, price=100)
+                with self.assertRaisesRegex(OrderGatewayError, "已有持仓或挂单"):
+                    await gateway.submit_intent({**request, "clientOrderID": "aifilled2"}, demo=True, instrument=spec, price=100)
+
+        asyncio.run(run())
+
+    def test_gateway_keeps_active_entry_when_lookup_is_uncertain(self):
+        async def submit(payload, demo):
+            return {"orderID": "ord-uncertain", "status": "submitted"}
+
+        async def lookup(instrument_id, client_order_id, demo):
+            raise TimeoutError("lookup timeout")
+
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                gateway = OrderGateway(
+                    Path(directory) / "ledger.json", submit=submit, lookup=lookup,
+                    limits={"minOrderIntervalSeconds": 0},
+                )
+                spec = InstrumentSpec("BTC-USDT-SWAP", ctVal=1, lotSize=1, minSize=1)
+                request = {
+                    "instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "market",
+                    "quantity": 1, "source": "ai", "leverage": 1,
+                }
+                await gateway.submit_intent({**request, "clientOrderID": "aiuncertain1"}, demo=True, instrument=spec, price=100)
+                with self.assertRaisesRegex(OrderGatewayError, "已有持仓或挂单"):
+                    await gateway.submit_intent({**request, "clientOrderID": "aiuncertain2"}, demo=True, instrument=spec, price=100)
 
         asyncio.run(run())
 

@@ -20,6 +20,69 @@ class PolicyError(ValueError):
 MIN_OPEN_WIN_RATE = 0.45
 MIN_OPEN_RISK_REWARD_RATIO = 2.0
 _OPEN_CANDLE_INTERVALS = ("5m", "15m", "1H", "4H")
+_ACTIVE_PENDING_ORDER_STATES = {"live", "partially_filled", "waiting", "pending", "open", "queued"}
+_TERMINAL_ORDER_STATES = {"filled", "canceled", "cancelled", "rejected", "failed", "expired", "mmp_canceled"}
+
+
+def _exposure_quantity(row: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    """Read a positive exposure quantity, returning ``None`` when unknown."""
+    for key in keys:
+        if key not in row:
+            continue
+        try:
+            value = float(row[key])
+        except (TypeError, ValueError):
+            return None
+        return abs(value) if math.isfinite(value) else None
+    return None
+
+
+def entry_exposure_error(account: dict[str, Any], instrument_id: str) -> str | None:
+    """Reject a new AI entry while this contract already has exposure.
+
+    Positions and active orders are exchange-owned facts. Missing fields on a
+    matching row are treated as unknown so a malformed account response cannot
+    silently authorize a duplicate order.
+    """
+    if not isinstance(account, dict):
+        return "current account exposure is unavailable"
+    quality = account.get("dataQuality")
+    if isinstance(quality, dict) and quality.get("positionsAvailable") is False:
+        return "current position state is unavailable"
+    if account.get("positionsKnown") is False:
+        return "current position state is unavailable"
+    if not isinstance(account.get("positions"), list):
+        return "current position state is unavailable"
+    for row in account.get("positions", []):
+        if not isinstance(row, dict):
+            continue
+        candidate = str(row.get("instrumentID") or row.get("instId") or "")
+        if candidate != instrument_id:
+            continue
+        quantity = _exposure_quantity(row, ("quantity", "pos", "size"))
+        if quantity is None:
+            return f"{instrument_id} position state is unavailable"
+        if quantity > 0:
+            return f"{instrument_id} already has a position; evaluate close before opening"
+    if not isinstance(account.get("pendingOrders"), list):
+        return "pending order state is unavailable"
+    for row in account.get("pendingOrders", []):
+        if not isinstance(row, dict):
+            continue
+        candidate = str(row.get("instrumentID") or row.get("instId") or "")
+        if candidate != instrument_id:
+            continue
+        status = str(row.get("status") or row.get("state") or "").lower()
+        if status in _TERMINAL_ORDER_STATES:
+            continue
+        if status not in _ACTIVE_PENDING_ORDER_STATES:
+            return f"{instrument_id} pending order state is unavailable"
+        quantity = _exposure_quantity(row, ("quantity", "sz", "size"))
+        if quantity is None:
+            return f"{instrument_id} pending order state is unavailable"
+        if quantity > 0:
+            return f"{instrument_id} already has a pending order; evaluate cancel before opening"
+    return None
 
 
 def _is_current_snapshot(snapshot: AISnapshot) -> bool:
@@ -60,6 +123,11 @@ def _open_snapshot_gate(snapshot: AISnapshot, instrument_id: str) -> str | None:
         return "todayLossCount is unavailable or invalid"
     if account.get("pendingOrdersKnown") is not True or not isinstance(account.get("pendingOrders"), list):
         return "pending order state is unavailable"
+    if not isinstance(account.get("positions"), list):
+        return "current position state is unavailable"
+    exposure_error = entry_exposure_error(account, instrument_id)
+    if exposure_error:
+        return exposure_error
     account_quality = account.get("dataQuality")
     if not isinstance(account_quality, dict):
         return "account data quality is unavailable"
@@ -136,6 +204,35 @@ def _check_protection_geometry(
     if not ordered:
         return f"assessment entry/stop loss/take profit conflict with direction: {instrument_id}"
     return None
+
+
+def _take_profit_targets(item: Any) -> list[float]:
+    """Return staged target prices from an assessment/decision-like object."""
+    levels = getattr(item, "takeProfitLevels", None)
+    if levels is None and isinstance(item, dict):
+        levels = item.get("takeProfitLevels")
+    prices: list[float] = []
+    if isinstance(levels, list):
+        for level in levels:
+            if not isinstance(level, dict):
+                continue
+            try:
+                value = float(level.get("price"))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value) and value > 0:
+                prices.append(value)
+    if not prices:
+        value = getattr(item, "takeProfitPrice", None)
+        if value is None and isinstance(item, dict):
+            value = item.get("takeProfitPrice")
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            parsed = 0.0
+        if math.isfinite(parsed) and parsed > 0:
+            prices.append(parsed)
+    return prices
 
 
 def _validate_cancel_scope(snapshot: AISnapshot, instrument_id: str, order_id: str) -> str | None:
@@ -309,13 +406,13 @@ def validate_decision(
                     return reject(f"assessment riskRewardRatio must be >= 2.0: {item.instrumentID}", parsed_snapshot.snapshotId)
                 if parsed_config.requireStopLoss and item.stopLossPrice is None:
                     return reject(f"eligible assessment requires a stop loss: {item.instrumentID}", parsed_snapshot.snapshotId)
-            if item.direction in {"long", "short"} and all(
-                value is not None for value in (item.limitPrice, item.stopLossPrice, item.takeProfitPrice)
-            ):
+            target_prices = _take_profit_targets(item)
+            target_price = (max(target_prices) if item.direction == "long" else min(target_prices)) if target_prices else None
+            if item.direction in {"long", "short"} and item.limitPrice is not None and item.stopLossPrice is not None and target_price is not None:
                 geometry_error = _check_protection_geometry(
                     instrument_id=item.instrumentID, direction=item.direction,
                     entry=item.limitPrice, stop_loss=item.stopLossPrice,
-                    take_profit=item.takeProfitPrice,
+                    take_profit=target_price,
                 )
                 if geometry_error:
                     return reject(geometry_error, parsed_snapshot.snapshotId)
@@ -367,7 +464,7 @@ def validate_decision(
                 return reject("open requires an entryEligible assessment for the selected contract", parsed_snapshot.snapshotId)
             if selected.direction != parsed_decision.direction:
                 return reject("open direction does not match the selected assessment", parsed_snapshot.snapshotId)
-            fields = ["winRate", "riskRewardRatio", "confidence", "stopLossPrice", "takeProfitPrice"]
+            fields = ["winRate", "riskRewardRatio", "confidence", "stopLossPrice", "takeProfitPrice", "takeProfitLevels"]
             if parsed_decision.orderType == "limit" or parsed_decision.limitPrice is not None:
                 fields.append("limitPrice")
             for key in fields:
@@ -378,8 +475,10 @@ def validate_decision(
                     same = math.isclose(proposed, action_value, rel_tol=1e-9, abs_tol=1e-12)
                 if not same:
                     return reject(f"open {key} does not match the selected assessment", parsed_snapshot.snapshotId)
-            if all(value is not None for value in (selected.limitPrice, selected.stopLossPrice, selected.takeProfitPrice)):
-                gross_ratio = abs(selected.takeProfitPrice - selected.limitPrice) / abs(selected.limitPrice - selected.stopLossPrice)
+            selected_targets = _take_profit_targets(selected)
+            selected_target = (max(selected_targets) if selected.direction == "long" else min(selected_targets)) if selected_targets else None
+            if selected.limitPrice is not None and selected.stopLossPrice is not None and selected_target is not None:
+                gross_ratio = abs(selected_target - selected.limitPrice) / abs(selected.limitPrice - selected.stopLossPrice)
                 # Fees may reduce the gross ratio, never improve it. Allow
                 # small display/rounding differences without adding a new
                 # threshold or demanding a TP from legacy entry intents.
@@ -392,7 +491,7 @@ def validate_decision(
             geometry_error = _check_protection_geometry(
                 instrument_id=selected.instrumentID, direction=selected.direction,
                 entry=entry_price, stop_loss=selected.stopLossPrice,
-                take_profit=selected.takeProfitPrice,
+                take_profit=selected_target,
             )
             if geometry_error:
                 return reject(geometry_error, parsed_snapshot.snapshotId)
@@ -447,7 +546,11 @@ def validate_decision(
         geometry_error = _check_protection_geometry(
             instrument_id=parsed_decision.instrumentID, direction=parsed_decision.direction,
             entry=entry_price, stop_loss=parsed_decision.stopLossPrice,
-            take_profit=parsed_decision.takeProfitPrice,
+            take_profit=(
+                max(_take_profit_targets(parsed_decision)) if parsed_decision.direction == "long" and _take_profit_targets(parsed_decision)
+                else min(_take_profit_targets(parsed_decision)) if parsed_decision.direction == "short" and _take_profit_targets(parsed_decision)
+                else parsed_decision.takeProfitPrice
+            ),
         )
         if geometry_error:
             return reject(geometry_error, parsed_snapshot.snapshotId)
@@ -463,14 +566,11 @@ def validate_decision(
         gate_error = _open_snapshot_gate(parsed_snapshot, parsed_decision.instrumentID)
         if gate_error:
             return reject(gate_error, parsed_snapshot.snapshotId)
-        previous = state.lastActionAt.get(parsed_decision.instrumentID)
-        if previous is not None and clock - previous < timedelta(seconds=parsed_config.cooldownSeconds):
-            return reject("instrument is in cooldown", parsed_snapshot.snapshotId)
     return PolicyResult(True, parsed_decision, "accepted")
 
 
 def record_decision(state: PolicyState, result: PolicyResult, *, at: datetime | None = None) -> None:
-    """Record an executed entry; exits and holds do not consume cooldown."""
+    """Record an executed entry for the worker's decision history."""
     if result.accepted and result.decision.action == "open":
         state.remember(result.decision, at)
 

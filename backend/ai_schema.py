@@ -23,11 +23,10 @@ AIProvider = Literal["codex", "deepseek-harness"]
 _CONTRACT_ID_RE = re.compile(r"^[A-Z0-9]+-USDT-SWAP$")
 FIXED_AI_MODEL = "gpt-6-luna"
 FIXED_AI_REASONING_EFFORT = "medium"
-# AI entries on one contract stay blocked for twelve hours after an order is
-# accepted. The order ledger enforces this durably; the config value mirrors
-# the rule in prompts and API responses so the model cannot assume a shorter
-# interval.
-AI_ENTRY_COOLDOWN_SECONDS = 12 * 60 * 60
+# Retained as a compatibility field for older persisted strategy configs. AI
+# entries are gated by current exchange positions and pending orders; a fixed
+# time-based same-contract cooldown is no longer enforced.
+AI_ENTRY_COOLDOWN_SECONDS = 0
 # Four parallel analysis groups can each carry tens of thousands of tokens.
 # Keep enough wall-clock budget for provider queueing and model processing.
 DEFAULT_CLI_TIMEOUT_SECONDS = 90.0
@@ -151,6 +150,38 @@ def _reasoning_effort(value: Any, name: str, *, allowed: set[str]) -> str:
     return result
 
 
+def _take_profit_levels(value: Any, name: str) -> list[dict[str, float]] | None:
+    """Validate optional staged take-profit targets.
+
+    A level is deliberately a small, explicit object rather than a positional
+    tuple so provider output remains readable and can be audited.  The sum of
+    ``quantityPercent`` values must be exactly one position (within a small
+    decimal tolerance for JSON round-off).
+    """
+    if value is None:
+        return None
+    rows = _list(value, name)
+    if not 1 <= len(rows) <= 4:
+        raise SchemaError(f"{name} must contain between 1 and 4 levels")
+    result: list[dict[str, float]] = []
+    total = 0.0
+    for index, item in enumerate(rows):
+        row = _mapping(item, f"{name}[{index}]")
+        _reject_extra(row, {"price", "quantityPercent"}, f"{name}[{index}]")
+        price = _number(_required(row, "price", f"{name}[{index}]"), f"{name}[{index}].price", minimum=0)
+        percent = _number(
+            _required(row, "quantityPercent", f"{name}[{index}]"),
+            f"{name}[{index}].quantityPercent", minimum=0, maximum=100,
+        )
+        if price <= 0 or percent <= 0:
+            raise SchemaError(f"{name}[{index}] price and quantityPercent must be positive")
+        total += percent
+        result.append({"price": price, "quantityPercent": percent})
+    if not math.isclose(total, 100.0, rel_tol=0.0, abs_tol=1e-6):
+        raise SchemaError(f"{name} quantityPercent values must sum to 100")
+    return result
+
+
 @dataclass(frozen=True)
 class AIInstrumentAssessment:
     """A proposed setup for one observed contract, never an order receipt."""
@@ -162,6 +193,7 @@ class AIInstrumentAssessment:
     limitPrice: float | None
     stopLossPrice: float | None
     takeProfitPrice: float | None
+    takeProfitLevels: list[dict[str, float]] | None
     confidence: float
     entryEligible: bool
     unmetConditions: list[str]
@@ -170,7 +202,7 @@ class AIInstrumentAssessment:
     _FIELDS: ClassVar[set[str]] = {
         "instrumentID", "direction", "winRate", "riskRewardRatio", "limitPrice",
         "stopLossPrice", "takeProfitPrice", "confidence", "entryEligible",
-        "unmetConditions", "reason",
+        "takeProfitLevels", "unmetConditions", "reason",
     }
 
     @classmethod
@@ -178,7 +210,10 @@ class AIInstrumentAssessment:
         row = _mapping(value, "assessment")
         _reject_extra(row, cls._FIELDS, "assessment")
         for key in cls._FIELDS:
-            _required(row, key, "assessment")
+            # takeProfitLevels was added after the original single-target
+            # contract.  Absence remains valid for persisted/legacy decisions.
+            if key != "takeProfitLevels":
+                _required(row, key, "assessment")
         instrument = _str(row["instrumentID"], "assessment.instrumentID")
         if not _CONTRACT_ID_RE.fullmatch(instrument):
             raise SchemaError("assessment.instrumentID must be an exact *-USDT-SWAP contract ID")
@@ -196,11 +231,13 @@ class AIInstrumentAssessment:
             prices[key] = _optional_number(row[key], f"assessment.{key}", minimum=0)
             if prices[key] is not None and prices[key] <= 0:
                 raise SchemaError(f"assessment.{key} must be positive or null")
+        levels = _take_profit_levels(row.get("takeProfitLevels"), "assessment.takeProfitLevels")
         return cls(
             instrumentID=instrument, direction=direction,
             winRate=_optional_number(row["winRate"], "assessment.winRate", minimum=0, maximum=1),
             riskRewardRatio=_optional_number(row["riskRewardRatio"], "assessment.riskRewardRatio", minimum=0),
             **prices,
+            takeProfitLevels=levels,
             confidence=_number(row["confidence"], "assessment.confidence", minimum=0, maximum=1),
             entryEligible=eligible, unmetConditions=unmet,
             reason=_str(row["reason"], "assessment.reason"),
@@ -220,6 +257,7 @@ class AIDecision:
     limitPrice: float | None = None
     stopLossPrice: float | None = None
     takeProfitPrice: float | None = None
+    takeProfitLevels: list[dict[str, float]] | None = None
     # The model chooses the leverage for each entry. Server policy caps it at
     # AIConfig.maxLeverage before the order gateway is reached.
     leverage: float | None = None
@@ -240,7 +278,7 @@ class AIDecision:
     _FIELDS: ClassVar[set[str]] = {
         "schemaVersion", "decisionId", "snapshotId", "action", "instrumentID", "direction",
         "orderType", "riskBudgetPercent", "limitPrice", "stopLossPrice", "takeProfitPrice",
-        "winRate", "riskRewardRatio", "leverage", "confidence", "validUntil", "reasonCode", "reason", "orderID", "assessments",
+        "takeProfitLevels", "winRate", "riskRewardRatio", "leverage", "confidence", "validUntil", "reasonCode", "reason", "orderID", "assessments",
     }
 
     @classmethod
@@ -285,6 +323,7 @@ class AIDecision:
             limitPrice=_optional_number(row.get("limitPrice"), "decision.limitPrice", minimum=0),
             stopLossPrice=_optional_number(row.get("stopLossPrice"), "decision.stopLossPrice", minimum=0),
             takeProfitPrice=_optional_number(row.get("takeProfitPrice"), "decision.takeProfitPrice", minimum=0),
+            takeProfitLevels=_take_profit_levels(row.get("takeProfitLevels"), "decision.takeProfitLevels"),
             winRate=win_rate, riskRewardRatio=risk_reward_ratio, leverage=leverage,
             confidence=_number(row.get("confidence", 0), "decision.confidence", minimum=0, maximum=1),
             validUntil=valid_until, reasonCode=reason_code, reason=reason, orderID=order_id,
@@ -297,7 +336,16 @@ class AIDecision:
         return cls(1, decision_id, snapshot_id or "unknown", "hold", winRate=0, riskRewardRatio=0, confidence=0, validUntil=now, reasonCode="hold", reason=reason)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        # Keep persisted legacy assessment records byte-compatible when no
+        # staged targets were supplied. New provider output may include the
+        # field explicitly (including an empty/one-level plan).
+        if payload.get("takeProfitLevels") is None:
+            payload.pop("takeProfitLevels", None)
+        for assessment in payload.get("assessments", []):
+            if isinstance(assessment, dict) and assessment.get("takeProfitLevels") is None:
+                assessment.pop("takeProfitLevels", None)
+        return payload
 
     def require_complete_assessments(self, observed_instruments: list[str]) -> None:
         expected = set(observed_instruments)
@@ -390,7 +438,7 @@ class AIConfig:
     decisionIntervalSeconds: float = 30.0
     cliTimeoutSeconds: float = DEFAULT_CLI_TIMEOUT_SECONDS
     maxOutputBytes: int = 1_000_000
-    cooldownSeconds: float = float(AI_ENTRY_COOLDOWN_SECONDS)
+    cooldownSeconds: float = 0.0
     maxConsecutiveFailures: int = 3
     allowOpen: bool = True
     allowClose: bool = True
@@ -450,10 +498,9 @@ class AIConfig:
             decisionIntervalSeconds=_number(row.get("decisionIntervalSeconds", 30), "config.decisionIntervalSeconds", minimum=.1),
             cliTimeoutSeconds=_number(row.get("cliTimeoutSeconds", DEFAULT_CLI_TIMEOUT_SECONDS), "config.cliTimeoutSeconds", minimum=.1),
             maxOutputBytes=int(_number(row.get("maxOutputBytes", 1_000_000), "config.maxOutputBytes", minimum=1024, maximum=10_000_000)),
-            cooldownSeconds=max(
-                _number(row.get("cooldownSeconds", AI_ENTRY_COOLDOWN_SECONDS), "config.cooldownSeconds", minimum=0),
-                AI_ENTRY_COOLDOWN_SECONDS,
-            ),
+            # Read legacy values but normalize the field to zero. The live
+            # entry gate is the current account position/order state.
+            cooldownSeconds=0.0,
             maxConsecutiveFailures=int(_number(row.get("maxConsecutiveFailures", 3), "config.maxConsecutiveFailures", minimum=1, maximum=100)),
             allowOpen=bools["allowOpen"], allowClose=bools["allowClose"], allowCancel=bools["allowCancel"], requireStopLoss=bools["requireStopLoss"],
             maxDailyOrders=_integer(row.get("maxDailyOrders", 20), "config.maxDailyOrders", minimum=1, maximum=10000),
@@ -531,7 +578,9 @@ def normalize_ai_chat_patch(value: Mapping[str, Any] | None) -> dict[str, Any]:
         if key in row:
             row[key] = _number(row[key], f"chat.suggestion.{key}", minimum=0.0 if key == "cooldownSeconds" else 0.1)
     if "cooldownSeconds" in row:
-        row["cooldownSeconds"] = max(row["cooldownSeconds"], AI_ENTRY_COOLDOWN_SECONDS)
+        # Keep old chat payloads schema-compatible while making the removed
+        # time-based restriction a no-op.
+        row["cooldownSeconds"] = 0.0
     for key in ("maxDailyOrders", "maxDailyLosses"):
         if key in row:
             value = row[key]
@@ -612,6 +661,17 @@ def decision_json_schema(
         "limitPrice": {"type": ["number", "null"], "exclusiveMinimum": 0},
         "stopLossPrice": {"type": ["number", "null"], "exclusiveMinimum": 0},
         "takeProfitPrice": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "takeProfitLevels": {
+            "type": ["array", "null"], "minItems": 1, "maxItems": 4,
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "required": ["price", "quantityPercent"],
+                "properties": {
+                    "price": {"type": "number", "exclusiveMinimum": 0},
+                    "quantityPercent": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+                },
+            },
+        },
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "entryEligible": {"type": "boolean"},
         "unmetConditions": {"type": "array", "items": {"type": "string", "minLength": 1}},
@@ -636,7 +696,7 @@ def decision_json_schema(
         "required": [
             "schemaVersion", "decisionId", "snapshotId", "action", "instrumentID", "direction",
             "orderType", "riskBudgetPercent", "limitPrice", "stopLossPrice", "takeProfitPrice",
-            "winRate", "riskRewardRatio", "leverage", "confidence", "validUntil", "reasonCode", "reason", "orderID", "assessments",
+            "takeProfitLevels", "winRate", "riskRewardRatio", "leverage", "confidence", "validUntil", "reasonCode", "reason", "orderID", "assessments",
         ],
         "properties": {
             "schemaVersion": {"type": "integer", "const": 1}, "decisionId": {"type": "string", "minLength": 1},
@@ -645,6 +705,17 @@ def decision_json_schema(
             "orderType": {"type": ["string", "null"], "enum": ["market", "limit", None]}, "riskBudgetPercent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
             "limitPrice": {"type": ["number", "null"], "minimum": 0}, "stopLossPrice": {"type": ["number", "null"], "minimum": 0},
             "takeProfitPrice": {"type": ["number", "null"], "minimum": 0}, "leverage": {"type": ["number", "null"], "minimum": 0}, "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "takeProfitLevels": {
+                "type": ["array", "null"], "minItems": 1, "maxItems": 4,
+                "items": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["price", "quantityPercent"],
+                    "properties": {
+                        "price": {"type": "number", "exclusiveMinimum": 0},
+                        "quantityPercent": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+                    },
+                },
+            },
             "winRate": {"type": ["number", "null"], "minimum": 0, "maximum": 1}, "riskRewardRatio": {"type": ["number", "null"], "minimum": 0},
             "validUntil": {"type": "string", "format": "date-time"}, "reasonCode": {"type": "string"}, "reason": {"type": "string"}, "orderID": {"type": ["string", "null"]},
             "assessments": assessment_schema,

@@ -189,6 +189,77 @@ class GatewayContractTests(unittest.TestCase):
         })
         self.assertEqual([call[2]["ordType"] for call in calls], ["conditional", "oco", "trigger"])
 
+    def test_staged_take_profit_schema_requires_full_position_allocation(self):
+        payload = {
+            "schemaVersion": 1, "decisionId": "staged-1", "snapshotId": "snap-1",
+            "action": "hold", "instrumentID": None, "direction": None, "orderType": None,
+            "riskBudgetPercent": None, "limitPrice": None, "stopLossPrice": None,
+            "takeProfitPrice": None,
+            "takeProfitLevels": [
+                {"price": 110, "quantityPercent": 40},
+                {"price": 120, "quantityPercent": 60},
+            ],
+            "winRate": 0, "riskRewardRatio": 0, "leverage": None, "confidence": .8,
+            "validUntil": "2026-10-07T00:00:00Z", "reasonCode": "hold", "reason": "复评",
+            "orderID": None, "assessments": [],
+        }
+        decision = main.AIDecision.from_dict(payload)
+        self.assertEqual(decision.takeProfitLevels[1]["quantityPercent"], 60)
+        with self.assertRaises(main.SchemaError):
+            main.AIDecision.from_dict({**payload, "takeProfitLevels": [{"price": 110, "quantityPercent": 99}]})
+
+    def test_high_confidence_material_protection_change_is_allowed_but_noise_is_not(self):
+        position = {"instrumentID": "BTC-USDT-SWAP", "side": "long", "quantity": 2, "entryPrice": 100}
+        protection = {"algoIDs": ["algo-1"], "takeProfitPrices": [110], "stopLossPrices": [95]}
+        assessment = SimpleNamespace(
+            takeProfitLevels=[{"price": 120, "quantityPercent": 100}],
+            takeProfitPrice=120, stopLossPrice=92, confidence=.9,
+            reason="突破确认且成交量放大。",
+        )
+        decision = SimpleNamespace(confidence=.9, reason="趋势确认，原保护线已不适用。")
+        self.assertTrue(main._protection_needs_adjustment(position, protection, assessment, decision))
+        decision.confidence = .7
+        self.assertFalse(main._protection_needs_adjustment(position, protection, assessment, decision))
+
+        staged_assessment = SimpleNamespace(
+            takeProfitLevels=[
+                {"price": 112, "quantityPercent": 50},
+                {"price": 120, "quantityPercent": 50},
+            ],
+            takeProfitPrice=120, stopLossPrice=92, confidence=.7,
+            reason="分批目标调整，但信号未出现实质变化。",
+        )
+        self.assertFalse(main._protection_needs_adjustment(position, protection, staged_assessment, decision))
+
+    def test_position_protection_uses_mark_price_for_profitable_staged_positions(self):
+        short_position = {
+            "instrumentID": "FIL-USDT-SWAP", "side": "short", "quantity": -180,
+            "entryPrice": 100, "markPrice": 80,
+        }
+        short_assessment = SimpleNamespace(
+            stopLossPrice=85,
+            takeProfitPrice=None,
+            takeProfitLevels=[
+                {"price": 75, "quantityPercent": 50},
+                {"price": 70, "quantityPercent": 50},
+            ],
+        )
+        self.assertTrue(main._protection_is_reasonable(short_position, short_assessment))
+
+        long_position = {
+            "instrumentID": "BTC-USDT-SWAP", "side": "long", "quantity": 2,
+            "entryPrice": 100, "markPrice": 120,
+        }
+        long_assessment = SimpleNamespace(
+            stopLossPrice=115,
+            takeProfitPrice=None,
+            takeProfitLevels=[
+                {"price": 130, "quantityPercent": 40},
+                {"price": 140, "quantityPercent": 60},
+            ],
+        )
+        self.assertTrue(main._protection_is_reasonable(long_position, long_assessment))
+
     def test_order_snapshot_calculates_margin_from_contract_spec(self):
         snapshot = main.order_snapshot({
             "ordId": "order-1", "instId": "BTC-USDT-SWAP", "side": "buy",

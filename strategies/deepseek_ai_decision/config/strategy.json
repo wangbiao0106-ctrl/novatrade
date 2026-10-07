@@ -28,7 +28,7 @@
     "decision_interval_seconds": 30,
     "cli_timeout_seconds": 90,
     "max_output_bytes": 1000000,
-    "cooldown_seconds": 43200,
+    "cooldown_seconds": 0,
     "max_consecutive_failures": 3,
     "max_daily_orders": 20,
     "max_daily_losses": 5,

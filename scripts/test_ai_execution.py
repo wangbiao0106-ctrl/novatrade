@@ -6,6 +6,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
+from dataclasses import replace
 from pathlib import Path
 import sys
 import tempfile
@@ -23,7 +24,7 @@ from backend import main  # noqa: E402
 from backend.ai_policy import validate_decision  # noqa: E402
 from backend.ai_schema import AIConfig, AIDecision, AISnapshot  # noqa: E402
 from backend.ai_worker import CodexRunner  # noqa: E402
-from backend.order_gateway import InstrumentSpec, OrderGateway, OrderNotSubmittedError  # noqa: E402
+from backend.order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError  # noqa: E402
 
 BTC = "BTC-USDT-SWAP"
 NEIRO = "NEIRO-USDT-SWAP"
@@ -201,6 +202,131 @@ class AccountExecutionUniverseTests(NoNetworkTests):
         gateway_factory.assert_not_called()
         private.assert_not_awaited()
 
+    async def test_execution_rejects_open_when_current_position_exists(self):
+        now = datetime.now(timezone.utc)
+        config = AIConfig(enabled=True, mode="demo-active", allowedInstruments=(BTC,), maxLeverage=5)
+        snapshot = AISnapshot(
+            snapshotId="position-gate", capturedAt=iso(now), instruments=[{"id": BTC}],
+            account={"authenticated": True, "pendingOrdersKnown": True,
+                     "availableEquityUSD": 1000, "todayLossCount": 0,
+                     "positions": [], "pendingOrders": []},
+            dataFreshness={"maxAgeSeconds": 90},
+        )
+        decision = AIDecision(
+            1, "position-gate-decision", snapshot.snapshotId, "open", instrumentID=BTC,
+            direction="long", orderType="market", stopLossPrice=90, takeProfitPrice=120,
+            leverage=2, winRate=.5, riskRewardRatio=2, confidence=.9,
+            validUntil=iso(now + timedelta(minutes=1)),
+        )
+        refreshed_account = {
+            "authenticated": True, "pendingOrdersKnown": True,
+            "availableEquityUSD": 1000, "todayLossCount": 0,
+            "positions": [{"instrumentID": BTC, "quantity": 1, "side": "long"}],
+            "pendingOrders": [],
+        }
+        with patch.object(main, "ai_worker", SimpleNamespace(config=config)), \
+             patch.object(main, "OKX_DEMO", True), \
+             patch.object(main, "account", new=AsyncMock(return_value=refreshed_account)), \
+             patch.object(main, "risk", new=AsyncMock(return_value={
+                 "killSwitch": False, "dailyPnLPercent": 0,
+                 "dataQuality": {"equitySource": "okx"},
+             })), \
+             patch.object(main, "_instrument_spec", new=AsyncMock(side_effect=AssertionError("position gate must run first"))), \
+             patch.object(main, "_get_order_gateway") as gateway_factory:
+            with self.assertRaises(HTTPException) as context:
+                await main._ai_execute(decision, snapshot)
+        self.assertEqual(context.exception.status_code, 409)
+        self.assertIn("already has a position", context.exception.detail)
+        gateway_factory.assert_not_called()
+
+    async def test_execution_rejects_open_when_current_pending_order_exists(self):
+        now = datetime.now(timezone.utc)
+        config = AIConfig(enabled=True, mode="demo-active", allowedInstruments=(BTC,), maxLeverage=5)
+        snapshot = AISnapshot(
+            snapshotId="pending-gate", capturedAt=iso(now), instruments=[{"id": BTC}],
+            account={"authenticated": True, "pendingOrdersKnown": True,
+                     "availableEquityUSD": 1000, "todayLossCount": 0,
+                     "positions": [], "pendingOrders": []},
+            dataFreshness={"maxAgeSeconds": 90},
+        )
+        decision = AIDecision(
+            1, "pending-gate-decision", snapshot.snapshotId, "open", instrumentID=BTC,
+            direction="short", orderType="limit", limitPrice=100, stopLossPrice=110,
+            takeProfitPrice=80, leverage=2, winRate=.5, riskRewardRatio=2, confidence=.9,
+            validUntil=iso(now + timedelta(minutes=1)),
+        )
+        refreshed_account = {
+            "authenticated": True, "pendingOrdersKnown": True,
+            "availableEquityUSD": 1000, "todayLossCount": 0,
+            "positions": [],
+            "pendingOrders": [{"instrumentID": BTC, "id": "pending-1", "status": "live", "quantity": 1}],
+        }
+        with patch.object(main, "ai_worker", SimpleNamespace(config=config)), \
+             patch.object(main, "OKX_DEMO", True), \
+             patch.object(main, "account", new=AsyncMock(return_value=refreshed_account)), \
+             patch.object(main, "risk", new=AsyncMock(return_value={
+                 "killSwitch": False, "dailyPnLPercent": 0,
+                 "dataQuality": {"equitySource": "okx"},
+             })), \
+             patch.object(main, "_instrument_spec", new=AsyncMock(side_effect=AssertionError("pending gate must run first"))), \
+             patch.object(main, "_get_order_gateway") as gateway_factory:
+            with self.assertRaises(HTTPException) as context:
+                await main._ai_execute(decision, snapshot)
+        self.assertEqual(context.exception.status_code, 409)
+        self.assertIn("pending order", context.exception.detail)
+        gateway_factory.assert_not_called()
+
+    async def test_execution_refreshes_authenticated_account_and_risk_before_entry(self):
+        now = datetime.now(timezone.utc)
+        config = AIConfig(enabled=True, mode="demo-active", allowedInstruments=(BTC,), maxLeverage=5)
+        snapshot = AISnapshot(
+            snapshotId="refresh-before-entry", capturedAt=iso(now), instruments=[{"id": BTC}],
+            account={
+                "authenticated": True, "pendingOrdersKnown": True,
+                "availableEquityUSD": 1000, "todayLossCount": 0,
+                "positions": [], "pendingOrders": [],
+            },
+            dataFreshness={"maxAgeSeconds": 90},
+        )
+        decision = AIDecision(
+            1, "refresh-entry", snapshot.snapshotId, "open", instrumentID=BTC,
+            direction="long", orderType="market", stopLossPrice=90, takeProfitPrice=120,
+            leverage=2, winRate=.5, riskRewardRatio=2, confidence=.9,
+            validUntil=iso(now + timedelta(minutes=1)),
+        )
+
+        class Gateway:
+            async def submit_intent(self, request, **kwargs):
+                return {"orderID": "refreshed-order"}
+
+        refreshed_account = {
+            "authenticated": True, "pendingOrdersKnown": True,
+            "availableEquityUSD": 900, "todayLossCount": 0,
+            "positions": [], "pendingOrders": [],
+        }
+        refreshed_risk = {
+            "killSwitch": False, "dailyPnLPercent": 0,
+            "dataQuality": {
+                "equitySource": "okx",
+                "accountRefreshError": None,
+                "accountRefreshRetryable": False,
+            },
+        }
+        account_refresh = AsyncMock(return_value=refreshed_account)
+        risk_refresh = AsyncMock(return_value=refreshed_risk)
+        with patch.object(main, "ai_worker", SimpleNamespace(config=config)), \
+             patch.object(main, "OKX_DEMO", True), \
+             patch.object(main, "account", new=account_refresh), \
+             patch.object(main, "risk", new=risk_refresh), \
+             patch.object(main, "_instrument_spec", new=AsyncMock(return_value=InstrumentSpec(BTC, ctVal=1))), \
+             patch.object(main, "_ticker_last", new=AsyncMock(return_value=100)), \
+             patch.object(main, "_get_order_gateway", return_value=Gateway()):
+            result = await main._ai_execute(decision, snapshot)
+
+        self.assertEqual(result["orderID"], "refreshed-order")
+        account_refresh.assert_awaited_once_with()
+        risk_refresh.assert_awaited_once_with()
+
     async def test_ai_entries_use_isolated_and_market_close_remains_reduce_only(self):
         now = datetime.now(timezone.utc)
         snapshot = AISnapshot(
@@ -208,7 +334,7 @@ class AccountExecutionUniverseTests(NoNetworkTests):
             instruments=[{"id": BTC}],
             account={
                 "availableEquityUSD": 1000, "todayLossCount": 0,
-                "positions": [{"instrumentID": BTC, "quantity": 2, "marginMode": "isolated"}],
+                "positions": [], "pendingOrders": [],
             },
             dataFreshness={"maxAgeSeconds": 90},
         )
@@ -238,7 +364,11 @@ class AccountExecutionUniverseTests(NoNetworkTests):
              patch.object(main, "_ticker_last", new=AsyncMock(return_value=100)), \
              patch.object(main, "_get_order_gateway", return_value=gateway):
             await main._ai_execute(entry, snapshot)
-            await main._ai_execute(close, snapshot)
+            close_snapshot = replace(snapshot, account={
+                **snapshot.account,
+                "positions": [{"instrumentID": BTC, "quantity": 2, "marginMode": "isolated"}],
+            })
+            await main._ai_execute(close, close_snapshot)
 
         self.assertEqual(gateway.requests[0]["marginMode"], "isolated")
         self.assertFalse(gateway.requests[0]["reduceOnly"])
@@ -371,7 +501,7 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
              patch.object(main, "OKX_DEMO", True), patch.object(main, "okx_private_request", new=writes):
             with self.assertRaises(OrderNotSubmittedError) as context:
                 await main.submit_order(entry_request(), demo=True)
-        self.assertIn("不能切换为 1x", str(context.exception))
+        self.assertIn("已有持仓", str(context.exception))
         self.assertEqual([call.args[1] for call in writes.await_args_list], ["/account/positions", "/trade/orders-pending"])
 
     async def test_leverage_failure_releases_new_durable_reservation_and_daily_allowance(self):
@@ -394,7 +524,10 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
 
     async def test_order_post_timeout_remains_unknown_and_counts_after_restart(self):
         timeout = httpx.ReadTimeout("Order result unknown")
-        writes = AsyncMock(side_effect=[{"data": []}, {"data": []}, {"data": [{}]}, timeout])
+        writes = AsyncMock(side_effect=[
+            {"data": []}, {"data": []}, {"data": [{}]},
+            {"data": []}, {"data": []}, timeout,
+        ])
         with tempfile.TemporaryDirectory() as directory, patch.object(main, "private_ready", return_value=True), \
              patch.object(main, "OKX_DEMO", True), patch.object(main, "okx_private_request", new=writes):
             path = Path(directory) / "orders.json"
@@ -402,7 +535,10 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
             with self.assertRaises(httpx.ReadTimeout) as context:
                 await self.submit(gateway)
             self.assertIs(context.exception, timeout)
-            self.assertEqual([call.args[1] for call in writes.await_args_list], ["/account/positions", "/trade/orders-pending", "/account/set-leverage", "/trade/order"])
+            self.assertEqual([call.args[1] for call in writes.await_args_list], [
+                "/account/positions", "/trade/orders-pending", "/account/set-leverage",
+                "/account/positions", "/trade/orders-pending", "/trade/order",
+            ])
             reservation = gateway.reservations["unresolved-aiexecution1"]
             self.assertFalse(reservation["inFlight"])
             self.assertEqual(gateway.daily_order_count(), 1)
@@ -411,7 +547,10 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
             self.assertEqual(restored.daily_order_count(), 1)
 
     async def test_failed_retry_preserves_previous_unknown_reservation(self):
-        writes = AsyncMock(side_effect=[{"data": []}, {"data": []}, {"data": [{}]}, httpx.ReadTimeout("Order result unknown")])
+        writes = AsyncMock(side_effect=[
+            {"data": []}, {"data": []}, {"data": [{}]},
+            {"data": []}, {"data": []}, httpx.ReadTimeout("Order result unknown"),
+        ])
         with tempfile.TemporaryDirectory() as directory, patch.object(main, "private_ready", return_value=True), \
              patch.object(main, "OKX_DEMO", True), patch.object(main, "okx_private_request", new=writes):
             path = Path(directory) / "orders.json"
@@ -420,7 +559,7 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
                 await self.submit(gateway)
             previous = deepcopy(gateway.reservations)
             with patch.object(main, "okx_private_request", new=AsyncMock(side_effect=exchange_error("51001"))):
-                with self.assertRaises(OrderNotSubmittedError):
+                with self.assertRaises(OrderGatewayError):
                     await self.submit(gateway)
             self.assertEqual(gateway.reservations, previous)
             self.assertEqual(gateway.daily_order_count(), 1)
@@ -428,8 +567,8 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
 
     async def test_lookup_only_typed_absent_code_releases_unknown_result(self):
         for code, detail, absent in (("51603", "Order absent", True),
-                                     ("51001", "Unknown contract", False),
-                                     ("51001", "51603 appears only in message", False),
+                                     ("51001", "Unknown contract", True),
+                                     ("51001", "51603 appears only in message", True),
                                      ("", "51603 appears only in message", False)):
             error = exchange_error(code, detail)
             private = AsyncMock(side_effect=error)
@@ -461,7 +600,10 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
     async def test_unverifiable_success_keeps_durable_unknown_reservation_during_reconciliation(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(main, "private_ready", return_value=True), \
              patch.object(main, "OKX_DEMO", True), \
-             patch.object(main, "okx_private_request", new=AsyncMock(side_effect=[{"data": []}, {"data": []}, {"data": [{}]}, httpx.ReadTimeout("unknown")])):
+             patch.object(main, "okx_private_request", new=AsyncMock(side_effect=[
+                 {"data": []}, {"data": []}, {"data": [{}]},
+                 {"data": []}, {"data": []}, httpx.ReadTimeout("unknown"),
+             ])):
             path = Path(directory) / "orders.json"
             gateway = self.gateway(path, lookup=main._lookup_order)
             with self.assertRaises(httpx.ReadTimeout):
@@ -479,21 +621,19 @@ class OrderSubmissionOutcomeTests(NoNetworkTests):
                 self.assertEqual(restored.reservations, previous)
                 self.assertEqual(restored.daily_order_count(), 1)
 
-    async def test_reconcile_keeps_unknown_contract_error_but_releases_explicit_absence(self):
+    async def test_reconcile_releases_unknown_contract_and_explicit_absence(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(main, "private_ready", return_value=True), \
              patch.object(main, "OKX_DEMO", True), \
-             patch.object(main, "okx_private_request", new=AsyncMock(side_effect=[{"data": []}, {"data": []}, {"data": [{}]}, httpx.ReadTimeout("unknown")])):
+             patch.object(main, "okx_private_request", new=AsyncMock(side_effect=[
+                 {"data": []}, {"data": []}, {"data": [{}]},
+                 {"data": []}, {"data": []}, httpx.ReadTimeout("unknown"),
+             ])):
             path = Path(directory) / "orders.json"
             gateway = self.gateway(path, lookup=main._lookup_order)
             with self.assertRaises(httpx.ReadTimeout):
                 await self.submit(gateway)
             previous = deepcopy(gateway.reservations)
             with patch.object(main, "okx_private_request", new=AsyncMock(side_effect=exchange_error("51001"))):
-                with self.assertRaises(HTTPException):
-                    await gateway.reconcile(demo=True)
-            self.assertEqual(gateway.reservations, previous)
-            self.assertEqual(gateway.daily_order_count(), 1)
-            with patch.object(main, "okx_private_request", new=AsyncMock(side_effect=exchange_error("51603"))):
                 await gateway.reconcile(demo=True)
             self.assertEqual(gateway.reservations, {})
             self.assertEqual(gateway.daily_order_count(), 0)
