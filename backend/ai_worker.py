@@ -1617,9 +1617,18 @@ class AIWorker:
 
     async def stop(self) -> None:
         self._stop.set()
-        if self._task is not None:
-            await self._task
-            self._task = None
+        task = self._task
+        if task is None:
+            return
+        # The loop may currently be awaiting a provider process for up to the
+        # configured model timeout. Setting the event alone cannot interrupt
+        # that await, which would make emergency flatten wait for the model
+        # before it can reach the order gateway. Provider runners handle
+        # CancelledError by terminating their child process and draining it.
+        self._task = None
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     async def disable(self) -> None:
         self.update_config({"enabled": False, "mode": "disabled"})

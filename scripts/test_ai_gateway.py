@@ -1559,6 +1559,40 @@ class AIGatewayTests(unittest.TestCase):
             self.assertEqual(status["lastDecisionInstruments"], ["BTC-USDT-SWAP"])
             self.assertEqual(status["lastDecisionFreshness"], previous["lastDecisionFreshness"])
 
+    def test_worker_stop_cancels_an_inflight_provider_call(self):
+        """Emergency flatten must not wait for the provider timeout budget."""
+        async def run():
+            started = asyncio.Event()
+            cancelled = asyncio.Event()
+
+            class BlockingRunner:
+                async def run(self, snapshot, config):
+                    started.set()
+                    try:
+                        await asyncio.Event().wait()
+                    except asyncio.CancelledError:
+                        cancelled.set()
+                        raise
+
+            async def snapshot_provider():
+                return self.snapshot()
+
+            with tempfile.TemporaryDirectory() as directory:
+                worker = AIWorker(
+                    config=AIConfig(enabled=True, mode="demo-active"),
+                    snapshot_provider=snapshot_provider,
+                    runner=BlockingRunner(),
+                    state_dir=Path(directory),
+                )
+                await worker.start()
+                await asyncio.wait_for(started.wait(), timeout=1)
+                await asyncio.wait_for(worker.disable(), timeout=1)
+                self.assertTrue(cancelled.is_set())
+                self.assertIsNone(worker._task)
+                self.assertEqual(worker.get_status()["state"], "stopped")
+
+        asyncio.run(run())
+
     def test_worker_records_true_freshness_without_rewriting_a_model_hold(self):
         class IncorrectHoldRunner:
             async def run(self, snapshot, config):

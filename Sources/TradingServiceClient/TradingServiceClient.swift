@@ -6,6 +6,10 @@ public enum TradingServiceClientError: LocalizedError, Sendable {
     case server(status: Int)
     case disconnected
     case timedOut
+    /// Flattening first waits for any in-flight AI evaluation to stop and can
+    /// then perform several private exchange requests. It has a separate
+    /// message so a slow emergency action is not reported as a model timeout.
+    case flattenTimedOut
 
     public var errorDescription: String? {
         switch self {
@@ -13,6 +17,7 @@ public enum TradingServiceClientError: LocalizedError, Sendable {
         case let .server(status): return "本地交易服务错误（HTTP \(status)）"
         case .disconnected: return "本地交易服务连接已断开"
         case .timedOut: return "AI 响应超时，请缩小标的池或稍后重试"
+        case .flattenTimedOut: return "平仓请求超时，后台可能仍在处理，请刷新持仓状态"
         }
     }
 }
@@ -78,7 +83,15 @@ public actor TradingServiceClient {
     /// actual cancellation and reduce-only flattening; the client only
     /// receives the resulting worker status.
     public func flattenAI() async throws -> AIFlattenResult {
-        try await request(path: "/api/v1/ai/flatten", method: "POST")
+        do {
+            // The service stops an in-flight model evaluation before it starts
+            // cancelling orders and submitting reduce-only exits. A normal
+            // 15-second REST deadline can expire while that safe stop is still
+            // in progress, even though the request itself is healthy.
+            return try await request(path: "/api/v1/ai/flatten", method: "POST", timeout: 120)
+        } catch TradingServiceClientError.timedOut {
+            throw TradingServiceClientError.flattenTimedOut
+        }
     }
     /// Sends a conversational request to the AI control plane. The server may
     /// return a configuration patch for review; only an explicit apply request
@@ -132,7 +145,11 @@ public actor TradingServiceClient {
 
     public func flattenAI(strategy: AIStrategyID) async throws -> AIFlattenResult {
         guard strategy != .codex else { return try await flattenAI() }
-        return try await request(path: aiStrategyPath(strategy, "flatten"), method: "POST")
+        do {
+            return try await request(path: aiStrategyPath(strategy, "flatten"), method: "POST", timeout: 120)
+        } catch TradingServiceClientError.timedOut {
+            throw TradingServiceClientError.flattenTimedOut
+        }
     }
 
     public func chatAI(strategy: AIStrategyID, message: String, apply: Bool = false, suggestion: AIPatch? = nil) async throws -> AIChatResponse {
