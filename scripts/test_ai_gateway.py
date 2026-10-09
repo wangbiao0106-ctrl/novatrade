@@ -731,7 +731,7 @@ class AIGatewayTests(unittest.TestCase):
 
     def test_eligible_assessment_must_meet_existing_quality_gates(self):
         config = AIConfig(enabled=True, mode="shadow", minimumConfidence=.75, allowedInstruments=("BTC-USDT-SWAP",))
-        for changes in ({"confidence": .7}, {"winRate": .44}, {"riskRewardRatio": 1.9}, {"stopLossPrice": None}):
+        for changes in ({"confidence": .7}, {"winRate": .499}, {"riskRewardRatio": 1.9}, {"stopLossPrice": None}):
             value = self.decision(action="hold", assessments=[self.assessment(**changes)])
             with self.subTest(changes=changes):
                 self.assertFalse(validate_decision(value, self.snapshot(), config).accepted)
@@ -829,7 +829,7 @@ class AIGatewayTests(unittest.TestCase):
         config = AIConfig(enabled=True, mode="shadow", minimumConfidence=.81, allowOpen=False, maxLeverage=4)
         prompt = CodexRunner._decision_prompt(self.snapshot(), config)
         self.assertIn('"minimumConfidence":0.81', prompt)
-        self.assertIn('"minimumWinRate":0.45', prompt)
+        self.assertIn('"minimumWinRate":0.5', prompt)
         self.assertIn('"minimumRiskRewardRatio":2.0', prompt)
         self.assertIn('"allowOpen":false', prompt)
         self.assertIn('"requireStopLoss":true', prompt)
@@ -1633,13 +1633,15 @@ class AIGatewayTests(unittest.TestCase):
     def test_policy_requires_open_win_rate_and_risk_reward_ratio(self):
         snapshot = self.snapshot()
         config = AIConfig(enabled=True, mode="shadow")
-        low_win_rate = validate_decision(self.decision(winRate=.449), snapshot, config)
-        self.assertFalse(low_win_rate.accepted)
-        self.assertIn("winRate", low_win_rate.reason)
+        for rate in (.45, .48, .499):
+            with self.subTest(winRate=rate):
+                low_win_rate = validate_decision(self.decision(winRate=rate), snapshot, config)
+                self.assertFalse(low_win_rate.accepted)
+                self.assertIn("winRate must be >= 0.50", low_win_rate.reason)
         low_risk_reward = validate_decision(self.decision(riskRewardRatio=1.99), snapshot, config)
         self.assertFalse(low_risk_reward.accepted)
         self.assertIn("riskRewardRatio", low_risk_reward.reason)
-        boundary = validate_decision(self.decision(winRate=.45, riskRewardRatio=2.0), snapshot, config)
+        boundary = validate_decision(self.decision(winRate=.5, riskRewardRatio=2.0), snapshot, config)
         self.assertTrue(boundary.accepted)
 
     def test_policy_caps_ai_leverage_and_daily_losses(self):

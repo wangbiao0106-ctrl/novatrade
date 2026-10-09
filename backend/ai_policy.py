@@ -19,7 +19,7 @@ class PolicyError(ValueError):
     """A decision cannot be admitted to the order gateway."""
 
 
-MIN_OPEN_WIN_RATE = 0.45
+MIN_OPEN_WIN_RATE = 0.50
 MIN_OPEN_RISK_REWARD_RATIO = 2.0
 # Both the model prompt and the execution layer must quote these numbers, so
 # they are public and imported instead of re-typed. MIN_EXIT_REASON_LENGTH is
@@ -626,7 +626,7 @@ def validate_decision(
                 if item.confidence < parsed_config.minimumConfidence:
                     return reject(f"assessment confidence is below configured minimum: {item.instrumentID}", parsed_snapshot.snapshotId)
                 if item.winRate is None or item.winRate < MIN_OPEN_WIN_RATE:
-                    return reject(f"assessment winRate must be >= 0.45: {item.instrumentID}", parsed_snapshot.snapshotId)
+                    return reject(f"assessment winRate must be >= {MIN_OPEN_WIN_RATE:.2f}: {item.instrumentID}", parsed_snapshot.snapshotId)
                 if item.riskRewardRatio is None or item.riskRewardRatio < MIN_OPEN_RISK_REWARD_RATIO:
                     return reject(f"assessment riskRewardRatio must be >= 2.0: {item.instrumentID}", parsed_snapshot.snapshotId)
                 if parsed_config.requireStopLoss and item.stopLossPrice is None:
@@ -762,7 +762,7 @@ def validate_decision(
         return reject("cancel actions are disabled", parsed_snapshot.snapshotId)
     if parsed_decision.action == "open":
         if parsed_decision.winRate is None or parsed_decision.winRate < MIN_OPEN_WIN_RATE:
-            return reject("winRate must be >= 0.45 for open actions", parsed_snapshot.snapshotId)
+            return reject(f"winRate must be >= {MIN_OPEN_WIN_RATE:.2f} for open actions", parsed_snapshot.snapshotId)
         if parsed_decision.riskRewardRatio is None or parsed_decision.riskRewardRatio < MIN_OPEN_RISK_REWARD_RATIO:
             return reject("riskRewardRatio must be >= 2.0 for open actions", parsed_snapshot.snapshotId)
         if parsed_decision.leverage is None or parsed_decision.leverage < 1 or parsed_decision.leverage > parsed_config.maxLeverage:

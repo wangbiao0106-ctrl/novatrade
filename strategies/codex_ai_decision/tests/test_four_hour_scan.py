@@ -144,6 +144,7 @@ class FourHourScanTests(unittest.TestCase):
             self.assertIn("proposed entry conditions, and the invalidation level", prompt)
             self.assertIn("Insufficient primary history blocks only open", prompt)
             self.assertIn('"primaryEntryInterval":"4H"', prompt)
+            self.assertIn('"minimumWinRate":0.5', prompt)
         gates = CodexRunner._entry_gates(source, config)
         self.assertEqual(set(gates["primaryEntryQuality"]), set(ids))
         self.assertTrue(all(item["canOpen"] for item in gates["primaryEntryQuality"].values()))

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[3]
 STRATEGY = ROOT / "strategies" / "codex_ai_decision"
 sys.path.insert(0, str(ROOT / "backend"))
 
-from ai_policy import ACCOUNT_DAILY_LOSS_PERCENT  # noqa: E402
+from ai_policy import ACCOUNT_DAILY_LOSS_PERCENT, MIN_OPEN_WIN_RATE, MIN_OPEN_RISK_REWARD_RATIO  # noqa: E402
 from ai_schema import AIConfig, PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES  # noqa: E402
 
 
@@ -75,7 +75,7 @@ class CodexAIStrategyContractTests(unittest.TestCase):
 
     def test_four_hour_entry_profile_matches_runtime(self) -> None:
         config = strategy_config()
-        self.assertEqual(config["version"], "1.2")
+        self.assertEqual(config["version"], "1.3")
         self.assertEqual(config["entry_analysis"], {
             "primary_interval": PRIMARY_ENTRY_INTERVAL,
             "minimum_confirmed_candles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
@@ -85,6 +85,12 @@ class CodexAIStrategyContractTests(unittest.TestCase):
         })
         self.assertEqual(AIConfig().decisionIntervalSeconds, 600)
         self.assertEqual(AIConfig().snapshotMaxAgeSeconds, 90)
+
+    def test_entry_quality_matches_runtime(self) -> None:
+        self.assertEqual(strategy_config()["entry_quality"], {
+            "minimum_win_rate": MIN_OPEN_WIN_RATE,
+            "minimum_risk_reward_ratio": MIN_OPEN_RISK_REWARD_RATIO,
+        })
 
     def test_published_parameters_match_the_runtime_defaults(self) -> None:
         """The package's machine parameters must equal AIConfig defaults.

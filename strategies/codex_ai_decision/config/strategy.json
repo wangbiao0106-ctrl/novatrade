@@ -1,6 +1,6 @@
 {
   "strategy_id": "codex_ai_decision",
-  "version": "1.2",
+  "version": "1.3",
   "source_of_truth": "strategies/codex_ai_decision/STRATEGY.md",
   "display_name": "Codex AI 决策策略",
   "name_en": "Codex AI Decision",
@@ -42,6 +42,10 @@
     "directions": ["long", "short"],
     "auxiliary_intervals": ["5m", "15m", "1H"],
     "forming_candle_role": "context_only"
+  },
+  "entry_quality": {
+    "minimum_win_rate": 0.5,
+    "minimum_risk_reward_ratio": 2.0
   },
   "entry_preflight": {
     "max_quote_age_seconds": 5,
