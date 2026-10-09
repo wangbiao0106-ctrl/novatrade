@@ -64,10 +64,6 @@ public actor TradingServiceClient {
     public func resetRisk() async throws -> RiskSnapshot { try await request(path: "/api/v1/risk/reset", method: "POST") }
     // MARK: - AI decision worker
 
-    private func aiStrategyPath(_ strategy: AIStrategyID, _ resource: String) -> String {
-        "/api/v1/ai/strategies/\(strategy.rawValue)/\(resource)"
-    }
-
     public func aiStatus() async throws -> AIStatus { try await get(path: "/api/v1/ai/status") }
     public func aiConfig() async throws -> AIConfig { try await get(path: "/api/v1/ai/config") }
     public func updateAIConfig(_ patch: AIPatch) async throws -> AIConfig {
@@ -116,60 +112,6 @@ public actor TradingServiceClient {
         try await get(path: "/api/v1/ai/audit")
     }
 
-    /// Multi-strategy endpoints. Codex intentionally keeps using the legacy
-    /// methods above so older local services remain fully compatible.
-    public func aiStatus(strategy: AIStrategyID) async throws -> AIStatus {
-        guard strategy != .codex else { return try await aiStatus() }
-        return try await get(path: aiStrategyPath(strategy, "status"))
-    }
-
-    public func aiConfig(strategy: AIStrategyID) async throws -> AIConfig {
-        guard strategy != .codex else { return try await aiConfig() }
-        return try await get(path: aiStrategyPath(strategy, "config"))
-    }
-
-    public func updateAIConfig(_ patch: AIPatch, strategy: AIStrategyID) async throws -> AIConfig {
-        guard strategy != .codex else { return try await updateAIConfig(patch) }
-        return try await request(path: aiStrategyPath(strategy, "config"), method: "PATCH", body: patch)
-    }
-
-    public func enableAI(strategy: AIStrategyID) async throws -> AIStatus {
-        guard strategy != .codex else { return try await enableAI() }
-        return try await request(path: aiStrategyPath(strategy, "enable"), method: "POST")
-    }
-
-    public func disableAI(strategy: AIStrategyID) async throws -> AIStatus {
-        guard strategy != .codex else { return try await disableAI() }
-        return try await request(path: aiStrategyPath(strategy, "disable"), method: "POST")
-    }
-
-    public func flattenAI(strategy: AIStrategyID) async throws -> AIFlattenResult {
-        guard strategy != .codex else { return try await flattenAI() }
-        do {
-            return try await request(path: aiStrategyPath(strategy, "flatten"), method: "POST", timeout: 120)
-        } catch TradingServiceClientError.timedOut {
-            throw TradingServiceClientError.flattenTimedOut
-        }
-    }
-
-    public func chatAI(strategy: AIStrategyID, message: String, apply: Bool = false, suggestion: AIPatch? = nil) async throws -> AIChatResponse {
-        guard strategy != .codex else { return try await chatAI(message: message, apply: apply, suggestion: suggestion) }
-        return try await post(
-            aiStrategyPath(strategy, "chat"),
-            body: AIChatRequest(message: message, apply: apply, suggestion: suggestion),
-            timeout: 120
-        )
-    }
-
-    public func aiDecisions(strategy: AIStrategyID) async throws -> [AIAuditRecord] {
-        guard strategy != .codex else { return try await aiDecisions() }
-        return try await get(path: aiStrategyPath(strategy, "decisions"))
-    }
-
-    public func aiAudit(strategy: AIStrategyID) async throws -> [AIAuditRecord] {
-        guard strategy != .codex else { return try await aiAudit() }
-        return try await get(path: aiStrategyPath(strategy, "audit"))
-    }
     public func createStrategy(_ config: StrategyConfig) async throws -> StrategyConfig { try await post("/api/v1/strategies", body: config) }
     public func deleteStrategy(_ id: UUID) async throws -> StrategyConfig { try await request(path: "/api/v1/strategies/\(id.uuidString)", method: "DELETE") }
     public func startStrategy(_ id: UUID) async throws -> StrategyConfig { try await request(path: "/api/v1/strategies/\(id.uuidString)/start", method: "POST") }

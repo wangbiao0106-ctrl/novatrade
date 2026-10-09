@@ -22,7 +22,7 @@ strategies/
 
 Sources/                            正式运行时 Swift 源码
 Tests/                              正式源码的跨模块测试
-scripts/                            项目级启动、数据采集和服务诊断脚本
+scripts/                            项目级启动、数据采集、账户迁移和服务诊断脚本
 spec/                               稳定的工程规范和接口约定
 ```
 
@@ -39,7 +39,7 @@ spec/                               稳定的工程规范和接口约定
 - 每个策略使用一个稳定的 ASCII `snake_case` 目录名。策略名称变更时同步更新目录 README、命令和引用。
 - 策略研究阶段的全部文件必须留在自己的目录中，不得把策略脚本放回项目级 `scripts/`，也不得把研究结果放进 `data/`。
 - `results/` 可以保存可复现的轻量结果；大体积行情导出或可重建缓存应加入 `.gitignore`，但不能改变数据目录职责。
-- 对普通策略，`STRATEGY.md` 是策略实验室中唯一的人类规则真源；`config/strategy.json` 是与其版本对应的机器参数真源。Codex/DeepSeek AI 决策包共用的公共门禁另见 [`spec/AI_DECISION_POLICY.md`](AI_DECISION_POLICY.md)，各自 `STRATEGY.md` 只维护 provider 差异。`research/` 中的回测、扫描器和结果只能提供证据，不能反向修改规则定义。
+- 对普通策略，`STRATEGY.md` 是策略实验室中唯一的人类规则真源；`config/strategy.json` 是与其版本对应的机器参数真源。Codex AI 决策包的公共门禁另见 [`spec/AI_DECISION_POLICY.md`](AI_DECISION_POLICY.md)，其 `STRATEGY.md` 维护模型调用与分组分析边界。`research/` 中的回测、扫描器和结果只能提供证据，不能反向修改规则定义。
 - 策略完成并准备接入交易服务时，先在实验室更新 `STRATEGY.md` 和 `config/strategy.json`，再把该版本规则移植到 `Sources/`，同步更新 `Tests/` 和目录 README。运行时源码不能通过相对路径读取 `strategies/`。
 - 删除或替换实验产物时，保留规则说明和能够重现结果的配置；同步修复所有文档、测试和命令路径。
 
@@ -60,7 +60,6 @@ spec/                               稳定的工程规范和接口约定
 | --- | --- | --- |
 | `strategies/sweep_reversal_short/` | 山寨币二次扫顶 | 已集成 `Sources/TradingService/StrategyEngine.swift`（v1.4）|
 | `strategies/codex_ai_decision/` | Codex / GPT AI 决策策略实验室包 | 候选规则；由 backend 配置中心 `codex` 管理 |
-| `strategies/deepseek_ai_decision/` | DeepSeek AI 决策策略实验室包 | 候选规则；由 backend 配置中心 `deepseek` 管理 |
 | `strategies/ema_3line_pullback/` | 三线突破回踩（EMA 20/60/120，四方向历史研究） | 研究归档，不是规则真源，未接入运行时 |
 | `strategies/intraday_pump_retest_short/` | 缩量二次拉升（山寨日内涨幅超过 60% 后回落再突涨） | 研究候选，未接入运行时 |
 | `strategies/personal_trading_style_backtest/` | 交易风格回放（OKX 统一账单回放、风格验证和候选筛选） | 研究候选，未接入运行时 |
@@ -89,3 +88,7 @@ spec/                               稳定的工程规范和接口约定
 完成，只写应用数据目录下的 `NovaTrade/strategy-packages/` 和其中的
 `registry.json`，不修改实验室源目录或 `Sources/`。包格式、生命周期和校验规则见
 [`spec/STRATEGY_PACKAGE.md`](STRATEGY_PACKAGE.md)。
+
+## 运行账户状态与迁移
+
+纸面账户和交易历史属于运行数据，保存在应用支持目录 `~/Library/Application Support/NovaTrade/`，不放进 `data/kline/` 或策略研究目录。`paper-account.json` 保存本地撮合账本；`paper-state.json` 保存策略配置、运行状态和风控快照。账户迁移命令 [`scripts/reset_paper_account.py`](../scripts/reset_paper_account.py) 只能在后台停止后执行；它将原运行文件备份到状态目录的 `backups/paper-reset-<UTC时间>/`，保留策略和 AI 参数但全部停用，再建立新的纸面账户。备份不属于仓库产物，目录权限为 `700`，文件权限为 `600`。

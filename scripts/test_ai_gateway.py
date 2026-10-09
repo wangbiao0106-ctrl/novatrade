@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -18,9 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from backend.ai_policy import PolicyState, snapshot_freshness, validate_decision  # noqa: E402
-from backend.ai_schema import AIDecision, AIInstrumentAssessment, AIChatResponse, AIConfig, AISnapshot, SchemaError, decision_json_schema, normalize_ai_chat_patch  # noqa: E402
-from backend.ai_worker import AIWorker, CodexError, CodexRunner, DeepSeekHarnessRunner, _prompt_snapshot  # noqa: E402
-from backend.deepseek_harness import DeepSeekHarnessError  # noqa: E402
+from backend.ai_schema import AI_CHAT_PATCH_FIELDS, AIDecision, AIInstrumentAssessment, AIChatResponse, AIConfig, AISnapshot, SchemaError, ai_chat_json_schema, decision_json_schema, normalize_ai_chat_patch  # noqa: E402
+from backend.ai_worker import AIWorker, CodexError, CodexRunner, _prompt_snapshot  # noqa: E402
 from backend.order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError  # noqa: E402
 
 
@@ -148,7 +148,15 @@ class AIGatewayTests(unittest.TestCase):
                 self.assertEqual(group[field], original[field])
             for field in ("tickers", "orderBook", "fundingRates"):
                 self.assertEqual(group[field], {item: original[field][item] for item in selected})
-            self.assertEqual(group["candles"], {key: value for key, value in original["candles"].items() if any(key.startswith(item + "/") for item in selected)})
+            expected_candles = {
+                key: value for key, value in original["candles"].items()
+                if any(key.startswith(item + "/") for item in selected)
+            }
+            self.assertEqual(set(group["candles"]), set(expected_candles))
+            for key, rows in group["candles"].items():
+                self.assertEqual(len(rows), 21)
+                self.assertEqual(rows[0], expected_candles[key][39])
+                self.assertEqual(rows[-1], expected_candles[key][-1])
         self.assertEqual(union, ids)
         self.assertEqual(snapshot.to_dict(), original)
         self.assertNotIn("assessments", schemas[-1]["properties"])
@@ -209,43 +217,27 @@ class AIGatewayTests(unittest.TestCase):
     def test_provider_failure_reports_the_real_reason_after_metadata_replacement(self):
         """A provider that swaps the telemetry dict must not mask its own error.
 
-        The DeepSeek adapter publishes its own metadata after every call. When
-        it replaced the workflow dict, the failure path read a missing key and
-        the strategy log showed ``'stage'`` instead of the provider reason.
+        Telemetry replacement must not make the failure path report a missing
+        workflow key instead of the actual CLI error.
         """
         snapshot = self.grouped_snapshot()
 
         async def run():
-            runner = DeepSeekHarnessRunner(executable=["/usr/bin/fake-dsh"])
-            reason = "DeepSeek Harness ACP exited while waiting for initialize: plugin did not activate"
+            runner = CodexRunner("unused")
+            reason = "Codex CLI exited before response: provider unavailable"
 
             async def invoke(prompt, schema, config, **kwargs):
-                runner.last_run_metadata = {"provider": "deepseek-official", "outcome": "error", "error": reason}
+                runner.last_run_metadata = {"provider": "codex", "outcome": "error", "error": reason}
                 raise CodexError(reason)
 
             with patch.object(runner, "_run_prompt", side_effect=invoke), self.assertRaises(CodexError) as caught:
                 await runner.run(snapshot, AIConfig(cliTimeoutSeconds=.5))
             message = str(caught.exception)
             self.assertIn("analysis phase failed (0/4 groups complete)", message)
-            self.assertIn("plugin did not activate", message)
+            self.assertIn("provider unavailable", message)
             self.assertNotIn("'stage'", message)
             self.assertEqual(runner.last_run_metadata["failureStage"], "analysis")
             self.assertEqual(runner.last_run_metadata["stage"], "failed")
-
-        asyncio.run(run())
-
-    def test_deepseek_prompt_merges_provider_telemetry_without_losing_the_stage(self):
-        async def run():
-            runner = DeepSeekHarnessRunner(executable=["/usr/bin/fake-dsh"])
-            runner.last_run_metadata = {"workflow": "grouped", "stage": "analysis", "completedGroups": 3}
-            runner.adapter.last_run_metadata = {"provider": "deepseek-official", "outcome": "error"}
-            with patch.object(runner.adapter, "run_json", AsyncMock(side_effect=DeepSeekHarnessError("ACP exited"))):
-                with self.assertRaises(CodexError) as caught:
-                    await runner._run_prompt("prompt", {}, AIConfig())
-            self.assertEqual(str(caught.exception), "ACP exited")
-            self.assertEqual(runner.last_run_metadata["stage"], "analysis")
-            self.assertEqual(runner.last_run_metadata["completedGroups"], 3)
-            self.assertEqual(runner.last_run_metadata["provider"], "deepseek-official")
 
         asyncio.run(run())
 
@@ -391,6 +383,20 @@ class AIGatewayTests(unittest.TestCase):
                 await worker._loop()
                 self.assertEqual(calls, before)
                 failed = False
+                # The failure halt is a durable safety latch: starting the
+                # worker again, or recreating it from the same state directory,
+                # must not resume trading on its own.
+                await worker.start()
+                self.assertEqual(worker.get_status()["state"], "halted")
+                self.assertEqual(worker.get_status()["consecutiveFailures"], 3)
+                self.assertEqual(calls, before)
+                restarted = AIWorker(state_dir=Path(directory))
+                self.assertEqual(restarted.get_status()["state"], "halted")
+                self.assertFalse(restarted.get_status()["enabled"])
+                # Only an explicit configuration update clears the latch, which
+                # is the operator's review step before trading resumes.
+                worker.update_config({})
+                self.assertEqual(worker.get_status()["consecutiveFailures"], 0)
                 await worker.start()
                 for _ in range(100):
                     if worker.get_status()["lastError"] is None:
@@ -463,6 +469,38 @@ class AIGatewayTests(unittest.TestCase):
         for external in (False, True):
             with self.subTest(external=external):
                 asyncio.run(run(external))
+
+    def test_partial_analysis_timeout_reports_completed_group_count_and_audit_stage(self):
+        """A timed-out analysis phase keeps the useful completion count visible."""
+        snapshot = self.grouped_snapshot(12)
+
+        async def run():
+            runner = CodexRunner("unused")
+
+            async def analyze(group, config, **kwargs):
+                instruments = group.observed_instruments()
+                if instruments[0] == "COIN8-USDT-SWAP":
+                    # Leave the final group pending until the shared phase
+                    # deadline cancels it after the first two have returned.
+                    await asyncio.sleep(1)
+                return AIDecision.from_dict(self.decision(
+                    snapshotId=snapshot.snapshotId,
+                    action="hold",
+                    instrumentID=None,
+                    assessments=[self.assessment(item) for item in instruments],
+                ))
+
+            with patch.object(runner, "_run_single", side_effect=analyze), self.assertRaises(CodexError) as caught:
+                await runner.run(snapshot, AIConfig(cliTimeoutSeconds=.1))
+            return str(caught.exception), dict(runner.last_run_metadata)
+
+        message, metadata = asyncio.run(run())
+        self.assertIn("analysis phase failed (2/3 groups complete)", message)
+        self.assertIn("timed out", message)
+        self.assertEqual(metadata["failureStage"], "analysis")
+        self.assertEqual(metadata["completedGroups"], 2)
+        self.assertEqual(metadata["groupCount"], 3)
+        self.assertEqual(metadata["stage"], "failed")
 
     def test_timeout_kills_descendant_after_group_leader_has_exited(self):
         async def run():
@@ -765,7 +803,7 @@ class AIGatewayTests(unittest.TestCase):
         async def run():
             with tempfile.TemporaryDirectory() as directory:
                 worker = AIWorker(
-                    config=AIConfig(enabled=True, mode="demo-active", cooldownSeconds=0, maxConsecutiveFailures=3, allowedInstruments=("BTC-USDT-SWAP",)),
+                    config=AIConfig(enabled=True, mode="demo-active", maxConsecutiveFailures=3, allowedInstruments=("BTC-USDT-SWAP",)),
                     runner=Runner(), order_gateway=AsyncMock(side_effect=RuntimeError("gateway failed")),
                     state_dir=Path(directory),
                 )
@@ -930,25 +968,17 @@ class AIGatewayTests(unittest.TestCase):
             candles={"BTC-USDT-SWAP/5m": rows},
             ai={"selectedInstruments": ["BTC-USDT-SWAP"]},
         )
-        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "compact10"}, clear=False):
-            compact = _prompt_snapshot(snapshot)
+        compact = _prompt_snapshot(snapshot, encoding="compact10")
         self.assertEqual(len(compact["candles"]["BTC-USDT-SWAP/5m"]["rows"]), 11)
         self.assertEqual(compact["candles"]["BTC-USDT-SWAP/5m"]["rows"][-1][-1], False)
-        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "raw"}, clear=False):
-            raw = _prompt_snapshot(snapshot)
+        raw = _prompt_snapshot(snapshot, encoding="raw")
         self.assertIsInstance(raw["candles"]["BTC-USDT-SWAP/5m"], list)
 
-    def test_deepseek_encoding_does_not_change_codex_prompt(self):
+    def test_codex_prompt_retains_full_candle_history(self):
         snapshot = self.grouped_snapshot(count=1)
-        codex = AIConfig(provider="codex")
-        deepseek = AIConfig(provider="deepseek-harness")
-        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "compact10"}, clear=False):
-            codex_prompt = CodexRunner._decision_prompt(snapshot, codex)
-            deepseek_prompt = CodexRunner._decision_prompt(snapshot, deepseek)
+        codex_prompt = CodexRunner._decision_prompt(snapshot, AIConfig())
         codex_snapshot = json.loads(codex_prompt.split("SNAPSHOT:\n", 1)[1])
-        deepseek_snapshot = json.loads(deepseek_prompt.split("SNAPSHOT:\n", 1)[1])
         self.assertEqual(len(codex_snapshot["candles"]["COIN0-USDT-SWAP/5m"]["rows"]), 60)
-        self.assertEqual(len(deepseek_snapshot["candles"]["COIN0-USDT-SWAP/5m"]["rows"]), 11)
 
     def test_production_runner_rejects_missing_duplicate_extra_and_omitted_rows(self):
         valid = self.decision(action="hold", instrumentID=None, assessments=[self.assessment()])
@@ -1002,20 +1032,131 @@ class AIGatewayTests(unittest.TestCase):
         self.assertNotIn("selectionLimit", defaults.to_dict())
         self.assertEqual(defaults.routineModel, "gpt-6-luna")
         self.assertEqual(defaults.routineReasoningEffort, "medium")
-        self.assertEqual(defaults.escalationModel, "gpt-6-luna")
-        self.assertEqual(defaults.escalationReasoningEffort, "medium")
         self.assertEqual(defaults.maxDailyOrders, 20)
         self.assertEqual(defaults.maxDailyLosses, 5)
         self.assertEqual(defaults.marginPerOrderUSD, 500)
         self.assertEqual(defaults.maxLeverage, 5)
-        self.assertEqual(defaults.cooldownSeconds, 0)
+        self.assertEqual(defaults.stopLossCooldownSeconds, 14400)
+        self.assertEqual(defaults.recentStopLossWindowSeconds, 3600)
+        self.assertEqual(defaults.recentStopLossLimit, 2)
         self.assertEqual(defaults.cliTimeoutSeconds, 90.0)
         self.assertEqual(AIConfig.from_dict({"cliTimeoutSeconds": 45}).cliTimeoutSeconds, 45.0)
-        self.assertEqual(AIConfig.from_dict({"cooldownSeconds": 60}).cooldownSeconds, 0)
+        # Retired keys are accepted for migration and never emitted again, so a
+        # stored cooldownSeconds cannot look like a live control.
+        self.assertNotIn("cooldownSeconds", defaults.to_dict())
+        self.assertNotIn("escalationModel", defaults.to_dict())
+        self.assertNotIn("escalationReasoningEffort", defaults.to_dict())
+        self.assertNotIn("cooldownSeconds", AIConfig.from_dict({"cooldownSeconds": 60}).to_dict())
+        # Bounds are enforced on direct construction too, not only via from_dict.
+        for invalid in ({"minimumConfidence": 5}, {"maxLeverage": 1000}, {"maxDailyLosses": 0}):
+            with self.assertRaises(SchemaError):
+                AIConfig(**invalid)
+        with self.assertRaises(SchemaError):
+            AIConfig(maxDailyOrders=0)
+        with self.assertRaises(SchemaError):
+            AIConfig.from_dict({"maxDailyLosses": 0})
         with self.assertRaises(SchemaError):
             AIConfig.from_dict({"allowedInstruments": ["BTC"]})
         with self.assertRaises(SchemaError):
             AIConfig.from_dict({"routineModel": "gpt-6-astra"})
+
+    def test_chat_patch_surface_cannot_weaken_protection(self) -> None:
+        """The conversational surface must match the validator and exclude
+        protective controls, so the model cannot suggest disabling them."""
+        patch_schema = ai_chat_json_schema()["properties"]["suggestion"]["anyOf"][0]
+        self.assertEqual(set(patch_schema["properties"]), set(AI_CHAT_PATCH_FIELDS))
+        self.assertEqual(set(patch_schema["required"]), set(AI_CHAT_PATCH_FIELDS))
+        for forbidden in ("requireStopLoss", "stopLossCooldownSeconds",
+                          "recentStopLossWindowSeconds", "recentStopLossLimit", "cooldownSeconds"):
+            with self.subTest(field=forbidden):
+                self.assertNotIn(forbidden, AI_CHAT_PATCH_FIELDS)
+                self.assertNotIn(forbidden, patch_schema["properties"])
+                with self.assertRaises(SchemaError):
+                    normalize_ai_chat_patch({forbidden: 0 if forbidden.endswith("Seconds") else False})
+        # enabled/mode stay human-controlled as well.
+        for forbidden in ("enabled", "mode", "provider", "cliTimeoutSeconds", "maxOutputBytes"):
+            self.assertNotIn(forbidden, AI_CHAT_PATCH_FIELDS)
+
+    def test_grouped_pipeline_budget_respects_the_snapshot_window(self) -> None:
+        from datetime import datetime as _datetime, timedelta as _timedelta, timezone as _timezone
+        from backend.ai_worker import _grouped_pipeline_budget_seconds
+
+        captured = _datetime.now(_timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        def snapshot_with(max_age: object, captured_at: str = captured) -> AISnapshot:
+            freshness = {} if max_age is None else {"maxAgeSeconds": max_age, "capturedAt": captured_at}
+            return AISnapshot(snapshotId="snap-1", capturedAt=captured_at,
+                              instruments=[{"id": "BTC-USDT-SWAP"}], dataFreshness=freshness)
+
+        config = AIConfig(cliTimeoutSeconds=90)
+        # 90 s of snapshot validity must not be stretched into 180 s of work.
+        self.assertAlmostEqual(_grouped_pipeline_budget_seconds(snapshot_with(90), config), 90, delta=5)
+        # A longer window still honours the 2 x CLI ceiling.
+        self.assertAlmostEqual(_grouped_pipeline_budget_seconds(snapshot_with(600), config), 180, delta=1)
+        # Absent metadata keeps the documented polling-interval fallback (the
+        # floor applies because 30 s is below half the CLI ceiling).
+        self.assertAlmostEqual(_grouped_pipeline_budget_seconds(snapshot_with(None), config), 45, delta=1)
+        # Unusable metadata (explicitly zero) cannot admit an entry at all, so
+        # only the CLI ceiling remains.
+        self.assertAlmostEqual(
+            _grouped_pipeline_budget_seconds(snapshot_with(0), config),
+            2 * config.cliTimeoutSeconds, delta=1,
+        )
+        # An already-expired snapshot keeps a usable slice for management
+        # actions instead of collapsing to a zero-length phase.
+        stale = (_datetime.now(_timezone.utc) - _timedelta(seconds=600)).isoformat(timespec="seconds").replace("+00:00", "Z")
+        self.assertAlmostEqual(_grouped_pipeline_budget_seconds(snapshot_with(90, stale), config), 45, delta=1)
+        # The single-call path is bounded the same way, so a CLI allowance
+        # longer than the admission window cannot make entries unreachable.
+        from backend.ai_worker import _freshness_bounded_budget
+        self.assertAlmostEqual(
+            _freshness_bounded_budget(snapshot_with(90), config, config.cliTimeoutSeconds), 90, delta=5,
+        )
+        long_cli = AIConfig(cliTimeoutSeconds=300)
+        # With a 300 s allowance against a 90 s window the floor governs: a tight
+        # window still leaves a usable slice for management actions, while the
+        # budget stays far below the configured CLI ceiling.
+        self.assertAlmostEqual(
+            _freshness_bounded_budget(snapshot_with(90), long_cli, long_cli.cliTimeoutSeconds), 150, delta=2,
+        )
+
+    def test_paper_active_config_round_trip(self):
+        config = AIConfig.from_dict({"enabled": True, "mode": "paper-active"})
+        self.assertEqual(config.mode, "paper-active")
+        self.assertEqual(AIConfig.from_dict(config.to_dict()), config)
+
+    def test_config_rejects_retired_provider(self):
+        for provider in ("deepseek-harness", "unsupported"):
+            with self.subTest(provider=provider):
+                with self.assertRaisesRegex(SchemaError, "provider must be codex"):
+                    AIConfig(provider=provider)
+                with self.assertRaisesRegex(SchemaError, "provider must be codex"):
+                    AIConfig.from_dict({"provider": provider})
+
+    def test_worker_rejects_unknown_strategy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "strategy must be codex"):
+                AIWorker(strategy_id="unsupported", state_dir=Path(directory))
+
+    def test_worker_disables_retired_persisted_provider(self):
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                state_dir = Path(directory)
+                raw = AIConfig(enabled=True, mode="paper-active").to_dict()
+                raw["provider"] = "deepseek-harness"
+                config_path = state_dir / "ai-config.json"
+                config_path.write_text(json.dumps(raw), encoding="utf-8")
+                worker = AIWorker(config=AIConfig(enabled=True, mode="paper-active"), state_dir=state_dir)
+                self.assertIsInstance(worker.runner, CodexRunner)
+                self.assertEqual(worker.config.provider, "codex")
+                self.assertFalse(worker.config.enabled)
+                self.assertEqual(worker.status.mode, "disabled")
+                self.assertFalse(worker.status.enabled)
+                persisted = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(persisted["provider"], "codex")
+                self.assertFalse(persisted["enabled"])
+
+        asyncio.run(run())
 
     def test_worker_migrates_legacy_cli_timeout_default(self):
         async def run():
@@ -1047,8 +1188,14 @@ class AIGatewayTests(unittest.TestCase):
             minimumConfidence=0.79, decisionIntervalSeconds=90, maxDailyOrders=12,
             marginPerOrderUSD=250, maxLeverage=3,
         ).to_dict()
-        legacy.update({"routineReasoningEffort": "low", "escalationModel": "gpt-6.1-sol"})
-        expected = dict(legacy, routineReasoningEffort="medium", escalationModel="gpt-6-luna")
+        legacy.update({
+            "routineReasoningEffort": "low", "escalationModel": "gpt-6.1-sol",
+            "escalationReasoningEffort": "medium", "cooldownSeconds": 60,
+        })
+        expected = dict(legacy, routineReasoningEffort="medium")
+        expected.pop("escalationModel")
+        expected.pop("escalationReasoningEffort")
+        expected.pop("cooldownSeconds")
         async def run():
             with tempfile.TemporaryDirectory() as directory:
                 state_dir = Path(directory)
@@ -1058,6 +1205,52 @@ class AIGatewayTests(unittest.TestCase):
                 self.assertEqual(worker.get_config(), expected)
                 self.assertEqual(json.loads(config_path.read_text()), expected)
                 self.assertEqual(AIWorker(state_dir=state_dir).get_config(), expected)
+
+        asyncio.run(run())
+
+    def test_failure_halt_survives_disable_start_and_restart(self):
+        """The halt latch is durable and only a config update clears it."""
+
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                state_dir = Path(directory)
+                worker = AIWorker(config=AIConfig(enabled=True, mode="demo-active"), state_dir=state_dir)
+                worker.status = replace(worker.status, state="halted", consecutiveFailures=3)
+                worker._persist()
+                # Disabling a halted worker must not lose the latch.
+                await worker.disable()
+                self.assertEqual(worker.get_status()["state"], "halted")
+                await worker.start()
+                self.assertIsNone(worker._task)
+                self.assertEqual(worker.get_status()["state"], "halted")
+                # A fresh process reading the same state directory stays halted.
+                restarted = AIWorker(state_dir=state_dir)
+                self.assertEqual(restarted.get_status()["state"], "halted")
+                self.assertEqual(restarted.get_status()["consecutiveFailures"], 3)
+                self.assertFalse(restarted.get_status()["enabled"])
+                # The explicit configuration update is the recovery step.
+                worker.update_config({"maxDailyOrders": 21})
+                self.assertEqual(worker.get_status()["state"], "stopped")
+                self.assertEqual(worker.get_status()["consecutiveFailures"], 0)
+                self.assertEqual(worker.get_config()["maxDailyOrders"], 21)
+                await worker.stop()
+
+        asyncio.run(run())
+
+    def test_persisted_zero_daily_loss_cap_is_lifted_without_losing_settings(self):
+        legacy = AIConfig(enabled=True, mode="demo-active", maxDailyLosses=5).to_dict()
+        # maxDailyLosses=0 used to close every entry from the first round. The
+        # migration lifts it to the usable minimum and keeps the other settings.
+        legacy.update({"maxDailyLosses": 0, "maxLeverage": 3})
+
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                state_dir = Path(directory)
+                (state_dir / "ai-config.json").write_text(json.dumps(legacy), encoding="utf-8")
+                config = AIWorker(state_dir=state_dir).get_config()
+                self.assertEqual(config["maxDailyLosses"], 1)
+                self.assertEqual(config["maxLeverage"], 3)
+                self.assertTrue(config["enabled"])
 
         asyncio.run(run())
 
@@ -1479,7 +1672,7 @@ class AIGatewayTests(unittest.TestCase):
 
     def test_policy_allows_reassessment_open_without_time_cooldown(self):
         snapshot = self.snapshot()
-        config = AIConfig(enabled=True, mode="shadow", cooldownSeconds=60)
+        config = AIConfig(enabled=True, mode="shadow")
         state = PolicyState()
         open_result = validate_decision(self.decision(), snapshot, config, state)
         self.assertTrue(open_result.accepted)
@@ -1520,6 +1713,134 @@ class AIGatewayTests(unittest.TestCase):
         )
         self.assertFalse(result.accepted)
         self.assertIn("already has a position", result.reason)
+
+    def paper_snapshot(self) -> AISnapshot:
+        instrument = "BTC-USDT-SWAP"
+        return AISnapshot(
+            snapshotId="snap-1", capturedAt=iso(datetime.now(timezone.utc)),
+            instruments=[{"id": instrument}],
+            candles={f"{instrument}/{interval}": [{"confirmed": True, "close": 100}]
+                     for interval in ("5m", "15m", "1H", "4H")},
+            tickers={instrument: {"last": 100}},
+            account={
+                "mode": "paper", "profile": "local-paper", "authenticated": True,
+                "availableEquityUSD": 5000, "todayLossCount": 0,
+                "pendingOrdersKnown": True, "pendingOrders": [],
+                "positionsKnown": True, "positions": [],
+                "dataQuality": {"dailyBillsAvailable": True, "pendingOrdersAvailable": True},
+            },
+            risk={"killSwitch": False, "dailyPnLPercent": 0,
+                  "dataQuality": {"equitySource": "paper", "accountRefreshError": None,
+                                  "accountRefreshRetryable": False}},
+            ai={"tradingMode": "paper", "tradingAvailability": {instrument: {"available": True}}},
+            dataFreshness={"maxAgeSeconds": 90, "availability": {}},
+        )
+
+    def test_policy_admits_local_paper_entry_with_complete_account_facts(self):
+        result = validate_decision(
+            self.assessed_decision(), self.paper_snapshot(),
+            AIConfig(enabled=True, mode="paper-active", allowedInstruments=("BTC-USDT-SWAP",)),
+        )
+        self.assertTrue(result.accepted, result.reason)
+
+    def test_policy_rejects_malformed_reentry_guard_metadata(self):
+        now = datetime.now(timezone.utc)
+        account = self.paper_snapshot().account
+        base_stop = {
+            "instrumentID": "BTC-USDT-SWAP",
+            "closedAt": iso(now - timedelta(minutes=5)),
+            "realizedPnL": -10.0,
+        }
+        variants = {
+            "cooldown_missing_closed_at": {
+                "reentryCooldowns": {"BTC-USDT-SWAP": {
+                    "blockedUntil": iso(now + timedelta(hours=1)),
+                    "reason": "stop_loss",
+                }},
+                "recentStopLosses": [], "recentStopLossWindowSeconds": 3600,
+                "recentStopLossLimit": 2,
+            },
+            "recent_invalid_closed_at": {
+                "reentryCooldowns": {},
+                "recentStopLosses": [{**base_stop, "closedAt": "not-a-timestamp"}],
+                "recentStopLossWindowSeconds": 3600, "recentStopLossLimit": 2,
+            },
+            "burst_missing_marker": {
+                "reentryCooldowns": {},
+                "recentStopLosses": [base_stop, {**base_stop, "closedAt": iso(now - timedelta(minutes=10))}],
+                "recentStopLossWindowSeconds": 3600, "recentStopLossLimit": 2,
+            },
+        }
+        config = AIConfig(enabled=True, mode="paper-active", allowedInstruments=("BTC-USDT-SWAP",))
+        for name, guard in variants.items():
+            with self.subTest(name=name):
+                snapshot = self.paper_snapshot()
+                snapshot.account.update(account)
+                snapshot.account.update(guard)
+                result = validate_decision(self.assessed_decision(), snapshot, config)
+                self.assertFalse(result.accepted)
+                self.assertIn("unavailable", result.reason)
+
+    def test_policy_allows_entry_after_expired_burst_window(self):
+        now = datetime.now(timezone.utc)
+        snapshot = self.paper_snapshot()
+        snapshot.account.update({
+            "reentryCooldowns": {},
+            "recentStopLosses": [
+                {"instrumentID": "BTC-USDT-SWAP", "closedAt": iso(now - timedelta(hours=2)), "realizedPnL": -10.0},
+                {"instrumentID": "ETH-USDT-SWAP", "closedAt": iso(now - timedelta(hours=2, minutes=1)), "realizedPnL": -12.0},
+            ],
+            "recentStopLossWindowSeconds": 3600,
+            "recentStopLossLimit": 2,
+            "recentStopLossBurstBlockedUntil": None,
+        })
+        result = validate_decision(
+            self.assessed_decision(), snapshot,
+            AIConfig(enabled=True, mode="paper-active", allowedInstruments=("BTC-USDT-SWAP",)),
+        )
+        self.assertTrue(result.accepted, result.reason)
+
+    def test_policy_keeps_data_quality_and_loss_gates_for_local_paper_entry(self):
+        cases = (
+            ("account", "authenticated", False, "authenticated account"),
+            ("account", "availableEquityUSD", 0, "available account equity"),
+            ("account", "todayLossCount", 5, "maximum daily losing trades"),
+            ("account", "profile", "okx-demo", "local paper account"),
+            ("risk", "killSwitch", True, "risk kill switch"),
+            ("risk", "dailyPnLPercent", -5, "risk kill switch"),
+        )
+        for section, key, value, reason in cases:
+            snapshot = self.paper_snapshot()
+            getattr(snapshot, section)[key] = value
+            with self.subTest(section=section, key=key):
+                result = validate_decision(
+                    self.assessed_decision(), snapshot,
+                    AIConfig(enabled=True, mode="paper-active", allowedInstruments=("BTC-USDT-SWAP",)),
+                )
+                self.assertFalse(result.accepted)
+                self.assertIn(reason, result.reason)
+        snapshot = self.paper_snapshot()
+        snapshot.risk["dataQuality"]["equitySource"] = "okx"
+        result = validate_decision(
+            self.assessed_decision(), snapshot,
+            AIConfig(enabled=True, mode="paper-active", allowedInstruments=("BTC-USDT-SWAP",)),
+        )
+        self.assertFalse(result.accepted)
+        self.assertIn("local paper risk equity", result.reason)
+
+    def test_policy_requires_active_mode_to_match_server_trading_mode(self):
+        for mode, expected in (("paper-active", "paper"), ("demo-active", "demo"), ("live-armed", "live")):
+            for actual in ("paper", "demo", "live", None):
+                snapshot = self.snapshot()
+                snapshot.ai["tradingMode"] = actual
+                with self.subTest(mode=mode, trading_mode=actual):
+                    result = validate_decision(self.decision(), snapshot, AIConfig(enabled=True, mode=mode))
+                    self.assertEqual(result.accepted, actual == expected)
+                    if actual != expected:
+                        self.assertIn(f"requires tradingMode {expected}", result.reason)
+            # Legacy library snapshots lack execution routing metadata.
+            result = validate_decision(self.decision(), self.snapshot(), AIConfig(enabled=True, mode=mode))
+            self.assertTrue(result.accepted, result.reason)
 
     def test_status_exposes_current_observation_set_and_restores_it(self):
         class HoldRunner:
@@ -1797,7 +2118,7 @@ class AIGatewayTests(unittest.TestCase):
                 executable.write_text("#!/bin/sh\ncat >/dev/null\nsleep 1\n", encoding="utf-8")
                 executable.chmod(0o700)
                 worker = AIWorker(
-                    config=AIConfig(enabled=True, mode="shadow", cliTimeoutSeconds=0.05),
+                    config=AIConfig(enabled=True, mode="shadow", cliTimeoutSeconds=0.1),
                     runner=CodexRunner(str(executable)),
                     state_dir=Path(directory) / "state",
                 )
@@ -1907,7 +2228,7 @@ class AIGatewayTests(unittest.TestCase):
         self.assertNotIn("unexpected-metadata-must-not-be-persisted", serialized)
         self.assertEqual(event["model"], "gpt-6-luna")
         self.assertEqual(event["reasoningEffort"], "medium")
-        self.assertEqual(quality["promptEncoding"], "compact60")
+        self.assertEqual(quality["promptEncoding"], "compact20")
 
     def test_codex_runner_reports_timeout(self):
         async def run():
@@ -1917,7 +2238,7 @@ class AIGatewayTests(unittest.TestCase):
                 executable.chmod(0o700)
                 runner = CodexRunner(str(executable))
                 with patch.object(CodexRunner, "_decision_prompt", return_value="test snapshot"), self.assertRaises(CodexError) as raised:
-                    await runner.run(self.snapshot(), AIConfig(mode="shadow", cliTimeoutSeconds=0.05))
+                    await runner.run(self.snapshot(), AIConfig(mode="shadow", cliTimeoutSeconds=0.1))
                 self.assertIn("timed out", str(raised.exception))
 
         asyncio.run(run())
@@ -1939,7 +2260,7 @@ class AIGatewayTests(unittest.TestCase):
                 runner = CodexRunner(str(executable))
                 started = asyncio.get_running_loop().time()
                 with patch.object(CodexRunner, "_decision_prompt", return_value="test snapshot"), self.assertRaises(CodexError):
-                    await runner.run(self.snapshot(), AIConfig(mode="shadow", cliTimeoutSeconds=0.05))
+                    await runner.run(self.snapshot(), AIConfig(mode="shadow", cliTimeoutSeconds=0.1))
                 return asyncio.get_running_loop().time() - started
 
         elapsed = asyncio.run(run())
@@ -2019,6 +2340,53 @@ class AIGatewayTests(unittest.TestCase):
         self.assertEqual(first["quantity"], 1)
         self.assertEqual(second["orderID"], "ord-1")
         self.assertEqual(len(calls), 1)
+
+    def test_gateway_rejects_leverage_above_the_server_ceiling(self):
+        """The gateway is the final bound: a hand-written request cannot ask the
+        exchange for an unbounded multiplier."""
+        calls = []
+
+        async def submit(payload, demo):
+            calls.append(payload)
+            return {"orderID": "ord-1", "status": "submitted"}
+
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                gateway = OrderGateway(Path(directory) / "ledger.json", submit=submit)
+                spec = InstrumentSpec("BTC-USDT-SWAP", ctVal=1, lotSize=1, minSize=1)
+                with self.assertRaises(OrderGatewayError):
+                    await gateway.submit_intent(
+                        {"instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "market",
+                         "quantity": 1, "leverage": float(gateway.limits["maxLeverage"]) + 1,
+                         "clientOrderID": "manualhuge1"},
+                        demo=False, instrument=spec, price=100,
+                    )
+                return calls
+
+        self.assertEqual(asyncio.run(run()), [])
+
+    def test_gateway_blocks_ai_reentry_after_durable_stop_loss_event(self):
+        calls = []
+
+        async def submit(payload, demo):
+            calls.append(payload)
+            return {"orderID": "ord-1", "status": "submitted"}
+
+        async def run():
+            with tempfile.TemporaryDirectory() as directory:
+                gateway = OrderGateway(Path(directory) / "ledger.json", submit=submit)
+                spec = InstrumentSpec("BTC-USDT-SWAP", ctVal=1, lotSize=1, minSize=1)
+                await gateway.record_event({
+                    "type": "exit-settled", "actualSide": "sl", "positionOpen": False,
+                    "instrumentID": "BTC-USDT-SWAP", "triggerTime": iso(datetime.now(timezone.utc)),
+                }, event_key="sl-1")
+                request = {"instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "market",
+                           "quantity": 1, "source": "ai", "clientOrderID": "aiguard1"}
+                with self.assertRaisesRegex(OrderGatewayError, "re-entry blocked"):
+                    await gateway.submit_intent(request, demo=True, instrument=spec, price=100)
+                return calls
+
+        self.assertEqual(asyncio.run(run()), [])
 
     def test_gateway_keeps_unknown_submission_reserved(self):
         async def submit(payload, demo):

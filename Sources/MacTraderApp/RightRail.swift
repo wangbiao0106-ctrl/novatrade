@@ -7,7 +7,14 @@ struct RightRail: View {
     @ObservedObject var model: DashboardModel
     @Binding var showingNewStrategy: Bool
 
-    private var accountLabel: String { model.accountOverview.mode == .paper ? "OKX 模拟" : "实盘" }
+    private var accountLabel: String {
+        if model.accountOverview.isLocalPaper { return "纸面交易" }
+        switch model.accountOverview.mode {
+        case .paper: return "OKX 模拟"
+        case .live: return "实盘"
+        case .readOnly: return "账户"
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -22,10 +29,13 @@ struct RightRail: View {
                 .padding(.vertical, 4)
                 if model.riskSnapshot.killSwitch {
                     RiskAlertModule(model: model)
+                } else if model.riskSnapshot.dataQuality?.dailyPnLAuthoritative == false {
+                    Label("账户日损数据待核实", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .help("账户权益刷新失败或缺少有效的日初权益基线，当前日损数值不能视为已核实。")
                 }
-                ForEach(AIStrategyID.allCases) { strategy in
-                    AIControlModule(model: model, strategy: strategy)
-                }
+                AIControlModule(model: model)
                 ForEach(model.strategies) { config in
                     StrategyStatusModule(config: config, status: model.strategyStatus(for: config), model: model)
                 }
@@ -37,12 +47,25 @@ struct RightRail: View {
                         RailRow {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(formatLocalTime(fill.timestamp)).foregroundStyle(.secondary)
+                                HStack(spacing: 5) {
+                                    Text(fillInstrumentLabel(fill))
+                                        .font(.caption.weight(.semibold).monospaced())
+                                        .lineLimit(1)
+                                    Text(fillSideLabel(fill))
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(fillSideColor(fill))
+                                }
+                                Text(fillEventLabel(fill))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                                 Text("成交 \(formatPrice(fill.price))")
                                     .font(.caption2.monospacedDigit())
                             }
                             Spacer()
-                            Text(formatQuantity(fill.quantity)).monospacedDigit()
-                            Text("费 \(formatQuantity(fill.fee))").foregroundStyle(.secondary)
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text("数量 \(formatQuantity(fill.quantity))").monospacedDigit()
+                                Text("费 \(formatQuantity(fill.fee))").foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -70,6 +93,49 @@ struct RightRail: View {
     private var ordersModule: some View {
         RailModule(title: "挂单", icon: "list.bullet.rectangle") {
             ordersContent
+        }
+    }
+
+    private func fillInstrumentLabel(_ fill: PaperFill) -> String {
+        let instrumentID = fill.instrumentID?.isEmpty == false
+            ? fill.instrumentID
+            : model.orders.first(where: { $0.id == fill.orderID })?.instrumentID
+        guard let instrumentID, !instrumentID.isEmpty else { return "未知合约" }
+        return instrumentID.replacingOccurrences(of: "-USDT-SWAP", with: " / USDT")
+    }
+
+    private func fillSide(_ fill: PaperFill) -> String? {
+        if let side = fill.side, !side.isEmpty { return side }
+        guard let order = model.orders.first(where: { $0.id == fill.orderID }) else { return nil }
+        switch order.side.lowercased() {
+        case "long": return "buy"
+        case "short": return "sell"
+        default: return order.side
+        }
+    }
+
+    private func fillSideLabel(_ fill: PaperFill) -> String {
+        switch fillSide(fill)?.lowercased() {
+        case "buy", "long": return "做多"
+        case "sell", "short": return "做空"
+        default: return "成交"
+        }
+    }
+
+    private func fillSideColor(_ fill: PaperFill) -> Color {
+        switch fillSide(fill)?.lowercased() {
+        case "buy", "long": return .green
+        case "sell", "short": return .red
+        default: return .secondary
+        }
+    }
+
+    private func fillEventLabel(_ fill: PaperFill) -> String {
+        switch fill.reason?.lowercased() {
+        case "stop_loss": return "止损平仓"
+        case "take_profit": return "止盈平仓"
+        case "manual_close": return "手动平仓"
+        default: return "开仓成交"
         }
     }
 
@@ -267,28 +333,24 @@ private struct PositionTag: View {
 
 struct AIControlModule: View {
     @ObservedObject var model: DashboardModel
-    let strategy: AIStrategyID
     @State private var showingFlattenConfirmation = false
     @State private var showingAIActivity = false
+    @State private var showingSettings = false
     @State private var feedback: String?
 
-    init(model: DashboardModel, strategy: AIStrategyID = .codex) {
-        self.model = model
-        self.strategy = strategy
-    }
-
-    private var status: AIStatus { model.aiStatus(for: strategy) }
-    private var config: AIConfig { model.aiConfig(for: strategy) }
-    private var active: Bool { status.enabled && status.mode != .disabled && status.mode != .halted }
+    private var status: AIStatus { model.aiStatus }
+    private var config: AIConfig { model.aiConfig }
+    private var halted: Bool { status.state == "halted" || status.mode == .halted }
+    private var active: Bool { status.enabled && status.mode != .disabled && !halted }
     private var statusDotColor: Color {
+        if halted { return .red }
         if status.lastError != nil { return .red }
         if active { return .green }
-        if status.mode == .halted { return .red }
         return .secondary
     }
     private var statusMessage: String {
+        if halted { return "失败熔断" }
         if status.lastError != nil { return "运行异常" }
-        if status.mode == .halted { return "已暂停" }
         return active ? "运行中" : "已停用"
     }
     private var latestActionLabel: String {
@@ -305,7 +367,7 @@ struct AIControlModule: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
-                Label(strategy.displayName, systemImage: strategy == .deepseek ? "diamond.fill" : "sparkles")
+                Label("Codex AI", systemImage: "sparkles")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                 Spacer()
@@ -338,7 +400,7 @@ struct AIControlModule: View {
             }
             .font(.caption2)
             HStack(spacing: 6) {
-                Text("决策：\(strategy.providerLabel)")
+                Text("决策：Codex")
                     .foregroundStyle(.secondary)
                 if !config.allowedInstruments.isEmpty {
                     Text("· \(config.allowedInstruments.count) 个标的")
@@ -346,6 +408,11 @@ struct AIControlModule: View {
                 }
             }
             .font(.caption2)
+            if config.mode == .paperActive {
+                Text("纸面交易 · 本地撮合")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             if let decision = status.lastDecision, let instrument = decision.instrumentID {
                 Text(instrument)
                     .font(.caption2.monospaced())
@@ -356,7 +423,7 @@ struct AIControlModule: View {
                 Button {
                     Task {
                         do {
-                            if active { try await model.disableAI(strategy: strategy) } else { try await model.enableAI(strategy: strategy) }
+                            if active { try await model.disableAI() } else { try await model.enableAI() }
                         } catch { feedback = error.localizedDescription }
                     }
                 } label: {
@@ -365,7 +432,7 @@ struct AIControlModule: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(model.isUpdatingAI || status.mode == .halted)
+                .disabled(model.isUpdatingAI || halted)
 
                 Button { showingFlattenConfirmation = true } label: {
                     Label("平仓", systemImage: "xmark.octagon")
@@ -375,6 +442,14 @@ struct AIControlModule: View {
                 .controlSize(.small)
                 .tint(.red)
                 .disabled(model.isUpdatingAI)
+            }
+            if halted {
+                Text("连续失败已停止运行。检查日志后，保存一次参数设置可解除熔断。")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                Button("检查并更新设置") { showingSettings = true }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
             }
             if let feedback {
                 Text(feedback).font(.caption2).foregroundStyle(.red).lineLimit(2)
@@ -388,12 +463,15 @@ struct AIControlModule: View {
                 .stroke(active ? Color.green.opacity(0.34) : Color.white.opacity(0.09), lineWidth: 1)
         )
         .sheet(isPresented: $showingAIActivity) {
-            AIActivitySheet(model: model, strategy: strategy)
+            AIActivitySheet(model: model)
+        }
+        .sheet(isPresented: $showingSettings) {
+            AISettingsSheet(model: model)
         }
         .confirmationDialog("撤销挂单并平掉当前仓位？", isPresented: $showingFlattenConfirmation, titleVisibility: .visible) {
             Button("确认平仓", role: .destructive) {
                 Task {
-                    do { try await model.flattenAI(strategy: strategy) } catch { feedback = error.localizedDescription }
+                    do { try await model.flattenAI() } catch { feedback = error.localizedDescription }
                 }
             }
             Button("取消", role: .cancel) {}
@@ -405,17 +483,15 @@ struct AIControlModule: View {
 
 struct AISettingsSheet: View {
     @ObservedObject var model: DashboardModel
-    let strategy: AIStrategyID
     @Environment(\.dismiss) private var dismiss
     @State private var config: AIConfig
     @State private var selectedInstrumentIDs: Set<String>
     @State private var instrumentSearch = ""
     @State private var feedback: String?
 
-    init(model: DashboardModel, strategy: AIStrategyID = .codex) {
+    init(model: DashboardModel) {
         self.model = model
-        self.strategy = strategy
-        let currentConfig = model.aiConfig(for: strategy)
+        let currentConfig = model.aiConfig
         _config = State(initialValue: currentConfig)
         let configured = currentConfig.allowedInstruments
         _selectedInstrumentIDs = State(initialValue: Set(configured.isEmpty ? ["BTC-USDT-SWAP"] : configured))
@@ -447,7 +523,7 @@ struct AISettingsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Label("\(strategy.displayName) 设置", systemImage: "slider.horizontal.3")
+                Label("Codex AI 设置", systemImage: "slider.horizontal.3")
                     .font(.title3.weight(.semibold))
                 Spacer()
                 Button("取消") { dismiss() }
@@ -459,7 +535,7 @@ struct AISettingsSheet: View {
                     HStack {
                         Text("提供方")
                         Spacer()
-                        Text(strategy.providerLabel)
+                        Text("Codex")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -467,6 +543,7 @@ struct AISettingsSheet: View {
                     Picker("运行模式", selection: $config.mode) {
                         Text("关闭").tag(AIRunMode.disabled)
                         Text("观察（只记录）").tag(AIRunMode.shadow)
+                        Text("纸面交易（本地撮合）").tag(AIRunMode.paperActive)
                         Text("模拟盘自动下单").tag(AIRunMode.demoActive)
                         Text("实盘授权").tag(AIRunMode.liveArmed)
                     }
@@ -572,6 +649,16 @@ struct AISettingsSheet: View {
                             .frame(width: 72)
                             .multilineTextAlignment(.trailing)
                     }
+                    HStack {
+                        Text("快照有效期（秒）").frame(width: 150, alignment: .leading)
+                        Spacer()
+                        TextField("90", value: $config.snapshotMaxAgeSeconds, format: .number.precision(.fractionLength(1)))
+                            .frame(width: 90)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Text("范围 5–3600 秒；行情采集与 AI 推理都计入有效期，过期快照不能开仓。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("交易限制") {
@@ -612,6 +699,36 @@ struct AISettingsSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("止损后开仓保护") {
+                    HStack {
+                        Text("同品种止损冷却（秒）")
+                        Spacer()
+                        TextField("14400", value: $config.stopLossCooldownSeconds, format: .number.precision(.fractionLength(0...1)))
+                            .frame(width: 90)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Text("默认 4 小时；设为 0 关闭同品种冷却，最长 7 天。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text("账户止损统计窗口（秒）")
+                        Spacer()
+                        TextField("3600", value: $config.recentStopLossWindowSeconds, format: .number.precision(.fractionLength(0...1)))
+                            .frame(width: 90)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    HStack {
+                        Text("窗口内止损次数上限")
+                        Spacer()
+                        TextField("2", value: $config.recentStopLossLimit, format: .number)
+                            .frame(width: 90)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Text("默认 60 分钟内 2 次止损暂停全部 AI 新开仓；平仓和保护管理仍可执行。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("允许的动作") {
                     Toggle("允许开仓", isOn: $config.allowOpen)
                     Toggle("允许平仓", isOn: $config.allowClose)
@@ -648,19 +765,37 @@ struct AISettingsSheet: View {
             feedback = "至少选择一个固定观察合约。"
             return
         }
-        guard config.cliTimeoutSeconds.isFinite, (10...300).contains(config.cliTimeoutSeconds) else {
-            feedback = "决策超时需为 10 至 300 秒。"
-            return
+        let bounds: [(String, Double, Double, Double)] = [
+            ("最低置信度", config.minimumConfidence, 0, 1),
+            ("决策间隔（秒）", config.decisionIntervalSeconds, 0.1, .greatestFiniteMagnitude),
+            ("决策超时（秒）", config.cliTimeoutSeconds, 0.1, .greatestFiniteMagnitude),
+            ("快照有效期（秒）", config.snapshotMaxAgeSeconds, 5, 3600),
+            ("每日最多开仓单", Double(config.maxDailyOrders), 1, 10000),
+            ("每日最多亏损单", Double(config.maxDailyLosses), 1, 10000),
+            ("单笔保证金（USDT）", config.marginPerOrderUSD, 0.01, 1_000_000),
+            ("最大杠杆", config.maxLeverage, 1, 125),
+            ("同品种止损冷却（秒）", config.stopLossCooldownSeconds, 0, 604800),
+            ("账户止损统计窗口（秒）", config.recentStopLossWindowSeconds, 1, 604800),
+            ("窗口内止损次数上限", Double(config.recentStopLossLimit), 1, 100),
+        ]
+        for (name, value, minimum, maximum) in bounds {
+            guard value.isFinite, value >= minimum, value <= maximum else {
+                let range = maximum == .greatestFiniteMagnitude
+                    ? "至少为 \(minimum.formatted())"
+                    : "在 \(minimum.formatted()) 至 \(maximum.formatted()) 之间"
+                feedback = "\(name)需\(range)。"
+                return
+            }
         }
         let patch = AIPatch(
-            provider: strategy == .deepseek ? .deepseekHarness : .codex,
-            enabled: config.mode == .disabled ? false : model.aiConfig(for: strategy).enabled,
+            provider: .codex,
+            enabled: config.mode == .disabled ? false : model.aiConfig.enabled,
             mode: config.mode,
             allowedInstruments: selectedInstrumentIDs.sorted(),
             minimumConfidence: config.minimumConfidence,
             decisionIntervalSeconds: config.decisionIntervalSeconds,
             cliTimeoutSeconds: config.cliTimeoutSeconds,
-            cooldownSeconds: 0,
+            snapshotMaxAgeSeconds: config.snapshotMaxAgeSeconds,
             allowOpen: config.allowOpen,
             allowClose: config.allowClose,
             allowCancel: config.allowCancel,
@@ -668,11 +803,14 @@ struct AISettingsSheet: View {
             maxDailyOrders: config.maxDailyOrders,
             maxDailyLosses: config.maxDailyLosses,
             marginPerOrderUSD: config.marginPerOrderUSD,
-            maxLeverage: config.maxLeverage
+            maxLeverage: config.maxLeverage,
+            stopLossCooldownSeconds: config.stopLossCooldownSeconds,
+            recentStopLossWindowSeconds: config.recentStopLossWindowSeconds,
+            recentStopLossLimit: config.recentStopLossLimit
         )
         Task {
             do {
-                try await model.updateAI(patch, strategy: strategy)
+                try await model.updateAI(patch)
                 dismiss()
             } catch {
                 feedback = error.localizedDescription
@@ -705,7 +843,7 @@ struct RiskAlertModule: View {
             }
 
             HStack(spacing: 12) {
-                riskMetric("单日损益", value: formatSignedPercent(risk.dailyPnLPercent.doubleValue), color: risk.dailyPnLPercent < 0 ? .red : .green)
+                riskMetric("单日损益", value: risk.dataQuality?.dailyPnLAuthoritative == false ? "待核实" : formatSignedPercent(risk.dailyPnLPercent.doubleValue), color: risk.dataQuality?.dailyPnLAuthoritative == false ? .orange : (risk.dailyPnLPercent < 0 ? .red : .green))
                 riskMetric("累计回撤", value: String(format: "%.2f%%", risk.drawdownPercent.doubleValue), color: .orange)
                 riskMetric("账户权益", value: formatUSD(risk.equity), color: .primary)
             }

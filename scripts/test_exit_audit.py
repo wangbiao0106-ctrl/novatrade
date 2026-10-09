@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 import json
 import sys
 import tempfile
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from backend.exit_audit import sync_native_protection_exits  # noqa: E402
-from backend.order_gateway import InstrumentSpec, OrderGateway  # noqa: E402
+from backend.order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError  # noqa: E402
 
 
 class FakeGateway:
@@ -51,6 +52,72 @@ def history_row(*, instrument: str = "FIL-USDT-SWAP", client: str = "aidecision1
 
 
 class ExitAuditTests(unittest.TestCase):
+    def test_settled_stop_loss_guard_survives_restart_and_keeps_manual_path_open(self):
+        calls: list[dict[str, object]] = []
+
+        async def submit(request: dict[str, object], demo: bool) -> dict[str, object]:
+            calls.append(request)
+            return {"orderID": f"entry-{len(calls)}", "instrumentID": request["instrumentID"]}
+
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "ledger.json"
+                gateway = OrderGateway(path, submit=submit, limits={"minOrderIntervalSeconds": 0})
+                entry = {
+                    "instrumentID": "FIL-USDT-SWAP", "side": "buy", "orderType": "market",
+                    "quantity": 10, "source": "ai", "clientOrderID": "aifilentry1",
+                }
+                await gateway.submit_intent(
+                    entry, demo=True, instrument=InstrumentSpec("FIL-USDT-SWAP", 1), price=1,
+                )
+                await gateway.record_event({
+                    "type": "exit-settled", "actualSide": "sl", "positionOpen": False,
+                    "instrumentID": "FIL-USDT-SWAP", "entryOrderID": "entry-1",
+                    "triggerTime": datetime.now(timezone.utc).isoformat(),
+                }, event_key="oco-demo-sl-1")
+
+                restored = OrderGateway(path, submit=submit, limits={"minOrderIntervalSeconds": 0})
+                with self.assertRaisesRegex(OrderGatewayError, "stop-loss cooldown"):
+                    await restored.submit_intent(
+                        {**entry, "clientOrderID": "aifilentry2"}, demo=True,
+                        instrument=InstrumentSpec("FIL-USDT-SWAP", 1), price=1,
+                    )
+
+                manual = await restored.submit_intent(
+                    {**entry, "source": "manual", "clientOrderID": "manual1"}, demo=True,
+                    instrument=InstrumentSpec("FIL-USDT-SWAP", 1), price=1,
+                )
+                self.assertEqual(manual["orderID"], "entry-2")
+
+        asyncio.run(exercise())
+
+    def test_two_settled_stop_losses_pause_ai_entries_on_other_symbols(self):
+        async def submit(request: dict[str, object], demo: bool) -> dict[str, object]:
+            return {"orderID": "entry-new", "instrumentID": request["instrumentID"]}
+
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                gateway = OrderGateway(
+                    Path(directory) / "ledger.json", submit=submit,
+                    limits={"minOrderIntervalSeconds": 0},
+                )
+                now = datetime.now(timezone.utc)
+                for index, instrument in enumerate(("BTC-USDT-SWAP", "ETH-USDT-SWAP")):
+                    await gateway.record_event({
+                        "type": "exit-settled", "actualSide": "sl", "positionOpen": False,
+                        "instrumentID": instrument,
+                        "triggerTime": (now - timedelta(seconds=10 - index)).isoformat(),
+                    }, event_key=f"oco-demo-sl-{index}")
+
+                with self.assertRaisesRegex(OrderGatewayError, "stop-loss exits"):
+                    await gateway.submit_intent({
+                        "instrumentID": "SOL-USDT-SWAP", "side": "buy", "orderType": "market",
+                        "quantity": 1, "source": "ai", "clientOrderID": "aisolentry1",
+                        "recentStopLossWindowSeconds": 3600, "recentStopLossLimit": 2,
+                    }, demo=True, instrument=InstrumentSpec("SOL-USDT-SWAP", 1), price=1)
+
+        asyncio.run(exercise())
+
     def test_exact_attach_matches_and_positions_history_adds_pnl(self):
         gateway = FakeGateway([{
             "instrumentID": "FIL-USDT-SWAP", "orderID": "entry-1", "clientOrderID": "aidecision123",

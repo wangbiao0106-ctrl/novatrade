@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import os
@@ -119,6 +120,46 @@ class FingerprintTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertNotEqual(baseline, decision_fingerprint(changed, self.config))
 
+    def test_stop_loss_guard_fingerprint_tracks_cooldown_and_burst_expiry(self) -> None:
+        now = datetime.now(timezone.utc)
+
+        def iso(value: datetime) -> str:
+            return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        stop = {"instrumentID": BTC, "closedAt": iso(now - timedelta(minutes=5)), "realizedPnL": -10.0}
+        active = snapshot(account={
+            "authenticated": True, "todayLossCount": 1, "todayAIOrderCount": 1,
+            "pendingOrders": [], "pendingOrdersKnown": True,
+            "reentryCooldowns": {BTC: {
+                "closedAt": stop["closedAt"], "blockedUntil": iso(now + timedelta(hours=1)),
+                "reason": "stop_loss", "realizedPnL": -10.0,
+            }},
+            "recentStopLosses": [stop], "recentStopLossWindowSeconds": 3600,
+            "recentStopLossLimit": 2,
+            "recentStopLossBurstBlockedUntil": iso(now + timedelta(minutes=30)),
+        })
+        expired = snapshot(account={
+            "authenticated": True, "todayLossCount": 1, "todayAIOrderCount": 1,
+            "pendingOrders": [], "pendingOrdersKnown": True,
+            "reentryCooldowns": {BTC: {
+                "closedAt": stop["closedAt"], "blockedUntil": iso(now - timedelta(minutes=1)),
+                "reason": "stop_loss", "realizedPnL": -10.0,
+            }},
+            "recentStopLosses": [stop], "recentStopLossWindowSeconds": 3600,
+            "recentStopLossLimit": 2,
+            "recentStopLossBurstBlockedUntil": iso(now - timedelta(minutes=1)),
+        })
+        self.assertNotEqual(
+            decision_fingerprint(active, self.config),
+            decision_fingerprint(expired, self.config),
+        )
+
+        changed_guard_config = replace(self.config, stopLossCooldownSeconds=30)
+        self.assertNotEqual(
+            decision_fingerprint(snapshot(), self.config),
+            decision_fingerprint(snapshot(), changed_guard_config),
+        )
+
     def test_funding_rate_and_next_funding_bucket_are_decision_events(self) -> None:
         baseline = decision_fingerprint(snapshot(), self.config)
         rate_changed = snapshot(fundingRates={BTC: {
@@ -137,34 +178,24 @@ class FingerprintTests(unittest.TestCase):
             allowOpen=False, maxDailyOrders=1,
         )
         self.assertNotEqual(baseline, decision_fingerprint(snapshot(), changed_config))
-        legacy_cooldown = AIConfig(
-            enabled=True, mode="shadow", allowedInstruments=(BTC,), cooldownSeconds=60,
-        )
-        self.assertEqual(baseline, decision_fingerprint(snapshot(), legacy_cooldown))
+        # Retired configuration keys (cooldownSeconds, escalationModel) are
+        # still accepted for migration but must not change the fingerprint.
+        retired = AIConfig.from_dict({
+            **self.config.to_dict(),
+            "cooldownSeconds": 60, "escalationModel": "gpt-6.1-sol",
+            "escalationReasoningEffort": "medium", "universeMode": "dynamic",
+        })
+        self.assertEqual(baseline, decision_fingerprint(snapshot(), retired))
+        self.assertNotIn("cooldownSeconds", retired.to_dict())
+        self.assertNotIn("escalationModel", retired.to_dict())
+        # A JSON round trip must be fingerprint-neutral: an int/float drift in a
+        # duration default would otherwise force a spurious model evaluation.
+        self.assertEqual(baseline, decision_fingerprint(snapshot(), AIConfig.from_dict(self.config.to_dict())))
 
-        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_MODEL": "deepseek-v4-pro-test"}, clear=False):
-            deepseek_config = AIConfig(
-                enabled=True, mode="shadow", provider="deepseek-harness",
-                allowedInstruments=(BTC,),
-            )
-            self.assertNotEqual(baseline, decision_fingerprint(snapshot(), deepseek_config))
-
-        deepseek_config = AIConfig(
-            enabled=True, mode="shadow", provider="deepseek-harness",
-            allowedInstruments=(BTC,),
-        )
-        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "compact10"}, clear=False):
-            compact = decision_fingerprint(snapshot(), deepseek_config)
-        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "raw"}, clear=False):
-            raw = decision_fingerprint(snapshot(), deepseek_config)
-        self.assertNotEqual(compact, raw)
-
-        codex_config = AIConfig(enabled=True, mode="shadow", provider="codex", allowedInstruments=(BTC,))
-        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "compact10", "NOVATRADE_DEEPSEEK_PROFILE": "stock"}, clear=False):
-            codex_compact = decision_fingerprint(snapshot(), codex_config)
-        with patch.dict(os.environ, {"NOVATRADE_DEEPSEEK_ENCODING": "raw", "NOVATRADE_DEEPSEEK_PROFILE": "optimized"}, clear=False):
-            codex_raw = decision_fingerprint(snapshot(), codex_config)
-        self.assertEqual(codex_compact, codex_raw)
+        changed_model = replace(self.config, routineModel="changed-model")
+        changed_effort = replace(self.config, routineReasoningEffort="low")
+        self.assertNotEqual(baseline, decision_fingerprint(snapshot(), changed_model))
+        self.assertNotEqual(baseline, decision_fingerprint(snapshot(), changed_effort))
 
     def test_managed_and_data_quality_states_are_fail_closed(self) -> None:
         self.assertFalse(managed_state(snapshot()))

@@ -22,6 +22,22 @@ private func decodeAIStatus(_ json: String) throws -> AIStatus {
     return try decoder.decode(AIStatus.self, from: Data(json.utf8))
 }
 
+@Test("Paper-active AI configurations and status remain readable by the client")
+func aiPaperActiveModeRoundTrip() throws {
+    let config = try JSONDecoder().decode(AIConfig.self, from: Data("{\"strategyID\":\"codex\",\"provider\":\"codex\",\"enabled\":true,\"mode\":\"paper-active\"}".utf8))
+    #expect(config.strategyID == .codex)
+    #expect(config.provider == .codex)
+    #expect(config.mode == .paperActive)
+    #expect(config.enabled)
+    let restored = try JSONDecoder().decode(AIConfig.self, from: JSONEncoder().encode(config))
+    #expect(restored == config)
+    let status = try decodeAIStatus("{\"strategyID\":\"codex\",\"provider\":\"codex\",\"enabled\":true,\"mode\":\"paper-active\",\"state\":\"running\"}")
+    #expect(status.strategyID == .codex)
+    #expect(status.provider == .codex)
+    #expect(status.mode == .paperActive)
+    #expect(status.enabled)
+}
+
 @Test("Historical holds without a recorded scope do not inherit the current observation pool")
 func aiStatusHistoricalHoldScope() throws {
     let status = try decodeAIStatus("""

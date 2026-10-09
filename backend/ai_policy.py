@@ -8,9 +8,9 @@ import math
 from typing import Any, Iterable
 
 try:
-    from .ai_schema import AIDecision, AIConfig, AISnapshot, SchemaError
+    from .ai_schema import ACCOUNT_DAILY_LOSS_PERCENT, AIDecision, AIConfig, AISnapshot, SchemaError
 except ImportError:  # bundled backend modules are launched as scripts
-    from ai_schema import AIDecision, AIConfig, AISnapshot, SchemaError
+    from ai_schema import ACCOUNT_DAILY_LOSS_PERCENT, AIDecision, AIConfig, AISnapshot, SchemaError
 
 
 class PolicyError(ValueError):
@@ -19,11 +19,15 @@ class PolicyError(ValueError):
 
 MIN_OPEN_WIN_RATE = 0.45
 MIN_OPEN_RISK_REWARD_RATIO = 2.0
+# Both the model prompt and the execution layer must quote these numbers, so
+# they are public and imported instead of re-typed. MIN_EXIT_REASON_LENGTH is
+# shared by the policy check, the order-execution recheck and the prompt.
+MIN_EXIT_REASON_LENGTH = 8
+MIN_PROTECTION_REPLACEMENT_CONFIDENCE = 0.80
 _OPEN_CANDLE_INTERVALS = ("5m", "15m", "1H", "4H")
 _ACTIVE_PENDING_ORDER_STATES = {"live", "partially_filled", "waiting", "pending", "open", "queued"}
 _TERMINAL_ORDER_STATES = {"filled", "canceled", "cancelled", "rejected", "failed", "expired", "mmp_canceled"}
 _EXIT_REASON_CODES = {"THESIS_INVALIDATED", "ORDER_MISTAKE"}
-_MIN_EXIT_REASON_LENGTH = 8
 
 
 def _exposure_quantity(row: dict[str, Any], keys: tuple[str, ...]) -> float | None:
@@ -39,10 +43,120 @@ def _exposure_quantity(row: dict[str, Any], keys: tuple[str, ...]) -> float | No
     return None
 
 
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _future_timestamp(value: Any) -> bool:
+    parsed = _parse_timestamp(value)
+    return parsed is not None and parsed > datetime.now(timezone.utc)
+
+
+def _entry_reentry_guard_error(account: dict[str, Any], instrument_id: str) -> str | None:
+    """Read optional durable stop-loss gates from a current account snapshot."""
+    metadata_keys = {
+        "reentryCooldowns", "recentStopLosses", "recentStopLossWindowSeconds",
+        "recentStopLossLimit", "recentStopLossBurstBlockedUntil", "reentryGuardAvailable",
+    }
+    if not metadata_keys.intersection(account):
+        return None
+    if account.get("reentryGuardAvailable") is False:
+        return "stop-loss history is unavailable"
+    cooldowns = account.get("reentryCooldowns")
+    if not isinstance(cooldowns, dict):
+        return "re-entry cooldown state is unavailable"
+    for key, item in cooldowns.items():
+        if not isinstance(key, str) or not key.strip() or not isinstance(item, dict):
+            return "re-entry cooldown state is unavailable"
+        closed_at = _parse_timestamp(item.get("closedAt"))
+        blocked_at = _parse_timestamp(item.get("blockedUntil"))
+        if closed_at is None or blocked_at is None or blocked_at < closed_at:
+            return "re-entry cooldown state is unavailable"
+        if item.get("reason") not in (None, "stop_loss"):
+            return "re-entry cooldown state is unavailable"
+        if "realizedPnL" in item:
+            try:
+                realized_pnl = float(item["realizedPnL"])
+            except (TypeError, ValueError):
+                return "re-entry cooldown state is unavailable"
+            if not math.isfinite(realized_pnl):
+                return "re-entry cooldown state is unavailable"
+    row = cooldowns.get(instrument_id)
+    if row is not None:
+        if not isinstance(row, dict):
+            return "re-entry cooldown state is unavailable"
+        if _future_timestamp(row.get("blockedUntil")):
+            return f"{instrument_id} is in a stop-loss re-entry cooldown"
+    recent = account.get("recentStopLosses")
+    limit = account.get("recentStopLossLimit")
+    if not isinstance(recent, list) or isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        return "recent stop-loss risk state is unavailable"
+    window: float | None = None
+    if "recentStopLossWindowSeconds" in account:
+        raw_window = account.get("recentStopLossWindowSeconds")
+        if isinstance(raw_window, bool) or not isinstance(raw_window, (int, float)):
+            return "recent stop-loss risk state is unavailable"
+        window = float(raw_window)
+        if not math.isfinite(window) or window <= 0:
+            return "recent stop-loss risk state is unavailable"
+    recent_times: list[datetime] = []
+    for item in recent:
+        if not isinstance(item, dict) or not isinstance(item.get("instrumentID"), str) or not item.get("instrumentID", "").strip():
+            return "recent stop-loss risk state is unavailable"
+        closed_at = _parse_timestamp(item.get("closedAt"))
+        if closed_at is None or closed_at > datetime.now(timezone.utc):
+            return "recent stop-loss risk state is unavailable"
+        recent_times.append(closed_at)
+        if "realizedPnL" in item:
+            try:
+                realized_pnl = float(item["realizedPnL"])
+            except (TypeError, ValueError):
+                return "recent stop-loss risk state is unavailable"
+            if not math.isfinite(realized_pnl):
+                return "recent stop-loss risk state is unavailable"
+    blocked_until = account.get("recentStopLossBurstBlockedUntil")
+    if blocked_until is not None and _parse_timestamp(blocked_until) is None:
+        return "recent stop-loss risk state is unavailable"
+    now = datetime.now(timezone.utc)
+    if window is None:
+        active_recent_count = len(recent)
+    else:
+        active_recent_count = sum(
+            1 for closed_at in recent_times
+            if (now - closed_at).total_seconds() <= window
+        )
+    burst_active = _future_timestamp(blocked_until)
+    # A future burst marker is only coherent when the configured number of
+    # recent exits is present. Treat an inconsistent marker as untrusted.
+    if burst_active and active_recent_count < limit:
+        return "recent stop-loss risk state is unavailable"
+    if active_recent_count >= limit and blocked_until is None:
+        # The paper/live projections omit the marker once the window has
+        # expired. If a window is available, derive that expiry from the
+        # durable exit timestamps; otherwise there is no safe way to tell an
+        # expired gate from a truncated payload.
+        if window is None:
+            return "recent stop-loss risk state is unavailable"
+        oldest = min((stamp for stamp in recent_times if (now - stamp).total_seconds() <= window), default=None)
+        if oldest is not None and (oldest + timedelta(seconds=window)) > now:
+            return "recent stop-loss risk state is unavailable"
+    if active_recent_count >= limit and burst_active:
+        return "AI entries are paused after a recent stop-loss burst"
+    return None
+
+
 def entry_exposure_error(account: dict[str, Any], instrument_id: str) -> str | None:
     """Reject a new AI entry while this contract already has exposure.
 
-    Positions and active orders are exchange-owned facts. Missing fields on a
+    Positions and active orders are server-owned facts. Missing fields on a
     matching row are treated as unknown so a malformed account response cannot
     silently authorize a duplicate order.
     """
@@ -84,7 +198,7 @@ def entry_exposure_error(account: dict[str, Any], instrument_id: str) -> str | N
             return f"{instrument_id} pending order state is unavailable"
         if quantity > 0:
             return f"{instrument_id} already has a pending order; evaluate cancel before opening"
-    return None
+    return _entry_reentry_guard_error(account, instrument_id)
 
 
 def _is_current_snapshot(snapshot: AISnapshot) -> bool:
@@ -142,6 +256,12 @@ def _open_snapshot_gate(snapshot: AISnapshot, instrument_id: str) -> str | None:
     risk_quality = risk.get("dataQuality")
     if not isinstance(risk_quality, dict):
         return "risk data quality is unavailable"
+    ai = snapshot.ai if isinstance(snapshot.ai, dict) else {}
+    if ai.get("tradingMode") == "paper":
+        if account.get("mode") != "paper" or account.get("profile") != "local-paper":
+            return "local paper account data is unavailable"
+        if risk_quality.get("equitySource") != "paper":
+            return "local paper risk equity is unavailable"
     if risk_quality.get("accountRefreshError") or risk_quality.get("accountRefreshRetryable"):
         return "risk account refresh is unavailable"
     if not isinstance(risk.get("killSwitch"), bool):
@@ -149,10 +269,9 @@ def _open_snapshot_gate(snapshot: AISnapshot, instrument_id: str) -> str | None:
     daily_pnl = risk.get("dailyPnLPercent")
     if isinstance(daily_pnl, bool) or not isinstance(daily_pnl, (int, float)) or not math.isfinite(float(daily_pnl)):
         return "risk daily PnL is unavailable"
-    if risk.get("killSwitch") or float(daily_pnl) <= -5:
+    if risk.get("killSwitch") or float(daily_pnl) <= -ACCOUNT_DAILY_LOSS_PERCENT:
         return "risk kill switch is active"
 
-    ai = snapshot.ai if isinstance(snapshot.ai, dict) else {}
     availability = ai.get("tradingAvailability")
     item = availability.get(instrument_id) if isinstance(availability, dict) else None
     if not isinstance(item, dict) or item.get("available") is not True:
@@ -349,8 +468,8 @@ def _validate_exit_reason(snapshot: AISnapshot, decision: AIDecision) -> str | N
         return None
     if decision.reasonCode not in _EXIT_REASON_CODES:
         return "current exit requires reasonCode THESIS_INVALIDATED or ORDER_MISTAKE"
-    if len(decision.reason.strip()) < _MIN_EXIT_REASON_LENGTH:
-        return f"current exit reason must be at least {_MIN_EXIT_REASON_LENGTH} characters"
+    if len(decision.reason.strip()) < MIN_EXIT_REASON_LENGTH:
+        return f"current exit reason must be at least {MIN_EXIT_REASON_LENGTH} characters"
     return None
 
 
@@ -479,6 +598,11 @@ def validate_decision(
 
     if not parsed_config.enabled or parsed_config.mode in {"disabled", "halted"}:
         return reject("AI worker is disabled", parsed_snapshot.snapshotId)
+    snapshot_ai = parsed_snapshot.ai if isinstance(parsed_snapshot.ai, dict) else {}
+    trading_mode = snapshot_ai.get("tradingMode")
+    expected_mode = {"paper-active": "paper", "demo-active": "demo", "live-armed": "live"}.get(parsed_config.mode)
+    if "tradingMode" in snapshot_ai and expected_mode is not None and trading_mode != expected_mode:
+        return reject(f"AI mode {parsed_config.mode} requires tradingMode {expected_mode}", parsed_snapshot.snapshotId)
     if parsed_decision.snapshotId != parsed_snapshot.snapshotId:
         return reject("decision snapshotId does not match current snapshot", parsed_snapshot.snapshotId)
     if parsed_decision.assessments:
@@ -638,9 +762,9 @@ def validate_decision(
             return reject("riskRewardRatio must be >= 2.0 for open actions", parsed_snapshot.snapshotId)
         if parsed_decision.leverage is None or parsed_decision.leverage < 1 or parsed_decision.leverage > parsed_config.maxLeverage:
             return reject(f"leverage must be between 1 and maxLeverage ({parsed_config.maxLeverage:g}) for open actions", parsed_snapshot.snapshotId)
-        # The account snapshot is server-generated. When a private account is
-        # available it carries today's realized losing-trade count from OKX
-        # bills; reaching the configured cap blocks only new entries.
+        # The account snapshot carries today's realized losing-trade count
+        # from the selected account ledger; reaching the configured cap
+        # blocks only new entries.
         loss_count = parsed_snapshot.account.get("todayLossCount") if isinstance(parsed_snapshot.account, dict) else None
         if loss_count is None:
             return reject("todayLossCount is unavailable", parsed_snapshot.snapshotId)

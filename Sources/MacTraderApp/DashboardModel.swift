@@ -34,13 +34,6 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var aiStatus = AIStatus()
     @Published private(set) var aiDecisions: [AIAuditRecord] = []
     @Published private(set) var aiAudit: [AIAuditRecord] = []
-    /// Configurations and runtime streams keyed by their server strategy ID.
-    /// The singular Codex properties above remain as source compatibility for
-    /// existing views and older local services.
-    @Published private(set) var aiConfigs: [AIStrategyID: AIConfig] = [:]
-    @Published private(set) var aiStatuses: [AIStrategyID: AIStatus] = [:]
-    @Published private(set) var aiDecisionsByStrategy: [AIStrategyID: [AIAuditRecord]] = [:]
-    @Published private(set) var aiAuditByStrategy: [AIStrategyID: [AIAuditRecord]] = [:]
     @Published private(set) var isUpdatingAI = false
 
     /// Contracts actually included in the latest AI market snapshot. The
@@ -48,25 +41,6 @@ final class DashboardModel: ObservableObject {
     /// allowlist that was sent to the worker.
     var aiObservedInstruments: [String] { aiStatus.observedInstruments }
     var aiObservationUpdatedAt: Date? { aiStatus.observationUpdatedAt }
-
-    func aiConfig(for strategy: AIStrategyID) -> AIConfig {
-        if let config = aiConfigs[strategy] { return config }
-        if strategy == .codex { return aiConfig }
-        return AIConfig(strategyID: strategy, provider: strategy == .deepseek ? .deepseekHarness : .codex)
-    }
-
-    func aiStatus(for strategy: AIStrategyID) -> AIStatus {
-        if let status = aiStatuses[strategy] { return status }
-        return strategy == .codex ? aiStatus : AIStatus(strategyID: strategy, provider: .deepseekHarness)
-    }
-
-    func aiDecisions(for strategy: AIStrategyID) -> [AIAuditRecord] {
-        strategy == .codex ? aiDecisions : (aiDecisionsByStrategy[strategy] ?? [])
-    }
-
-    func aiAudit(for strategy: AIStrategyID) -> [AIAuditRecord] {
-        strategy == .codex ? aiAudit : (aiAuditByStrategy[strategy] ?? [])
-    }
 
     private let client = TradingServiceClient()
     private let serviceProcess = LocalServiceProcess()
@@ -333,6 +307,12 @@ final class DashboardModel: ObservableObject {
     /// Positions, orders and fills live on the OKX account (demo or live), so
     /// they change without any action from this app and must be re-read.
     private func refreshTradingActivity() async {
+        // Account equity also changes when a paper position is marked or a
+        // fill realizes PnL. Keep the top account summary in sync with the
+        // same polling cycle as positions and fills.
+        if let account = try? await client.account() {
+            accountOverview = account
+        }
         livePositions = (try? await client.privatePositions()) ?? livePositions
         liveOrders = (try? await client.privateOrders()) ?? liveOrders
         orders = (try? await client.paperOrders()) ?? orders
@@ -350,116 +330,66 @@ final class DashboardModel: ObservableObject {
         guard serviceState == .running else { return }
         if let config = try? await client.aiConfig() {
             aiConfig = config
-            aiConfigs[.codex] = config
         }
         if let status = try? await client.aiStatus() {
             aiStatus = status
-            aiStatuses[.codex] = status
         }
         if let decisions = try? await client.aiDecisions() {
             aiDecisions = decisions
-            aiDecisionsByStrategy[.codex] = decisions
         }
         if let audit = try? await client.aiAudit() {
             aiAudit = audit
-            aiAuditByStrategy[.codex] = audit
-        }
-        // A service predating multi-strategy support simply returns an error
-        // for these calls; preserve the Codex dashboard in that case.
-        if let config = try? await client.aiConfig(strategy: .deepseek) {
-            aiConfigs[.deepseek] = config
-        }
-        if let status = try? await client.aiStatus(strategy: .deepseek) {
-            aiStatuses[.deepseek] = status
-        }
-        if let decisions = try? await client.aiDecisions(strategy: .deepseek) {
-            aiDecisionsByStrategy[.deepseek] = decisions
-        }
-        if let audit = try? await client.aiAudit(strategy: .deepseek) {
-            aiAuditByStrategy[.deepseek] = audit
         }
     }
 
     func updateAI(_ patch: AIPatch) async throws {
-        try await updateAI(patch, strategy: .codex)
-    }
-
-    func updateAI(_ patch: AIPatch, strategy: AIStrategyID) async throws {
         guard !isUpdatingAI else { return }
         isUpdatingAI = true
         defer { isUpdatingAI = false }
-        let config = try await client.updateAIConfig(patch, strategy: strategy)
-        aiConfigs[strategy] = config
-        if strategy == .codex { aiConfig = config }
-        if let status = try? await client.aiStatus(strategy: strategy) {
-            aiStatuses[strategy] = status
-            if strategy == .codex { aiStatus = status }
+        aiConfig = try await client.updateAIConfig(patch)
+        if let status = try? await client.aiStatus() {
+            aiStatus = status
         }
     }
 
     func enableAI() async throws {
-        try await enableAI(strategy: .codex)
-    }
-
-    func enableAI(strategy: AIStrategyID) async throws {
         guard !isUpdatingAI else { return }
         isUpdatingAI = true
         defer { isUpdatingAI = false }
-        let status = try await client.enableAI(strategy: strategy)
-        aiStatuses[strategy] = status
-        if strategy == .codex { aiStatus = status }
-        if let config = try? await client.aiConfig(strategy: strategy) {
-            aiConfigs[strategy] = config
-            if strategy == .codex { aiConfig = config }
+        aiStatus = try await client.enableAI()
+        if let config = try? await client.aiConfig() {
+            aiConfig = config
         }
     }
 
     func disableAI() async throws {
-        try await disableAI(strategy: .codex)
-    }
-
-    func disableAI(strategy: AIStrategyID) async throws {
         guard !isUpdatingAI else { return }
         isUpdatingAI = true
         defer { isUpdatingAI = false }
-        let status = try await client.disableAI(strategy: strategy)
-        aiStatuses[strategy] = status
-        if strategy == .codex { aiStatus = status }
-        if let config = try? await client.aiConfig(strategy: strategy) {
-            aiConfigs[strategy] = config
-            if strategy == .codex { aiConfig = config }
+        aiStatus = try await client.disableAI()
+        if let config = try? await client.aiConfig() {
+            aiConfig = config
         }
     }
 
     func flattenAI() async throws {
-        try await flattenAI(strategy: .codex)
-    }
-
-    func flattenAI(strategy: AIStrategyID) async throws {
         guard !isUpdatingAI else { return }
         isUpdatingAI = true
         defer { isUpdatingAI = false }
-        _ = try await client.flattenAI(strategy: strategy)
-        if let status = try? await client.aiStatus(strategy: strategy) {
-            aiStatuses[strategy] = status
-            if strategy == .codex { aiStatus = status }
+        _ = try await client.flattenAI()
+        if let status = try? await client.aiStatus() {
+            aiStatus = status
         }
         await refreshTradingActivity()
     }
 
     func chatAI(message: String, apply: Bool = false, suggestion: AIPatch? = nil) async throws -> AIChatResponse {
-        try await chatAI(strategy: .codex, message: message, apply: apply, suggestion: suggestion)
-    }
-
-    func chatAI(strategy: AIStrategyID, message: String, apply: Bool = false, suggestion: AIPatch? = nil) async throws -> AIChatResponse {
-        let response = try await client.chatAI(strategy: strategy, message: message, apply: apply, suggestion: suggestion)
+        let response = try await client.chatAI(message: message, apply: apply, suggestion: suggestion)
         if let config = response.config {
-            aiConfigs[strategy] = config
-            if strategy == .codex { aiConfig = config }
+            aiConfig = config
         }
-        if response.applied, let status = try? await client.aiStatus(strategy: strategy) {
-            aiStatuses[strategy] = status
-            if strategy == .codex { aiStatus = status }
+        if response.applied, let status = try? await client.aiStatus() {
+            aiStatus = status
         }
         return response
     }

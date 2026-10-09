@@ -33,8 +33,13 @@ from typing import Any, Protocol
 try:
     from .ai_market_facts import market_facts
     from .ai_trigger import decision_fingerprint, managed_state, structure_identity, trigger_reason
-    from .deepseek_harness import DeepSeekHarnessError, DeepSeekHarnessRunner as DeepSeekACP
-    from .ai_policy import MIN_OPEN_WIN_RATE, MIN_OPEN_RISK_REWARD_RATIO, PolicyResult, PolicyState, record_decision, snapshot_freshness, validate_decision
+    from .ai_policy import (
+        MIN_EXIT_REASON_LENGTH,
+        MIN_OPEN_RISK_REWARD_RATIO,
+        MIN_OPEN_WIN_RATE,
+        MIN_PROTECTION_REPLACEMENT_CONFIDENCE,
+        PolicyResult, PolicyState, record_decision, snapshot_freshness, validate_decision,
+    )
     from .ai_schema import (
         AIDecision, AIChatResponse, AIConfig, AISnapshot, AIStatus, SchemaError,
         DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
@@ -45,8 +50,13 @@ try:
 except ImportError:  # launched from bundled backend/main.py as a script
     from ai_market_facts import market_facts
     from ai_trigger import decision_fingerprint, managed_state, structure_identity, trigger_reason
-    from deepseek_harness import DeepSeekHarnessError, DeepSeekHarnessRunner as DeepSeekACP
-    from ai_policy import MIN_OPEN_WIN_RATE, MIN_OPEN_RISK_REWARD_RATIO, PolicyResult, PolicyState, record_decision, snapshot_freshness, validate_decision
+    from ai_policy import (
+        MIN_EXIT_REASON_LENGTH,
+        MIN_OPEN_RISK_REWARD_RATIO,
+        MIN_OPEN_WIN_RATE,
+        MIN_PROTECTION_REPLACEMENT_CONFIDENCE,
+        PolicyResult, PolicyState, record_decision, snapshot_freshness, validate_decision,
+    )
     from ai_schema import (
         AIDecision, AIChatResponse, AIConfig, AISnapshot, AIStatus, SchemaError,
         DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
@@ -71,10 +81,21 @@ class CodexError(RuntimeError):
 
 _AUTOMATIC_MODELS = frozenset({FIXED_AI_MODEL})
 _AUTOMATIC_REASONING = frozenset({FIXED_AI_REASONING_EFFORT})
+# The prompt cap is deliberately not the CLI output cap: maxOutputBytes
+# truncates the provider's stdout/stderr, while this bounds the request we are
+# willing to send. Raising the output cap must not raise the prompt budget.
 _MAX_DECISION_PROMPT_BYTES = 1_000_000
+# A grouped cycle runs an analysis phase and a coordinator phase. The analysis
+# phase keeps this share of the remaining budget so a slow analysis can never
+# starve the coordinator that actually produces the decision.
+_GROUPED_ANALYSIS_BUDGET_SHARE = 0.6
+# A phase needs a usable slice of time even when the snapshot has already
+# expired: management actions (close/cancel/protection) do not require a fresh
+# snapshot, and a zero-length phase would turn a stale snapshot into a
+# consecutive-failure halt.
+_MIN_PIPELINE_BUDGET_SHARE = 0.5
 
-# The analysis and coordinator prompts share one policy contract. Provider
-# specific prompts only add routing, encoding, and workflow context around it.
+# The analysis and coordinator prompts share one policy contract.
 _SHARED_POLICY_RULES = (
     "DECISION POLICY (follow these four groups in order):\n"
     "1. DATA CONTRACT AND QUALITY: Preserve the fixed observed contract pool and maintain exactly one assessment per contract. "
@@ -95,17 +116,52 @@ _SHARED_POLICY_RULES = (
     "A position or pending order blocks replacement open for that contract; it does not block protection review or a justified exit. "
     "Close only for materially invalidated market evidence or ORDER_MISTAKE, using the actual position direction. "
     "Cancel only for materially changed setup or ORDER_MISTAKE, using the real current order ID. "
-    "For close/cancel use reasonCode=THESIS_INVALIDATED or ORDER_MISTAKE and at least 8 characters of concrete evidence in reason. "
+    f"For close/cancel use reasonCode=THESIS_INVALIDATED or ORDER_MISTAKE and at least {MIN_EXIT_REASON_LENGTH} characters of concrete evidence in reason. "
     "Do not use routine duplicate replacement as an exit reason.\n"
     "4. PROTECTION AND STAGED TAKE-PROFIT: For every current position compare the latest assessment with existing protection. "
     "Restore missing stop-loss/take-profit protection. Staged takeProfitLevels may split profit-taking, must sum to 100%, use unique "
     "prices in the profitable direction, and keep a valid stop for the remaining position. "
-    "Adjust an existing protection line only with high confidence (server threshold 0.80) and clear material thesis change; ordinary "
+    f"Adjust an existing protection line only with high confidence (server threshold {MIN_PROTECTION_REPLACEMENT_CONFIDENCE:.2f}) and clear material thesis change; ordinary "
     "noise must not move it.\n"
     "OUTPUT: Return strict JSON matching the schema, with UTC whole-second validUntil and concise Simplified Chinese reasons. "
     "SERVER FRESHNESS is authoritative: use its evaluatedAt, ageSeconds and isStale values; do not guess the current time or claim a valid fresh snapshot is expired. "
     "Unknown account, risk, freshness, or order state is never zero or safe by assumption; the server policy is authoritative.\n"
 )
+
+
+def _freshness_bounded_budget(snapshot: AISnapshot, config: AIConfig, ceiling: float) -> float:
+    """Return the model budget for one cycle, bounded by snapshot freshness.
+
+    Entry admission requires a snapshot younger than ``maxAgeSeconds``, so a
+    call that runs past that window can only ever return management actions.
+    The budget is therefore ``min(ceiling, max(remaining_age, floor))`` where
+    the floor is half the CLI allowance: an already-expired snapshot still gets
+    a usable slice for close/cancel/protection instead of collapsing to a
+    zero-length phase. When the CLI allowance is more than twice the window the
+    floor therefore exceeds the window, which is the operator's explicit choice
+    of latency over entry frequency; when the server supplies no usable
+    freshness metadata, the ceiling alone applies.
+    """
+    freshness = snapshot_freshness(snapshot, config)
+    if not freshness.get("valid"):
+        return ceiling
+    max_age = freshness.get("maxAgeSeconds")
+    if isinstance(max_age, bool) or not isinstance(max_age, (int, float)) or not math.isfinite(float(max_age)) or max_age <= 0:
+        return ceiling
+    age = freshness.get("ageSeconds")
+    remaining = float(max_age) - (float(age) if isinstance(age, (int, float)) and not isinstance(age, bool) else 0.0)
+    usable = max(remaining, config.cliTimeoutSeconds * _MIN_PIPELINE_BUDGET_SHARE)
+    return min(ceiling, usable)
+
+
+def _grouped_pipeline_budget_seconds(snapshot: AISnapshot, config: AIConfig) -> float:
+    """Total two-phase grouped budget, bounded by the snapshot admission window.
+
+    Without the bound, ``2 * cliTimeoutSeconds`` of work against a snapshot that
+    expires after ``maxAgeSeconds`` makes every grouped ``open`` structurally
+    unreachable.
+    """
+    return _freshness_bounded_budget(snapshot, config, 2 * config.cliTimeoutSeconds)
 
 
 def _event_driven_enabled() -> bool:
@@ -131,12 +187,12 @@ def _prompt_snapshot(snapshot: AISnapshot, *, encoding: str | None = None) -> di
     """Encode the model snapshot, optionally selecting a shorter candle window.
 
     The runtime/audit snapshot is unchanged. Repeated candle field names are
-    removed only from the model prompt in the default compact mode; all fields
-    and all row values remain present. ``compact20``/``compact10`` are explicit
-    experimental window modes and retain the latest forming row. Heterogeneous
-    objects stay objects to preserve absent-vs-null.
+    removed only from the model prompt in compact modes; all fields and all row
+    values remain present in the runtime snapshot. Windowed modes retain the
+    latest forming row. Heterogeneous objects stay objects to preserve
+    absent-vs-null.
     """
-    selected_encoding = (encoding or os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60")).strip().lower()
+    selected_encoding = (encoding or "compact60").strip().lower()
     result = snapshot.to_dict()
     for key, rows in result["candles"].items():
         if not rows:
@@ -536,8 +592,12 @@ class CodexRunner:
         semaphore = asyncio.Semaphore(4)
         clock = asyncio.get_running_loop()
         analysis_started = clock.time()
-        analysis_deadline = min(analysis_started + config.cliTimeoutSeconds, deadline)
-        self.last_run_metadata.update(stage="analysis", groupCount=len(groups), completedGroups=0)
+        analysis_budget = min(config.cliTimeoutSeconds, max(0.0, deadline - analysis_started) * _GROUPED_ANALYSIS_BUDGET_SHARE)
+        analysis_deadline = analysis_started + analysis_budget
+        self.last_run_metadata.update(
+            stage="analysis", groupCount=len(groups), completedGroups=0,
+            analysisBudgetSeconds=round(analysis_budget, 3),
+        )
 
         async def analyze(instruments: list[str]) -> AIDecision:
             async with semaphore:
@@ -545,7 +605,8 @@ class CodexRunner:
                 decision = await self._run_single(
                     group, config, deadline=analysis_deadline,
                     prompt="This is an independent analysis group. Its tentative action is NOT an execution authorization; "
-                           "the final coordinator will review the complete observation pool.\n" + self._decision_prompt(group, config),
+                           "the final coordinator will review the complete observation pool.\n"
+                           + self._decision_prompt(group, config, encoding="compact20"),
                 )
                 self.last_run_metadata["completedGroups"] += 1
                 return decision
@@ -575,9 +636,13 @@ class CodexRunner:
             schema = decision_json_schema(snapshot.snapshotId, observed)
             del schema["properties"]["assessments"]
             schema["required"].remove("assessments")
-            self.last_run_metadata.update(stage="coordinator", assessmentCount=len(assessments))
             coordinator_started = clock.time()
-            coordinator_deadline = min(coordinator_started + config.cliTimeoutSeconds, deadline)
+            coordinator_budget = min(config.cliTimeoutSeconds, max(0.0, deadline - coordinator_started))
+            coordinator_deadline = coordinator_started + coordinator_budget
+            self.last_run_metadata.update(
+                stage="coordinator", assessmentCount=len(assessments),
+                coordinatorBudgetSeconds=round(coordinator_budget, 3),
+            )
             try:
                 raw = await asyncio.wait_for(
                     self._run_prompt(self._coordinator_prompt(snapshot, config, decisions), schema, config, deadline=coordinator_deadline),
@@ -615,26 +680,41 @@ class CodexRunner:
         clock = asyncio.get_running_loop()
         started = clock.time()
         grouped = len(snapshot.observed_instruments()) > 4
+        pipeline_budget = (
+            _grouped_pipeline_budget_seconds(snapshot, config) if grouped
+            else _freshness_bounded_budget(snapshot, config, config.cliTimeoutSeconds)
+        )
         self.last_run_metadata = {
             "workflow": "grouped" if grouped else "single", "stage": "starting",
             "observedCount": len(snapshot.observed_instruments()), "groupCount": 0,
             "completedGroups": 0, "assessmentCount": 0,
+            # Configured per-CLI ceilings.
             "analysisTimeoutSeconds": config.cliTimeoutSeconds,
             "coordinatorTimeoutSeconds": config.cliTimeoutSeconds if grouped else 0,
+            # The budget actually available to the whole grouped pipeline after
+            # the snapshot admission window is taken into account.
+            "pipelineBudgetSeconds": round(pipeline_budget, 3),
         }
         try:
             # Preserve the whole-pool budget guard before ANY CLI starts.
-            prompt = self._decision_prompt(snapshot, config)
+            # Grouped analysis already divides the observation pool into
+            # several model calls. Keep those calls small enough to finish
+            # within the shared phase deadline; SERVER MARKET FACTS still use
+            # the complete collected candle history.
+            prompt = self._decision_prompt(snapshot, config, encoding="compact20" if grouped else "compact60")
             self._check_prompt_budget(prompt)
             if not grouped:
                 self.last_run_metadata.update(stage="analysis", groupCount=1)
-                decision = await self._run_single(snapshot, config, prompt=prompt, deadline=started + config.cliTimeoutSeconds)
+                decision = await self._run_single(snapshot, config, prompt=prompt, deadline=started + pipeline_budget)
                 self.last_run_metadata.update(completedGroups=1, assessmentCount=len(decision.assessments), analysisDurationSeconds=round(clock.time() - started, 3))
             else:
-                # cliTimeoutSeconds remains a per-CLI ceiling. Parallel group
-                # analysis shares one such phase; the final CLI has its own
-                # phase. Neither snapshot nor order freshness is extended.
-                decision = await self._run_grouped(snapshot, config, deadline=started + 2 * config.cliTimeoutSeconds)
+                # cliTimeoutSeconds remains a per-CLI ceiling. The two phases
+                # share pipelineBudgetSeconds, which never exceeds the snapshot
+                # admission window: a decision produced after that window could
+                # not authorize an entry, so spending longer than the window
+                # would only consume provider budget. Order and snapshot
+                # freshness are never extended by this budget.
+                decision = await self._run_grouped(snapshot, config, deadline=started + pipeline_budget)
             self.last_run_metadata["stage"] = "complete"
             return decision
         except asyncio.CancelledError:
@@ -669,27 +749,24 @@ class CodexRunner:
         }
 
     @staticmethod
-    def _decision_prompt(snapshot: AISnapshot, config: AIConfig, *, now: datetime | None = None) -> str:
+    def _decision_prompt(
+        snapshot: AISnapshot,
+        config: AIConfig,
+        *,
+        now: datetime | None = None,
+        encoding: str = "compact60",
+    ) -> str:
         freshness = snapshot_freshness(snapshot, config, now=now)
         entry_gates = CodexRunner._entry_gates(snapshot, config)
-        # The compact candle experiment belongs only to the DeepSeek route.
-        # A DeepSeek tuning environment variable must never silently alter the
-        # GPT/Codex prompt or its event semantics.
-        encoding = (
-            os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60")
-            if config.provider == "deepseek-harness" else "compact60"
-        ).strip().lower()
-        if encoding == "raw":
-            candle_encoding_note = (
-                "SNAPSHOT candle series are raw object arrays in ascending order; every supplied row and field is present. "
-            )
-        elif encoding in {"compact20", "compact10"}:
-            limit = 20 if encoding == "compact20" else 10
+        selected_encoding = (encoding or "compact60").strip().lower()
+        if selected_encoding in {"compact20", "compact10"}:
+            limit = 20 if selected_encoding == "compact20" else 10
             candle_encoding_note = (
                 f"SNAPSHOT candle series contain the latest {limit} confirmed rows plus the latest forming row when present; "
                 "the local SERVER MARKET FACTS still use the complete collected history. "
             )
         else:
+            selected_encoding = "compact60"
             candle_encoding_note = (
                 "SNAPSHOT candle series may be encoded as {columns:[field names],rows:[[values]]}; every supplied row, "
                 "field, precision and type is preserved. "
@@ -713,7 +790,7 @@ class CodexRunner:
             "OBSERVED CONTRACTS (complete assessment coverage required):\n" + json.dumps(snapshot.observed_instruments(), ensure_ascii=False, separators=(",", ":")) + "\n"
             "COPY EXACT SNAPSHOT ID:\n" + snapshot.snapshotId + "\n"
             "SERVER MARKET FACTS:\n" + dumps(market_facts(snapshot)) + "\n"
-            "SNAPSHOT:\n" + dumps(_prompt_snapshot(snapshot, encoding=encoding)) + "\n"
+            "SNAPSHOT:\n" + dumps(_prompt_snapshot(snapshot, encoding=selected_encoding)) + "\n"
         )
 
     async def invoke(self, snapshot: AISnapshot, config: AIConfig) -> AIDecision:
@@ -779,93 +856,6 @@ class CodexRunner:
                 raise CodexError(str(error)) from error
 
 
-class DeepSeekHarnessRunner(CodexRunner):
-    """Use the shared ACP adapter while retaining Codex's decision workflow."""
-
-    provider_label = "DeepSeek Harness"
-
-    def __init__(self, executable: list[str] | str | None = None) -> None:
-        self.adapter = DeepSeekACP(executable=executable)
-        self.last_run_metadata: dict[str, Any] = {}
-
-    def _merge_adapter_metadata(self) -> None:
-        """Merge provider telemetry into the workflow metadata in place.
-
-        ``CodexRunner.run`` publishes the workflow fields (stage, group counts,
-        phase durations) on this dict before any provider call starts. Replacing
-        the dict with the adapter's telemetry made a later read of a workflow
-        field raise ``KeyError``, which replaced the real provider failure with
-        ``'stage'`` in the strategy log; provider telemetry is merged instead.
-        """
-        metadata = getattr(self.adapter, "last_run_metadata", None)
-        if isinstance(metadata, Mapping):
-            self.last_run_metadata.update(metadata)
-
-    @staticmethod
-    def runtime_identity() -> dict[str, str]:
-        return {
-            "model": os.getenv("NOVATRADE_DEEPSEEK_MODEL", "deepseek-v4-pro"),
-            "provider": "DeepSeek Harness",
-            "reasoningEffort": os.getenv("NOVATRADE_DEEPSEEK_REASONING_EFFORT", "low"),
-        }
-
-    async def _run_prompt(
-        self, prompt: str, schema: dict[str, Any], config: AIConfig, *, deadline: float | None = None,
-    ) -> dict[str, Any]:
-        remaining = config.cliTimeoutSeconds
-        if deadline is not None:
-            remaining = min(remaining, deadline - asyncio.get_running_loop().time())
-        if remaining <= 0:
-            raise CodexError("DeepSeek Harness decision workflow timed out")
-        structured_prompt = (
-            prompt
-            + "\nSTRICT OUTPUT CONTRACT (authoritative): return exactly one JSON object, with no markdown or prose. "
-            + "Every property declared in the schema must be present; use null only where the schema permits it. "
-            + "The server will reject any missing, extra, or type-invalid field.\nJSON SCHEMA:\n"
-            + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
-        )
-        if len(structured_prompt.encode("utf-8")) > _MAX_DECISION_PROMPT_BYTES:
-            raise CodexError(
-                f"DeepSeek decision prompt exceeds {_MAX_DECISION_PROMPT_BYTES} UTF-8 bytes"
-            )
-        # Workflow metadata published by CodexRunner.run is preserved here: the
-        # provider telemetry is merged in below instead of replacing it.
-        try:
-            with tempfile.TemporaryDirectory(prefix="novatrade-deepseek-") as workdir:
-                raw = await self.adapter.run_json(
-                    structured_prompt,
-                    cwd=workdir,
-                    timeout_seconds=remaining,
-                    max_output_bytes=config.maxOutputBytes,
-                )
-            self._merge_adapter_metadata()
-            return raw
-        except DeepSeekHarnessError as error:
-            self._merge_adapter_metadata()
-            raise CodexError(str(error)) from error
-
-    async def run_chat(self, message: str, config: AIConfig) -> AIChatResponse:
-        prompt = (
-            "You are NovaTrade's strategy copilot. Return exactly one JSON object matching this schema. "
-            "Never place or modify orders; suggestion may only contain safe strategy fields.\n"
-            "SCHEMA:\n" + dumps(ai_chat_json_schema()) + "\nCURRENT CONFIG:\n" + dumps(config)
-            + "\nUSER MESSAGE:\n" + message
-        )
-        try:
-            with tempfile.TemporaryDirectory(prefix="novatrade-deepseek-chat-") as workdir:
-                text = await self.adapter.run_prompt(
-                    prompt,
-                    cwd=workdir,
-                    timeout_seconds=config.cliTimeoutSeconds,
-                    max_output_bytes=config.maxOutputBytes,
-                )
-            self._merge_adapter_metadata()
-            return CodexRunner._decode_chat_response(text)
-        except DeepSeekHarnessError as error:
-            self._merge_adapter_metadata()
-            raise CodexError(str(error)) from error
-
-
 def parse_codex_output(output: str, snapshot_id: str = "unknown") -> AIDecision:
     """Parse CLI output and return a safe hold for malformed output."""
     try:
@@ -901,10 +891,10 @@ class AIWorker:
         self.snapshot_provider = snapshot_provider
         self.order_gateway = order_gateway
         self.config = config if isinstance(config, AIConfig) else AIConfig.from_dict(config)
-        selected_strategy = "deepseek" if strategy_id == "codex" and self.config.provider == "deepseek-harness" else strategy_id
-        self.strategy_id = re.sub(r"[^A-Za-z0-9_-]+", "-", selected_strategy.strip()) or "codex"
-        self.runner = runner or (DeepSeekHarnessRunner() if self.config.provider == "deepseek-harness" else CodexRunner())
-        self._custom_runner = runner is not None
+        if strategy_id != "codex":
+            raise ValueError("AI strategy must be codex")
+        self.strategy_id = "codex"
+        self.runner = runner or CodexRunner()
         self.state_dir = state_dir or _state_dir()
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.policy_state = PolicyState()
@@ -918,35 +908,43 @@ class AIWorker:
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._load_persisted()
-        if not self._custom_runner:
-            self.runner = DeepSeekHarnessRunner() if self.config.provider == "deepseek-harness" else CodexRunner()
 
     def _path(self, name: str) -> Path:
-        if self.strategy_id == "codex":
-            return self.state_dir / name
-        stem, suffix = name.rsplit(".", 1)
-        return self.state_dir / f"{stem}-{self.strategy_id}.{suffix}"
+        return self.state_dir / name
 
     def _load_persisted(self) -> None:
         migrated_config = False
         persisted_fingerprint: str | None = None
+        persisted_state: str | None = None
+        persisted_failures = 0
         try:
             raw = json.loads(self._path("ai-config.json").read_text(encoding="utf-8"))
-            self.config = AIConfig.from_dict(raw)
+            normalized = dict(raw) if isinstance(raw, Mapping) else {}
+            # maxDailyLosses=0 used to mean "no losing trade is acceptable",
+            # which closed every entry from the first round (0 >= 0). allowOpen
+            # already expresses "never open", so lift a persisted zero to the
+            # usable minimum instead of discarding the rest of the settings.
+            if normalized.get("maxDailyLosses") == 0 and not isinstance(normalized.get("maxDailyLosses"), bool):
+                normalized["maxDailyLosses"] = 1
             # The original default was 45 seconds and was never exposed as a
             # user setting. Treat that persisted value as the old default so
-            # existing installations receive the larger grouped-analysis
-            # budget without requiring a manual reset.
+            # existing installations receive the larger grouped-analysis budget
+            # without requiring a manual reset.
             if (
-                isinstance(raw, Mapping)
-                and isinstance(raw.get("cliTimeoutSeconds"), (int, float))
-                and not isinstance(raw.get("cliTimeoutSeconds"), bool)
-                and float(raw["cliTimeoutSeconds"]) == LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS
+                isinstance(normalized.get("cliTimeoutSeconds"), (int, float))
+                and not isinstance(normalized.get("cliTimeoutSeconds"), bool)
+                and float(normalized["cliTimeoutSeconds"]) == LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS
             ):
-                self.config = AIConfig.from_dict({**raw, "cliTimeoutSeconds": DEFAULT_CLI_TIMEOUT_SECONDS})
+                normalized["cliTimeoutSeconds"] = DEFAULT_CLI_TIMEOUT_SECONDS
+            self.config = AIConfig.from_dict(normalized)
             migrated_config = isinstance(raw, Mapping) and raw != self.config.to_dict()
             self.status = AIStatus(mode=self.config.mode, enabled=self.config.enabled, updatedAt=_now_iso())
-        except (OSError, ValueError, SchemaError, json.JSONDecodeError):
+        except SchemaError:
+            # A retired or invalid saved configuration must never enable the
+            # remaining worker through a caller-supplied default.
+            self.config = AIConfig()
+            migrated_config = True
+        except (OSError, ValueError, json.JSONDecodeError):
             pass
         # Keep the last concrete observation set visible across service
         # restarts. It is informational only; a fresh snapshot replaces it
@@ -966,12 +964,26 @@ class AIWorker:
             fingerprint = state.get("decisionFingerprint") if isinstance(state, dict) else None
             if isinstance(fingerprint, str) and fingerprint:
                 persisted_fingerprint = fingerprint
+            # A failure halt is a durable safety latch, not process memory.
+            # Without restoring it, a crash loop or a restart would silently
+            # resume trading after maxConsecutiveFailures was reached.
+            raw_state = state.get("state") if isinstance(state, dict) else None
+            if isinstance(raw_state, str) and raw_state in {"halted", "error"}:
+                persisted_state = raw_state
+            raw_failures = state.get("consecutiveFailures") if isinstance(state, dict) else None
+            if isinstance(raw_failures, int) and not isinstance(raw_failures, bool) and raw_failures >= 0:
+                persisted_failures = raw_failures
         except (OSError, ValueError, json.JSONDecodeError, AttributeError):
             pass
+        halted = persisted_state == "halted"
         self.status = replace(
             self.status,
+            state=persisted_state or "stopped",
             mode=self.config.mode,
-            enabled=self.config.enabled,
+            # A restored halt always reports a disabled worker, matching what
+            # run_once() enforces while halted.
+            enabled=False if halted else self.config.enabled,
+            consecutiveFailures=persisted_failures,
             updatedAt=_now_iso(),
             observedInstruments=list(self.observed_instruments),
             observationUpdatedAt=self.observation_updated_at,
@@ -1081,6 +1093,8 @@ class AIWorker:
     @staticmethod
     def _snapshot_quality(snapshot: AISnapshot, config: AIConfig) -> dict[str, Any]:
         """Keep collection diagnostics without recording prices or account data."""
+        prompt_encoding = "compact20" if len(snapshot.observed_instruments()) > 4 else "compact60"
+        prompt = CodexRunner._decision_prompt(snapshot, config, encoding=prompt_encoding)
         metadata = snapshot.dataFreshness
         duration = metadata.get("collectionDurationSeconds")
         if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration < 0:
@@ -1098,10 +1112,6 @@ class AIWorker:
             if isinstance(attempts, int) and not isinstance(attempts, bool):
                 compact["attempts"] = attempts
             compact_errors.append(compact)
-        prompt_encoding = (
-            os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60")
-            if config.provider == "deepseek-harness" else "compact60"
-        ).strip().lower()
         return {
             "instrumentCount": len(snapshot.observed_instruments()),
             "candleSeriesCount": len(snapshot.candles),
@@ -1114,7 +1124,7 @@ class AIWorker:
             "collectionDurationSeconds": duration,
             "collectionErrors": compact_errors,
             "collectionErrorCount": len(errors) if isinstance(errors, list) else 0,
-            "promptBytes": len(CodexRunner._decision_prompt(snapshot, config).encode("utf-8")),
+            "promptBytes": len(prompt.encode("utf-8")),
             "promptBytesScope": "decision-prompt-only",
             "promptEncoding": prompt_encoding,
         }
@@ -1122,12 +1132,6 @@ class AIWorker:
     @classmethod
     def route_for_snapshot(cls, snapshot: AISnapshot, config: AIConfig) -> tuple[str, str, str]:
         """Use one fixed provider route for every snapshot."""
-        if config.provider == "deepseek-harness":
-            return (
-                os.getenv("NOVATRADE_DEEPSEEK_MODEL", "deepseek-v4-pro"),
-                os.getenv("NOVATRADE_DEEPSEEK_REASONING_EFFORT", "low"),
-                "deepseek-harness",
-            )
         model, effort = CodexRunner._route_values(config)
         CodexRunner._validate_override(model, effort)
         return model, effort, "fixed-model"
@@ -1168,8 +1172,8 @@ class AIWorker:
         # commands that have an exact server-side meaning.
         if re.search(r"(模型|model|版本)", message, re.IGNORECASE):
             identity = getattr(self.runner, "runtime_identity", lambda: {"model": "Codex 默认模型", "provider": "default"})()
-            route_model = identity.get("model") if self.config.provider == "deepseek-harness" else self.config.routineModel
-            route_effort = identity.get("reasoningEffort", "low") if self.config.provider == "deepseek-harness" else self.config.routineReasoningEffort
+            route_model = self.config.routineModel
+            route_effort = self.config.routineReasoningEffort
             return {
                 "schemaVersion": 1,
                 "reply": (
@@ -1354,16 +1358,21 @@ class AIWorker:
             "applied": False,
             "config": self.get_config(),
             "degraded": True,
-            "errorCode": "deepseek_unavailable" if self.config.provider == "deepseek-harness" else "codex_unavailable",
+            "errorCode": "codex_unavailable",
         }
 
-    def update_config(self, values: Mapping[str, Any]) -> dict[str, Any]:
+    def update_config(self, values: Mapping[str, Any], *, clear_halt: bool = True) -> dict[str, Any]:
+        """Merge a configuration patch.
+
+        ``clear_halt`` defaults to true because an explicit configuration
+        update from the operator is the documented recovery from a failure
+        halt. The internal pause path (``disable``) passes false so that
+        disabling and re-enabling a halted worker cannot silently clear the
+        latch without a review.
+        """
         merged = self.config.to_dict()
         merged.update(dict(values))
-        previous_provider = self.config.provider
         self.config = AIConfig.from_dict(merged)
-        if self.config.provider != previous_provider and isinstance(self.runner, (CodexRunner, DeepSeekHarnessRunner)):
-            self.runner = DeepSeekHarnessRunner() if self.config.provider == "deepseek-harness" else CodexRunner()
         if any(key in values for key in ("allowedInstruments", "universeMode", "candidateLimit", "selectionLimit")):
             # The previous snapshot no longer describes the requested
             # universe. Clear it until the next cycle resolves fresh symbols.
@@ -1374,8 +1383,11 @@ class AIWorker:
         self._last_event_fingerprint = None
         self._last_model_evaluated_at = None
         self._event_skip_count = 0
+        halted = self.status.state == "halted"
         self.status = replace(
             self.status,
+            state="stopped" if (halted and clear_halt) else self.status.state,
+            consecutiveFailures=0 if clear_halt else self.status.consecutiveFailures,
             mode=self.config.mode,
             enabled=self.config.enabled,
             updatedAt=_now_iso(),
@@ -1570,35 +1582,30 @@ class AIWorker:
         if not isinstance(metadata, Mapping) or not metadata:
             return
         compact: dict[str, Any] = {}
-        for key in ("workflow", "stage", "failureStage", "outcome", "profile", "profileFallback"):
+        for key in ("workflow", "stage", "failureStage", "outcome"):
             value = metadata.get(key)
-            allowed = {"single", "grouped"} if key == "workflow" else {"starting", "analysis", "coordinator", "complete", "failed", "cancelled", "success", "error", "acp", "novatrade-decision"}
+            allowed = {"single", "grouped"} if key == "workflow" else {"starting", "analysis", "coordinator", "complete", "failed", "cancelled", "success", "error"}
             if isinstance(value, str) and value in allowed:
                 compact[key] = value
-        # The harness profile decides how much fixed prompt overhead each
-        # request carries, so keep the active profile visible in the audit.
-        for key in ("provider", "model", "reasoningEffort", "sessionId", "profileFallback"):
+        for key in ("provider", "model", "reasoningEffort"):
             value = metadata.get(key)
             if key in metadata:
                 compact[key] = value if isinstance(value, str) and value.strip() and len(value) <= 256 else None
-        fallback_reason = metadata.get("profileFallbackReason")
-        if isinstance(fallback_reason, str) and fallback_reason.strip():
-            compact["profileFallbackReason"] = fallback_reason[:500]
         for key in ("observedCount", "groupCount", "completedGroups", "assessmentCount"):
             if key in metadata:
                 value = metadata.get(key)
                 if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                     compact[key] = value
         for key in ("analysisTimeoutSeconds", "coordinatorTimeoutSeconds", "analysisDurationSeconds",
-                    "coordinatorDurationSeconds", "durationSeconds"):
+                    "coordinatorDurationSeconds", "durationSeconds", "pipelineBudgetSeconds",
+                    "analysisBudgetSeconds", "coordinatorBudgetSeconds"):
             if key in metadata:
                 value = metadata.get(key)
                 if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
                     compact[key] = value
         for key in ("requestId", "inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens",
                     "cacheWriteTokens", "basePromptBytes", "strictContractBytes", "schemaBytes",
-                    "modelPayloadBytes", "initializeSeconds", "sessionCreateSeconds", "configSeconds",
-                    "promptSeconds", "closeSeconds", "totalSeconds"):
+                    "modelPayloadBytes"):
             if key in metadata:
                 value = metadata.get(key)
                 compact[key] = value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0 else None
@@ -1616,6 +1623,14 @@ class AIWorker:
                 continue
 
     async def start(self) -> None:
+        if self.status.state == "halted":
+            # A failure halt is cleared only by an explicit configuration
+            # update (update_config resets the latch). Starting must never
+            # silently resume trading after maxConsecutiveFailures, so persist
+            # the halted status and leave the worker stopped.
+            self.status = replace(self.status, enabled=False, updatedAt=_now_iso())
+            self._persist()
+            return
         if self._task is None or self._task.done():
             self._stop.clear()
             self.status = replace(
@@ -1648,11 +1663,14 @@ class AIWorker:
         await asyncio.gather(task, return_exceptions=True)
 
     async def disable(self) -> None:
-        self.update_config({"enabled": False, "mode": "disabled"})
+        # A pause must not clear a failure halt: disabling and re-enabling would
+        # otherwise resume trading without the configuration review the halt
+        # requires.
+        self.update_config({"enabled": False, "mode": "disabled"}, clear_halt=False)
         await self.stop()
         self.status = replace(
             self.status,
-            state="stopped",
+            state="halted" if self.status.state == "halted" else "stopped",
             mode="disabled",
             enabled=False,
             updatedAt=_now_iso(),

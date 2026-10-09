@@ -23,6 +23,7 @@ struct AccountToolbarLabel: View {
     @ObservedObject var model: DashboardModel
 
     private var accountName: String {
+        if model.accountOverview.isLocalPaper { return "纸面交易" }
         if let label = model.accountOverview.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
             return label
         }

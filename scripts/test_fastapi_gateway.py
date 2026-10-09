@@ -8,6 +8,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from datetime import datetime, timezone
@@ -20,6 +21,58 @@ from backend import main  # noqa: E402
 
 
 class GatewayContractTests(unittest.TestCase):
+    def test_http_client_uses_a_distinct_pool_for_each_event_loop(self):
+        async def make_client_and_close():
+            client = main.OKX_HTTP_CLIENT._client_for_loop()
+            await client.aclose()
+            return id(client)
+
+        first = asyncio.run(make_client_and_close())
+        second = asyncio.run(make_client_and_close())
+        self.assertNotEqual(first, second)
+
+    def test_enable_is_refused_while_the_failure_halt_is_latched(self):
+        """Enable must not double as the halt recovery; only a config update is."""
+        worker = SimpleNamespace(
+            config=main.AIConfig(enabled=True, mode="paper-active"),
+            status=SimpleNamespace(state="halted"),
+            update_config=lambda values: worker.config.to_dict(),
+            start=AsyncMock(),
+            get_status=lambda: {"state": "halted", "enabled": False},
+        )
+        previous_workers = main.ai_workers
+        previous_worker = main.ai_worker
+        try:
+            main.ai_workers = {"codex": worker}
+            main.ai_worker = worker
+            with self.assertRaises(main.HTTPException) as raised:
+                asyncio.run(main.enable_ai())
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertIn("halted", raised.exception.detail)
+            worker.start.assert_not_awaited()
+        finally:
+            main.ai_workers = previous_workers
+            main.ai_worker = previous_worker
+
+    def test_ai_status_does_not_restart_a_halted_worker(self):
+        worker = SimpleNamespace(
+            config=main.AIConfig(enabled=True, mode="paper-active"),
+            status=SimpleNamespace(state="halted"),
+            get_status=lambda: {"state": "halted", "enabled": False},
+            start=AsyncMock(),
+        )
+        previous_workers = main.ai_workers
+        previous_worker = main.ai_worker
+        try:
+            main.ai_workers = {"codex": worker}
+            main.ai_worker = worker
+            status = asyncio.run(main.ai_status())
+            self.assertEqual(status["state"], "halted")
+            worker.start.assert_not_awaited()
+        finally:
+            main.ai_workers = previous_workers
+            main.ai_worker = previous_worker
+
     def test_ai_strategy_catalog_exposes_package_source_runtime_and_live_gate(self):
         class StubWorker:
             def __init__(self, strategy_id: str, provider: str):
@@ -33,7 +86,6 @@ class GatewayContractTests(unittest.TestCase):
 
         workers = {
             "codex": StubWorker("codex", "codex"),
-            "deepseek": StubWorker("deepseek", "deepseek-harness"),
         }
 
         async def ensure(strategy_id: str):
@@ -42,14 +94,56 @@ class GatewayContractTests(unittest.TestCase):
         with patch.object(main, "_ensure_ai_worker", side_effect=ensure):
             catalog = asyncio.run(main.ai_strategies())
 
-        self.assertEqual([item["id"] for item in catalog], ["codex", "deepseek"])
+        self.assertEqual([item["id"] for item in catalog], ["codex"])
         self.assertEqual(catalog[0]["package"]["id"], "codex_ai_decision")
-        self.assertEqual(catalog[1]["package"]["id"], "deepseek_ai_decision")
         for item in catalog:
             self.assertTrue(item["source"]["ofTruth"].endswith("/STRATEGY.md"))
             self.assertTrue(item["runtime"]["decisionEndpoint"].startswith("/api/v1/ai/strategies/"))
             self.assertTrue(item["liveGate"]["requiresManualEnable"])
             self.assertTrue(item["liveGate"]["requiresLiveTradingSwitch"])
+
+    def test_exchange_risk_derives_mark_to_market_daily_loss_and_latches(self):
+        """The account breaker must read real equity, not an unwritten field."""
+        import tempfile as _tempfile
+
+        async def run():
+            with _tempfile.TemporaryDirectory() as directory:
+                state_dir = Path(directory)
+                equity = {"value": 10_000.0}
+
+                async def private(method, path, **kwargs):
+                    self.assertEqual(method, "GET")
+                    if path == "/account/balance":
+                        return {"data": [{"totalEq": str(equity["value"]), "details": []}]}
+                    raise AssertionError(f"unexpected private path {path}")
+
+                with patch.object(main, "TRADING_MODE", "exchange"), \
+                        patch.object(main, "state_dir", return_value=state_dir), \
+                        patch.object(main, "private_ready", return_value=True), \
+                        patch.object(main, "okx_private_request", side_effect=private):
+                    first = await main.risk()
+                    self.assertEqual(first["dataQuality"]["equitySource"], "okx")
+                    self.assertTrue(first["dataQuality"]["dailyPnLAuthoritative"])
+                    self.assertEqual(first["dayStartEquity"], 10_000.0)
+                    self.assertEqual(first["dailyPnLPercent"], 0)
+                    self.assertFalse(first["killSwitch"])
+                    # A 5% intraday drawdown latches the breaker, and the reason
+                    # names the configured percentage.
+                    equity["value"] = 9_500.0
+                    breach = await main.risk()
+                    self.assertLessEqual(breach["dailyPnLPercent"], -5)
+                    self.assertTrue(breach["killSwitch"])
+                    self.assertIn("5%", breach["reason"])
+                    # The latch survives a subsequent recovery within the day.
+                    equity["value"] = 10_400.0
+                    recovered = await main.risk()
+                    self.assertTrue(recovered["killSwitch"])
+                    # And it is durable on disk for the next process.
+                    persisted = json.loads((state_dir / "paper-state.json").read_text(encoding="utf-8"))
+                    self.assertTrue(persisted["risk"]["killSwitch"])
+                    self.assertEqual(persisted["risk"]["dayStartEquity"], 10_000.0)
+
+        asyncio.run(run())
 
     def test_daily_loss_count_deduplicates_negative_bills_by_order(self):
         today_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -247,7 +341,7 @@ class GatewayContractTests(unittest.TestCase):
         protection = {"algoIDs": ["algo-1"], "takeProfitPrices": [110], "stopLossPrices": [95]}
         assessment = SimpleNamespace(
             takeProfitLevels=[{"price": 120, "quantityPercent": 100}],
-            takeProfitPrice=120, stopLossPrice=92, confidence=.9,
+            takeProfitPrice=120, stopLossPrice=98, confidence=.9,
             reason="突破确认且成交量放大。",
         )
         decision = SimpleNamespace(confidence=.9, reason="趋势确认，原保护线已不适用。")
@@ -264,6 +358,92 @@ class GatewayContractTests(unittest.TestCase):
             reason="分批目标调整，但信号未出现实质变化。",
         )
         self.assertFalse(main._protection_needs_adjustment(position, protection, staged_assessment, decision))
+
+    def test_protection_adjustment_only_moves_toward_profit(self):
+        decision = SimpleNamespace(confidence=.95, reason="趋势延续，保护线跟随盈利方向移动。")
+
+        long_position = {"instrumentID": "BTC-USDT-SWAP", "side": "long", "quantity": 2, "entryPrice": 100}
+        long_protection = {"algoIDs": ["long-algo"], "takeProfitPrices": [120], "stopLossPrices": [95]}
+
+        # A long stop and target can only move upward. A mixed update that
+        # worsens either side must be rejected as one atomic replacement.
+        long_better = SimpleNamespace(
+            takeProfitLevels=[{"price": 130, "quantityPercent": 100}],
+            takeProfitPrice=130, stopLossPrice=105, confidence=.95,
+            reason="趋势延续，抬高止损并扩大止盈目标。",
+        )
+        self.assertTrue(main._protection_needs_adjustment(long_position, long_protection, long_better, decision))
+
+        long_worse_stop = SimpleNamespace(
+            takeProfitLevels=[{"price": 130, "quantityPercent": 100}],
+            takeProfitPrice=130, stopLossPrice=90, confidence=.95,
+            reason="重新评估后调整保护线。",
+        )
+        self.assertFalse(main._protection_needs_adjustment(long_position, long_protection, long_worse_stop, decision))
+
+        long_worse_target = SimpleNamespace(
+            takeProfitLevels=[{"price": 110, "quantityPercent": 100}],
+            takeProfitPrice=110, stopLossPrice=105, confidence=.95,
+            reason="重新评估后调整保护线。",
+        )
+        self.assertFalse(main._protection_needs_adjustment(long_position, long_protection, long_worse_target, decision))
+
+        staged_protection = {"algoIDs": ["staged-algo"], "takeProfitPrices": [100, 120, 140], "stopLossPrices": [95]}
+        staged_assessment = SimpleNamespace(
+            takeProfitLevels=[
+                {"price": 110, "quantityPercent": 30},
+                {"price": 115, "quantityPercent": 30},
+                {"price": 150, "quantityPercent": 40},
+            ],
+            takeProfitPrice=150, stopLossPrice=105, confidence=.95,
+            reason="分批目标中间档回撤。",
+        )
+        self.assertFalse(main._protection_needs_adjustment(long_position, staged_protection, staged_assessment, decision))
+
+        short_position = {"instrumentID": "FIL-USDT-SWAP", "side": "short", "quantity": -2, "entryPrice": 100}
+        short_protection = {"algoIDs": ["short-algo"], "takeProfitPrices": [80], "stopLossPrices": [105]}
+
+        # A short stop and target can only move downward.
+        short_better = SimpleNamespace(
+            takeProfitLevels=[{"price": 70, "quantityPercent": 100}],
+            takeProfitPrice=70, stopLossPrice=95, confidence=.95,
+            reason="趋势延续，压低止损并下移止盈目标。",
+        )
+        self.assertTrue(main._protection_needs_adjustment(short_position, short_protection, short_better, decision))
+
+        short_worse_stop = SimpleNamespace(
+            takeProfitLevels=[{"price": 70, "quantityPercent": 100}],
+            takeProfitPrice=70, stopLossPrice=110, confidence=.95,
+            reason="重新评估后调整保护线。",
+        )
+        self.assertFalse(main._protection_needs_adjustment(short_position, short_protection, short_worse_stop, decision))
+
+        short_worse_target = SimpleNamespace(
+            takeProfitLevels=[{"price": 90, "quantityPercent": 100}],
+            takeProfitPrice=90, stopLossPrice=95, confidence=.95,
+            reason="重新评估后调整保护线。",
+        )
+        self.assertFalse(main._protection_needs_adjustment(short_position, short_protection, short_worse_target, decision))
+
+    def test_protection_adjustment_rejects_a_worse_line_even_with_a_better_other_line(self):
+        position = {"instrumentID": "BTC-USDT-SWAP", "side": "long", "quantity": 2, "entryPrice": 100}
+        protection = {"algoIDs": ["algo-1"], "takeProfitPrices": [110], "stopLossPrices": [95]}
+        assessment = SimpleNamespace(
+            takeProfitLevels=[{"price": 120, "quantityPercent": 100}],
+            takeProfitPrice=120, stopLossPrice=92, confidence=.9,
+            reason="目标上移但保护线回撤。",
+        )
+        decision = SimpleNamespace(confidence=.9, reason="复评要求调整保护线。")
+        self.assertFalse(main._protection_needs_adjustment(position, protection, assessment, decision))
+
+        short_position = {"instrumentID": "BTC-USDT-SWAP", "side": "short", "quantity": -2, "entryPrice": 100}
+        short_protection = {"algoIDs": ["algo-2"], "takeProfitPrices": [90], "stopLossPrices": [105]}
+        short_assessment = SimpleNamespace(
+            takeProfitLevels=[{"price": 80, "quantityPercent": 100}],
+            takeProfitPrice=80, stopLossPrice=108, confidence=.9,
+            reason="目标下移但保护线回撤。",
+        )
+        self.assertFalse(main._protection_needs_adjustment(short_position, short_protection, short_assessment, decision))
 
     def test_position_protection_uses_mark_price_for_profitable_staged_positions(self):
         short_position = {

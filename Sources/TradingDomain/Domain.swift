@@ -54,6 +54,8 @@ public struct AccountOverview: Codable, Equatable, Sendable {
     public let positions: [PositionSnapshot]
     public let updatedAt: Date
 
+    public var isLocalPaper: Bool { mode == .paper && profile == "local-paper" }
+
     /// The amount of USDT available as the strategy sizing base. A missing
     /// USDT row is a known zero balance once an authenticated account has
     /// loaded; before authentication/account loading, keep it unknown.
@@ -544,6 +546,7 @@ public struct LiveTradingStatus: Codable, Equatable, Sendable {
 public enum AIRunMode: String, Codable, CaseIterable, Sendable {
     case disabled
     case shadow
+    case paperActive = "paper-active"
     case demoActive = "demo-active"
     case liveArmed = "live-armed"
     case halted
@@ -569,50 +572,26 @@ public enum AIOrderType: String, Codable, CaseIterable, Sendable {
     case limit
 }
 
-/// Stable identifiers for the server-owned AI workers. The legacy Codex
-/// endpoint remains the default when a response omits this value.
+/// Identifier returned by the Codex worker. Older responses may omit it.
 public enum AIStrategyID: String, Codable, CaseIterable, Sendable, Identifiable, Hashable {
     case codex
-    case deepseek
 
     public var id: String { rawValue }
-
-    public var displayName: String {
-        switch self {
-        case .codex: return "Codex AI"
-        case .deepseek: return "DeepSeek AI"
-        }
-    }
-
-    public var providerLabel: String {
-        switch self {
-        case .codex: return "Codex"
-        case .deepseek: return "DeepSeek Harness"
-        }
-    }
+    public var displayName: String { "Codex AI" }
+    public var providerLabel: String { "Codex" }
 }
 
-/// Decision engine used by an AI strategy. Kept separate from the strategy
-/// identifier so a future strategy can share a provider without changing the
-/// dashboard model.
+/// Decision engine reported by the Codex control plane.
 public enum AIProvider: String, Codable, CaseIterable, Sendable, Hashable {
     case codex
-    case deepseekHarness = "deepseek-harness"
-
-    public var displayName: String {
-        switch self {
-        case .codex: return "Codex"
-        case .deepseekHarness: return "DeepSeek Harness"
-        }
-    }
+    public var displayName: String { "Codex" }
 }
 
 /// Persisted configuration for the local AI worker.  The same object is used
 /// for GET responses and PATCH requests; the service merges PATCH fields with
 /// its persisted configuration before validating the result.
 public struct AIConfig: Codable, Equatable, Sendable {
-    /// Optional for compatibility with configurations written before the
-    /// multi-strategy control plane existed.
+    /// Optional for compatibility with older Codex configurations.
     public var strategyID: AIStrategyID?
     public var provider: AIProvider?
     public var enabled: Bool
@@ -621,10 +600,9 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var minimumConfidence: Double
     public var decisionIntervalSeconds: Double
     public var cliTimeoutSeconds: Double
+    /// Maximum snapshot age accepted by the entry policy, in seconds.
+    public var snapshotMaxAgeSeconds: Double
     public var maxOutputBytes: Int
-    /// Legacy compatibility field. AI entries are gated by current positions
-    /// and pending orders; this field no longer controls trading.
-    public var cooldownSeconds: Double
     public var maxConsecutiveFailures: Int
     public var allowOpen: Bool
     public var allowClose: Bool
@@ -638,24 +616,34 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var marginPerOrderUSD: Double
     /// Upper leverage bound. The AI may request a lower leverage per decision.
     public var maxLeverage: Double
+    /// Minimum time before an AI entry may re-open a contract after a stop-loss exit.
+    public var stopLossCooldownSeconds: Double
+    /// Rolling window used by the account-wide stop-loss burst breaker.
+    public var recentStopLossWindowSeconds: Double
+    /// Number of stop-loss exits in the rolling window that pauses AI entries.
+    public var recentStopLossLimit: Int
 
-    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool = false, mode: AIRunMode = .disabled, allowedInstruments: [String] = [], minimumConfidence: Double = 0.65, decisionIntervalSeconds: Double = 30, cliTimeoutSeconds: Double = 90, maxOutputBytes: Int = 1_000_000, cooldownSeconds: Double = 0, maxConsecutiveFailures: Int = 3, allowOpen: Bool = true, allowClose: Bool = true, allowCancel: Bool = true, requireStopLoss: Bool = true, maxDailyOrders: Int = 20, maxDailyLosses: Int = 5, marginPerOrderUSD: Double = 500, maxLeverage: Double = 5) {
+    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool = false, mode: AIRunMode = .disabled, allowedInstruments: [String] = [], minimumConfidence: Double = 0.65, decisionIntervalSeconds: Double = 30, cliTimeoutSeconds: Double = 90, snapshotMaxAgeSeconds: Double = 90, maxOutputBytes: Int = 1_000_000, maxConsecutiveFailures: Int = 3, allowOpen: Bool = true, allowClose: Bool = true, allowCancel: Bool = true, requireStopLoss: Bool = true, maxDailyOrders: Int = 20, maxDailyLosses: Int = 5, marginPerOrderUSD: Double = 500, maxLeverage: Double = 5, stopLossCooldownSeconds: Double = 14_400, recentStopLossWindowSeconds: Double = 3_600, recentStopLossLimit: Int = 2) {
         self.strategyID = strategyID; self.provider = provider
         self.enabled = enabled; self.mode = mode; self.allowedInstruments = allowedInstruments
         self.minimumConfidence = minimumConfidence; self.decisionIntervalSeconds = decisionIntervalSeconds
         self.cliTimeoutSeconds = cliTimeoutSeconds; self.maxOutputBytes = maxOutputBytes
-        self.cooldownSeconds = cooldownSeconds; self.maxConsecutiveFailures = maxConsecutiveFailures
+        self.snapshotMaxAgeSeconds = snapshotMaxAgeSeconds; self.maxConsecutiveFailures = maxConsecutiveFailures
         self.allowOpen = allowOpen; self.allowClose = allowClose; self.allowCancel = allowCancel
         self.requireStopLoss = requireStopLoss
         self.maxDailyOrders = maxDailyOrders; self.maxDailyLosses = maxDailyLosses
         self.marginPerOrderUSD = marginPerOrderUSD; self.maxLeverage = maxLeverage
+        self.stopLossCooldownSeconds = stopLossCooldownSeconds
+        self.recentStopLossWindowSeconds = recentStopLossWindowSeconds
+        self.recentStopLossLimit = recentStopLossLimit
     }
 
     private enum CodingKeys: String, CodingKey {
         case strategyID, provider, enabled, mode, allowedInstruments
-        case minimumConfidence, decisionIntervalSeconds, cliTimeoutSeconds, maxOutputBytes
-        case cooldownSeconds, maxConsecutiveFailures, allowOpen, allowClose, allowCancel
+        case minimumConfidence, decisionIntervalSeconds, cliTimeoutSeconds, snapshotMaxAgeSeconds, maxOutputBytes
+        case maxConsecutiveFailures, allowOpen, allowClose, allowCancel
         case requireStopLoss, maxDailyOrders, maxDailyLosses, marginPerOrderUSD, maxLeverage
+        case stopLossCooldownSeconds, recentStopLossWindowSeconds, recentStopLossLimit
     }
 
     /// Keep configurations persisted by older clients usable when the service
@@ -671,8 +659,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
             minimumConfidence: try container.decodeIfPresent(Double.self, forKey: .minimumConfidence) ?? 0.65,
             decisionIntervalSeconds: try container.decodeIfPresent(Double.self, forKey: .decisionIntervalSeconds) ?? 30,
             cliTimeoutSeconds: try container.decodeIfPresent(Double.self, forKey: .cliTimeoutSeconds) ?? 90,
+            snapshotMaxAgeSeconds: try container.decodeIfPresent(Double.self, forKey: .snapshotMaxAgeSeconds) ?? 90,
             maxOutputBytes: try container.decodeIfPresent(Int.self, forKey: .maxOutputBytes) ?? 1_000_000,
-            cooldownSeconds: try container.decodeIfPresent(Double.self, forKey: .cooldownSeconds) ?? 0,
             maxConsecutiveFailures: try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveFailures) ?? 3,
             allowOpen: try container.decodeIfPresent(Bool.self, forKey: .allowOpen) ?? true,
             allowClose: try container.decodeIfPresent(Bool.self, forKey: .allowClose) ?? true,
@@ -681,7 +669,10 @@ public struct AIConfig: Codable, Equatable, Sendable {
             maxDailyOrders: try container.decodeIfPresent(Int.self, forKey: .maxDailyOrders) ?? 20,
             maxDailyLosses: try container.decodeIfPresent(Int.self, forKey: .maxDailyLosses) ?? 5,
             marginPerOrderUSD: try container.decodeIfPresent(Double.self, forKey: .marginPerOrderUSD) ?? 500,
-            maxLeverage: try container.decodeIfPresent(Double.self, forKey: .maxLeverage) ?? 5
+            maxLeverage: try container.decodeIfPresent(Double.self, forKey: .maxLeverage) ?? 5,
+            stopLossCooldownSeconds: try container.decodeIfPresent(Double.self, forKey: .stopLossCooldownSeconds) ?? 14_400,
+            recentStopLossWindowSeconds: try container.decodeIfPresent(Double.self, forKey: .recentStopLossWindowSeconds) ?? 3_600,
+            recentStopLossLimit: try container.decodeIfPresent(Int.self, forKey: .recentStopLossLimit) ?? 2
         )
     }
 
@@ -695,8 +686,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
         try container.encode(minimumConfidence, forKey: .minimumConfidence)
         try container.encode(decisionIntervalSeconds, forKey: .decisionIntervalSeconds)
         try container.encode(cliTimeoutSeconds, forKey: .cliTimeoutSeconds)
+        try container.encode(snapshotMaxAgeSeconds, forKey: .snapshotMaxAgeSeconds)
         try container.encode(maxOutputBytes, forKey: .maxOutputBytes)
-        try container.encode(cooldownSeconds, forKey: .cooldownSeconds)
         try container.encode(maxConsecutiveFailures, forKey: .maxConsecutiveFailures)
         try container.encode(allowOpen, forKey: .allowOpen)
         try container.encode(allowClose, forKey: .allowClose)
@@ -706,6 +697,9 @@ public struct AIConfig: Codable, Equatable, Sendable {
         try container.encode(maxDailyLosses, forKey: .maxDailyLosses)
         try container.encode(marginPerOrderUSD, forKey: .marginPerOrderUSD)
         try container.encode(maxLeverage, forKey: .maxLeverage)
+        try container.encode(stopLossCooldownSeconds, forKey: .stopLossCooldownSeconds)
+        try container.encode(recentStopLossWindowSeconds, forKey: .recentStopLossWindowSeconds)
+        try container.encode(recentStopLossLimit, forKey: .recentStopLossLimit)
     }
 }
 
@@ -720,8 +714,8 @@ public struct AIPatch: Codable, Equatable, Sendable {
     public var minimumConfidence: Double?
     public var decisionIntervalSeconds: Double?
     public var cliTimeoutSeconds: Double?
+    public var snapshotMaxAgeSeconds: Double?
     public var maxOutputBytes: Int?
-    public var cooldownSeconds: Double?
     public var maxConsecutiveFailures: Int?
     public var allowOpen: Bool?
     public var allowClose: Bool?
@@ -731,17 +725,23 @@ public struct AIPatch: Codable, Equatable, Sendable {
     public var maxDailyLosses: Int?
     public var marginPerOrderUSD: Double?
     public var maxLeverage: Double?
+    public var stopLossCooldownSeconds: Double?
+    public var recentStopLossWindowSeconds: Double?
+    public var recentStopLossLimit: Int?
 
-    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool? = nil, mode: AIRunMode? = nil, allowedInstruments: [String]? = nil, minimumConfidence: Double? = nil, decisionIntervalSeconds: Double? = nil, cliTimeoutSeconds: Double? = nil, maxOutputBytes: Int? = nil, cooldownSeconds: Double? = nil, maxConsecutiveFailures: Int? = nil, allowOpen: Bool? = nil, allowClose: Bool? = nil, allowCancel: Bool? = nil, requireStopLoss: Bool? = nil, maxDailyOrders: Int? = nil, maxDailyLosses: Int? = nil, marginPerOrderUSD: Double? = nil, maxLeverage: Double? = nil) {
+    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool? = nil, mode: AIRunMode? = nil, allowedInstruments: [String]? = nil, minimumConfidence: Double? = nil, decisionIntervalSeconds: Double? = nil, cliTimeoutSeconds: Double? = nil, snapshotMaxAgeSeconds: Double? = nil, maxOutputBytes: Int? = nil, maxConsecutiveFailures: Int? = nil, allowOpen: Bool? = nil, allowClose: Bool? = nil, allowCancel: Bool? = nil, requireStopLoss: Bool? = nil, maxDailyOrders: Int? = nil, maxDailyLosses: Int? = nil, marginPerOrderUSD: Double? = nil, maxLeverage: Double? = nil, stopLossCooldownSeconds: Double? = nil, recentStopLossWindowSeconds: Double? = nil, recentStopLossLimit: Int? = nil) {
         self.strategyID = strategyID; self.provider = provider
         self.enabled = enabled; self.mode = mode; self.allowedInstruments = allowedInstruments
         self.minimumConfidence = minimumConfidence; self.decisionIntervalSeconds = decisionIntervalSeconds
         self.cliTimeoutSeconds = cliTimeoutSeconds; self.maxOutputBytes = maxOutputBytes
-        self.cooldownSeconds = cooldownSeconds; self.maxConsecutiveFailures = maxConsecutiveFailures
+        self.snapshotMaxAgeSeconds = snapshotMaxAgeSeconds; self.maxConsecutiveFailures = maxConsecutiveFailures
         self.allowOpen = allowOpen; self.allowClose = allowClose; self.allowCancel = allowCancel
         self.requireStopLoss = requireStopLoss
         self.maxDailyOrders = maxDailyOrders; self.maxDailyLosses = maxDailyLosses
         self.marginPerOrderUSD = marginPerOrderUSD; self.maxLeverage = maxLeverage
+        self.stopLossCooldownSeconds = stopLossCooldownSeconds
+        self.recentStopLossWindowSeconds = recentStopLossWindowSeconds
+        self.recentStopLossLimit = recentStopLossLimit
     }
 }
 
@@ -848,10 +848,12 @@ public struct AIDecision: Codable, Equatable, Sendable, Identifiable {
     public let instrumentID: String?
     public let direction: AIDirection?
     public let orderType: AIOrderType?
-    public let riskBudgetPercent: Double?
     public let limitPrice: Decimal?
     public let stopLossPrice: Decimal?
     public let takeProfitPrice: Decimal?
+    /// Optional staged targets. Missing and null values remain compatible
+    /// with decisions persisted before staged take-profit support.
+    public let takeProfitLevels: [AITakeProfitLevel]?
     /// Model's self-reported confidence in its chosen action, not a trade's win rate.
     public let confidence: Double
     /// Model-estimated win rate in the range 0...1. Optional for backwards
@@ -867,18 +869,19 @@ public struct AIDecision: Codable, Equatable, Sendable, Identifiable {
     public let reason: String
     public let assessments: [AIInstrumentAssessment]
 
-    public init(schemaVersion: Int = 1, decisionId: String, snapshotId: String, action: AIAction, instrumentID: String? = nil, direction: AIDirection? = nil, orderType: AIOrderType? = nil, riskBudgetPercent: Double? = nil, limitPrice: Decimal? = nil, stopLossPrice: Decimal? = nil, takeProfitPrice: Decimal? = nil, confidence: Double = 0, winRate: Double? = nil, riskRewardRatio: Double? = nil, leverage: Double? = nil, validUntil: Date, reasonCode: String = "", reason: String = "", assessments: [AIInstrumentAssessment] = []) {
+    public init(schemaVersion: Int = 1, decisionId: String, snapshotId: String, action: AIAction, instrumentID: String? = nil, direction: AIDirection? = nil, orderType: AIOrderType? = nil, limitPrice: Decimal? = nil, stopLossPrice: Decimal? = nil, takeProfitPrice: Decimal? = nil, takeProfitLevels: [AITakeProfitLevel]? = nil, confidence: Double = 0, winRate: Double? = nil, riskRewardRatio: Double? = nil, leverage: Double? = nil, validUntil: Date, reasonCode: String = "", reason: String = "", assessments: [AIInstrumentAssessment] = []) {
         self.schemaVersion = schemaVersion; self.decisionId = decisionId; self.snapshotId = snapshotId; self.action = action
-        self.instrumentID = instrumentID; self.direction = direction; self.orderType = orderType; self.riskBudgetPercent = riskBudgetPercent
+        self.instrumentID = instrumentID; self.direction = direction; self.orderType = orderType
         self.limitPrice = limitPrice; self.stopLossPrice = stopLossPrice; self.takeProfitPrice = takeProfitPrice
+        self.takeProfitLevels = takeProfitLevels
         self.confidence = confidence; self.winRate = winRate; self.riskRewardRatio = riskRewardRatio; self.leverage = leverage
         self.validUntil = validUntil; self.reasonCode = reasonCode; self.reason = reason
         self.assessments = assessments
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, decisionId, snapshotId, action, instrumentID, direction, orderType, riskBudgetPercent
-        case limitPrice, stopLossPrice, takeProfitPrice, confidence, winRate, riskRewardRatio, leverage
+        case schemaVersion, decisionId, snapshotId, action, instrumentID, direction, orderType
+        case limitPrice, stopLossPrice, takeProfitPrice, takeProfitLevels, confidence, winRate, riskRewardRatio, leverage
         case validUntil, reasonCode, reason, assessments
     }
 
@@ -892,10 +895,10 @@ public struct AIDecision: Codable, Equatable, Sendable, Identifiable {
             instrumentID: try row.decodeIfPresent(String.self, forKey: .instrumentID),
             direction: try row.decodeIfPresent(AIDirection.self, forKey: .direction),
             orderType: try row.decodeIfPresent(AIOrderType.self, forKey: .orderType),
-            riskBudgetPercent: try row.decodeIfPresent(Double.self, forKey: .riskBudgetPercent),
             limitPrice: try row.decodeIfPresent(Decimal.self, forKey: .limitPrice),
             stopLossPrice: try row.decodeIfPresent(Decimal.self, forKey: .stopLossPrice),
             takeProfitPrice: try row.decodeIfPresent(Decimal.self, forKey: .takeProfitPrice),
+            takeProfitLevels: try row.decodeIfPresent([AITakeProfitLevel].self, forKey: .takeProfitLevels),
             confidence: try row.decode(Double.self, forKey: .confidence),
             winRate: try row.decodeIfPresent(Double.self, forKey: .winRate),
             riskRewardRatio: try row.decodeIfPresent(Double.self, forKey: .riskRewardRatio),
@@ -1559,6 +1562,24 @@ public struct StrategyStatus: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// Source and freshness information returned with an account risk snapshot.
+/// Fields are optional because paper and exchange responses publish different
+/// quality signals, and older snapshots did not include this object.
+public struct RiskDataQuality: Codable, Equatable, Sendable {
+    public let available: Bool?
+    public let equitySource: String?
+    public let accountRefreshError: String?
+    public let accountRefreshRetryable: Bool?
+    /// Whether the daily mark-to-market result uses refreshed exchange equity.
+    public let dailyPnLAuthoritative: Bool?
+
+    public init(available: Bool? = nil, equitySource: String? = nil, accountRefreshError: String? = nil, accountRefreshRetryable: Bool? = nil, dailyPnLAuthoritative: Bool? = nil) {
+        self.available = available; self.equitySource = equitySource
+        self.accountRefreshError = accountRefreshError; self.accountRefreshRetryable = accountRefreshRetryable
+        self.dailyPnLAuthoritative = dailyPnLAuthoritative
+    }
+}
+
 public struct RiskSnapshot: Codable, Equatable, Sendable {
     public let equity: Decimal
     /// USDT balance used to size strategy pools; account equity remains the
@@ -1578,9 +1599,11 @@ public struct RiskSnapshot: Codable, Equatable, Sendable {
     /// Global notional reservations survive a service restart until the next
     /// authenticated account reconciliation removes completed exposure.
     public let globalNotionals: [String: Decimal]
+    public let dataQuality: RiskDataQuality?
 
-    public init(equity: Decimal = 0, equityPeak: Decimal = 0, dayStartEquity: Decimal = 0, dayStartAt: Date? = nil, dailyPnLPercent: Decimal = 0, drawdownPercent: Decimal = 0, killSwitch: Bool = false, reason: String? = nil, strategyCapitals: [StrategyCapitalSnapshot] = [], globalNotionals: [String: Decimal] = [:], strategyCapitalBase: Decimal? = nil) {
+    public init(equity: Decimal = 0, equityPeak: Decimal = 0, dayStartEquity: Decimal = 0, dayStartAt: Date? = nil, dailyPnLPercent: Decimal = 0, drawdownPercent: Decimal = 0, killSwitch: Bool = false, reason: String? = nil, strategyCapitals: [StrategyCapitalSnapshot] = [], globalNotionals: [String: Decimal] = [:], strategyCapitalBase: Decimal? = nil, dataQuality: RiskDataQuality? = nil) {
         self.equity = equity; self.strategyCapitalBase = strategyCapitalBase; self.equityPeak = equityPeak; self.dayStartEquity = dayStartEquity; self.dayStartAt = dayStartAt; self.dailyPnLPercent = dailyPnLPercent; self.drawdownPercent = drawdownPercent; self.killSwitch = killSwitch; self.reason = reason; self.strategyCapitals = strategyCapitals; self.globalNotionals = globalNotionals
+        self.dataQuality = dataQuality
     }
 }
 
@@ -1633,13 +1656,17 @@ public struct PaperOrderRequest: Codable, Equatable, Sendable {
 public struct PaperFill: Codable, Equatable, Sendable, Identifiable {
     public let id: UUID
     public let orderID: UUID
+    public let instrumentID: String?
+    public let side: String?
     public let price: Decimal
     public let quantity: Decimal
     public let fee: Decimal
     public let timestamp: Date
+    public let reason: String?
 
-    public init(id: UUID = UUID(), orderID: UUID, price: Decimal, quantity: Decimal, fee: Decimal, timestamp: Date = .now) {
-        self.id = id; self.orderID = orderID; self.price = price; self.quantity = quantity; self.fee = fee; self.timestamp = timestamp
+    public init(id: UUID = UUID(), orderID: UUID, instrumentID: String? = nil, side: String? = nil, price: Decimal, quantity: Decimal, fee: Decimal, timestamp: Date = .now, reason: String? = nil) {
+        self.id = id; self.orderID = orderID; self.instrumentID = instrumentID; self.side = side
+        self.price = price; self.quantity = quantity; self.fee = fee; self.timestamp = timestamp; self.reason = reason
     }
 }
 

@@ -18,19 +18,38 @@ from typing import Any, ClassVar, Literal, Mapping
 Action = Literal["hold", "open", "close", "cancel"]
 Direction = Literal["long", "short"]
 OrderType = Literal["market", "limit"]
-RunMode = Literal["disabled", "shadow", "demo-active", "live-armed", "halted"]
-AIProvider = Literal["codex", "deepseek-harness"]
+RunMode = Literal["disabled", "shadow", "paper-active", "demo-active", "live-armed", "halted"]
+AIProvider = Literal["codex"]
 _CONTRACT_ID_RE = re.compile(r"^[A-Z0-9]+-USDT-SWAP$")
 FIXED_AI_MODEL = "gpt-6-luna"
 FIXED_AI_REASONING_EFFORT = "medium"
-# Retained as a compatibility field for older persisted strategy configs. AI
-# entries are gated by current exchange positions and pending orders; a fixed
-# time-based same-contract cooldown is no longer enforced.
-AI_ENTRY_COOLDOWN_SECONDS = 0
+# A losing stop should not be followed immediately by a fresh signal on the
+# same contract. These defaults are deliberately long enough to require a
+# new market structure rather than a fast reversal re-entry.
+#
+# The durations are floats on purpose: the dataclass defaults and the values
+# parsed from JSON must serialize identically, otherwise the same logical
+# configuration would produce two different decision fingerprints (and, before
+# that, an int/float drift in every persisted config round trip).
+DEFAULT_STOP_LOSS_COOLDOWN_SECONDS = float(4 * 60 * 60)
+DEFAULT_RECENT_STOP_LOSS_WINDOW_SECONDS = float(60 * 60)
+DEFAULT_RECENT_STOP_LOSS_LIMIT = 2
+# Fixed account-level daily-loss circuit breaker as a percentage of the UTC
+# day-start equity. This is a safety boundary, not a per-strategy parameter:
+# the research allocation ceilings are derived from the same 5% (see
+# scripts/validate_strategy_sync.py and Sources/TradingDomain/Domain.swift).
+# Every layer that gates entries imports this one constant.
+ACCOUNT_DAILY_LOSS_PERCENT = 5.0
 # Four parallel analysis groups can each carry tens of thousands of tokens.
 # Keep enough wall-clock budget for provider queueing and model processing.
 DEFAULT_CLI_TIMEOUT_SECONDS = 90.0
 LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS = 45.0
+# How old a snapshot's market data may be when an entry is admitted. This is
+# also the ceiling for the whole grouped model pipeline: a decision produced
+# after the window could not authorize an entry anyway. It is configurable
+# because it must track the provider's real latency, but it is a protective
+# control, so it is not part of the conversational patch surface.
+DEFAULT_SNAPSHOT_MAX_AGE_SECONDS = 90.0
 
 
 class SchemaError(ValueError):
@@ -257,7 +276,6 @@ class AIDecision:
     instrumentID: str | None = None
     direction: Direction | None = None
     orderType: OrderType | None = None
-    riskBudgetPercent: float | None = None
     limitPrice: float | None = None
     stopLossPrice: float | None = None
     takeProfitPrice: float | None = None
@@ -281,6 +299,8 @@ class AIDecision:
 
     _FIELDS: ClassVar[set[str]] = {
         "schemaVersion", "decisionId", "snapshotId", "action", "instrumentID", "direction",
+        # riskBudgetPercent is retired: no server code ever consumed it, so the
+        # key stays accepted for historical decisions and is ignored.
         "orderType", "riskBudgetPercent", "limitPrice", "stopLossPrice", "takeProfitPrice",
         "takeProfitLevels", "winRate", "riskRewardRatio", "leverage", "confidence", "validUntil", "reasonCode", "reason", "orderID", "assessments",
     }
@@ -325,7 +345,6 @@ class AIDecision:
         return cls(
             schemaVersion=1, decisionId=decision_id, snapshotId=snapshot_id, action=action,
             instrumentID=instrument, direction=direction, orderType=order_type,
-            riskBudgetPercent=_optional_number(row.get("riskBudgetPercent"), "decision.riskBudgetPercent", minimum=0, maximum=100),
             limitPrice=_optional_number(row.get("limitPrice"), "decision.limitPrice", minimum=0),
             stopLossPrice=_optional_number(row.get("stopLossPrice"), "decision.stopLossPrice", minimum=0),
             takeProfitPrice=_optional_number(row.get("takeProfitPrice"), "decision.takeProfitPrice", minimum=0),
@@ -432,10 +451,34 @@ class AISnapshot:
         return asdict(self)
 
 
+# Single declarative bound table for the AI configuration. Both the JSON path
+# (``from_dict``) and direct construction (``AIConfig(...)``) apply it, so a
+# caller cannot bypass a range by building the dataclass directly.
+_CONFIG_NUMBER_BOUNDS: dict[str, tuple[float | None, float | None]] = {
+    "minimumConfidence": (0, 1),
+    "decisionIntervalSeconds": (.1, None),
+    "cliTimeoutSeconds": (.1, None),
+    "snapshotMaxAgeSeconds": (5, 3600),
+    "maxOutputBytes": (1024, 10_000_000),
+    "maxConsecutiveFailures": (1, 100),
+    "maxDailyOrders": (1, 10000),
+    # Zero would reject every entry from the first round (``0 >= 0``), which is
+    # what ``allowOpen=false`` already expresses. Require a usable cap instead.
+    "maxDailyLosses": (1, 10000),
+    "marginPerOrderUSD": (0.01, 1_000_000),
+    "maxLeverage": (1, 125),
+    "stopLossCooldownSeconds": (0, 7 * 24 * 60 * 60),
+    "recentStopLossWindowSeconds": (1, 7 * 24 * 60 * 60),
+    "recentStopLossLimit": (1, 100),
+}
+_CONFIG_INTEGER_FIELDS: frozenset[str] = frozenset({
+    "maxOutputBytes", "maxConsecutiveFailures", "maxDailyOrders", "maxDailyLosses", "recentStopLossLimit",
+})
+
+
 @dataclass(frozen=True)
 class AIConfig:
-    # The strategy's decision engine. ``codex`` is the backwards-compatible
-    # default; DeepSeek Harness uses the local ACP stdio adapter.
+    # The supported decision engine; retained in JSON for client compatibility.
     provider: AIProvider = "codex"
     enabled: bool = False
     mode: RunMode = "disabled"
@@ -443,8 +486,8 @@ class AIConfig:
     minimumConfidence: float = 0.65
     decisionIntervalSeconds: float = 30.0
     cliTimeoutSeconds: float = DEFAULT_CLI_TIMEOUT_SECONDS
+    snapshotMaxAgeSeconds: float = DEFAULT_SNAPSHOT_MAX_AGE_SECONDS
     maxOutputBytes: int = 1_000_000
-    cooldownSeconds: float = 0.0
     maxConsecutiveFailures: int = 3
     allowOpen: bool = True
     allowClose: bool = True
@@ -456,12 +499,14 @@ class AIConfig:
     maxDailyLosses: int = 5
     marginPerOrderUSD: float = 500.0
     maxLeverage: float = 5.0
-    # Retain the legacy routing fields for configuration compatibility. Both
-    # routes now represent the same fixed model and reasoning effort.
+    stopLossCooldownSeconds: float = DEFAULT_STOP_LOSS_COOLDOWN_SECONDS
+    recentStopLossWindowSeconds: float = DEFAULT_RECENT_STOP_LOSS_WINDOW_SECONDS
+    recentStopLossLimit: int = DEFAULT_RECENT_STOP_LOSS_LIMIT
+    # Retain the legacy routing field for configuration compatibility. The
+    # automatic route is one fixed model and reasoning effort; the escalation
+    # route is retired because no code path ever consulted it.
     routineModel: str = FIXED_AI_MODEL
     routineReasoningEffort: str = FIXED_AI_REASONING_EFFORT
-    escalationModel: str = FIXED_AI_MODEL
-    escalationReasoningEffort: str = FIXED_AI_REASONING_EFFORT
 
     _FIELDS: ClassVar[set[str]] = {
         "provider",
@@ -470,49 +515,76 @@ class AIConfig:
         # are ignored and never emitted again, so dynamic boards cannot be
         # selected through the current API.
         "universeMode", "candidateLimit", "selectionLimit",
+        # Retired controls stay accepted so an existing ai-config.json keeps
+        # every other setting, but nothing reads them and to_dict drops them.
+        "cooldownSeconds", "escalationModel", "escalationReasoningEffort",
         "minimumConfidence", "decisionIntervalSeconds",
-        "cliTimeoutSeconds", "maxOutputBytes", "cooldownSeconds", "maxConsecutiveFailures",
+        "cliTimeoutSeconds", "snapshotMaxAgeSeconds", "maxOutputBytes", "maxConsecutiveFailures",
         "allowOpen", "allowClose", "allowCancel", "requireStopLoss",
         "maxDailyOrders", "maxDailyLosses", "marginPerOrderUSD", "maxLeverage",
-        "routineModel", "routineReasoningEffort", "escalationModel", "escalationReasoningEffort",
+        "stopLossCooldownSeconds", "recentStopLossWindowSeconds", "recentStopLossLimit",
+        "routineModel", "routineReasoningEffort",
     }
+
+    def __post_init__(self) -> None:
+        if self.provider != "codex":
+            raise SchemaError("config.provider must be codex")
+        # Apply the shared bound table so a directly constructed config cannot
+        # carry a value the JSON path would have rejected.
+        for name, (minimum, maximum) in _CONFIG_NUMBER_BOUNDS.items():
+            value = getattr(self, name)
+            check = _integer if name in _CONFIG_INTEGER_FIELDS else _number
+            check(value, f"config.{name}", minimum=minimum, maximum=maximum)
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any] | None) -> "AIConfig":
         row = _mapping(value or {}, "config")
         _reject_extra(row, cls._FIELDS, "config")
         provider = row.get("provider", "codex")
-        if provider not in {"codex", "deepseek-harness"}:
-            raise SchemaError("config.provider must be one of: codex, deepseek-harness")
+        if provider != "codex":
+            raise SchemaError("config.provider must be codex")
         bools = {key: bool(row.get(key, getattr(cls(), key))) for key in ("enabled", "allowOpen", "allowClose", "allowCancel", "requireStopLoss")}
         for key, val in bools.items():
             if not isinstance(row.get(key, val), bool):
                 raise SchemaError(f"config.{key} must be boolean")
         mode = row.get("mode", "disabled")
-        if mode not in {"disabled", "shadow", "demo-active", "live-armed", "halted"}:
+        if mode not in {"disabled", "shadow", "paper-active", "demo-active", "live-armed", "halted"}:
             raise SchemaError("config.mode is invalid")
         instruments = normalize_contract_ids(row.get("allowedInstruments", []), "config.allowedInstruments")
-        # Accept only the previous known routes during migration, then
-        # normalize them without discarding the user's other settings.
+        # Accept only the previous known route during migration, then normalize
+        # it without discarding the user's other settings. Retired fields
+        # (cooldownSeconds, escalationModel, escalationReasoningEffort) are
+        # accepted by _FIELDS and intentionally ignored here.
         _model_name(row.get("routineModel", FIXED_AI_MODEL), "config.routineModel", allowed={FIXED_AI_MODEL})
         _reasoning_effort(row.get("routineReasoningEffort", FIXED_AI_REASONING_EFFORT), "config.routineReasoningEffort", allowed={"low", FIXED_AI_REASONING_EFFORT})
-        _model_name(row.get("escalationModel", FIXED_AI_MODEL), "config.escalationModel", allowed={"gpt-6.1-sol", FIXED_AI_MODEL})
-        _reasoning_effort(row.get("escalationReasoningEffort", FIXED_AI_REASONING_EFFORT), "config.escalationReasoningEffort", allowed={FIXED_AI_REASONING_EFFORT})
+        # Bounds are enforced once, by __post_init__ through the shared table.
         return cls(
             provider=provider, enabled=bools["enabled"], mode=mode, allowedInstruments=tuple(instruments),
-            minimumConfidence=_number(row.get("minimumConfidence", .65), "config.minimumConfidence", minimum=0, maximum=1),
-            decisionIntervalSeconds=_number(row.get("decisionIntervalSeconds", 30), "config.decisionIntervalSeconds", minimum=.1),
-            cliTimeoutSeconds=_number(row.get("cliTimeoutSeconds", DEFAULT_CLI_TIMEOUT_SECONDS), "config.cliTimeoutSeconds", minimum=.1),
-            maxOutputBytes=int(_number(row.get("maxOutputBytes", 1_000_000), "config.maxOutputBytes", minimum=1024, maximum=10_000_000)),
-            # Read legacy values but normalize the field to zero. The live
-            # entry gate is the current account position/order state.
-            cooldownSeconds=0.0,
-            maxConsecutiveFailures=int(_number(row.get("maxConsecutiveFailures", 3), "config.maxConsecutiveFailures", minimum=1, maximum=100)),
+            minimumConfidence=_number(row.get("minimumConfidence", .65), "config.minimumConfidence"),
+            decisionIntervalSeconds=_number(row.get("decisionIntervalSeconds", 30), "config.decisionIntervalSeconds"),
+            cliTimeoutSeconds=_number(row.get("cliTimeoutSeconds", DEFAULT_CLI_TIMEOUT_SECONDS), "config.cliTimeoutSeconds"),
+            snapshotMaxAgeSeconds=_number(
+                row.get("snapshotMaxAgeSeconds", DEFAULT_SNAPSHOT_MAX_AGE_SECONDS), "config.snapshotMaxAgeSeconds",
+            ),
+            maxOutputBytes=int(_number(row.get("maxOutputBytes", 1_000_000), "config.maxOutputBytes")),
+            maxConsecutiveFailures=int(_number(row.get("maxConsecutiveFailures", 3), "config.maxConsecutiveFailures")),
             allowOpen=bools["allowOpen"], allowClose=bools["allowClose"], allowCancel=bools["allowCancel"], requireStopLoss=bools["requireStopLoss"],
-            maxDailyOrders=_integer(row.get("maxDailyOrders", 20), "config.maxDailyOrders", minimum=1, maximum=10000),
-            maxDailyLosses=_integer(row.get("maxDailyLosses", 5), "config.maxDailyLosses", minimum=0, maximum=10000),
-            marginPerOrderUSD=_number(row.get("marginPerOrderUSD", 500), "config.marginPerOrderUSD", minimum=0.01, maximum=1_000_000),
-            maxLeverage=_number(row.get("maxLeverage", 5), "config.maxLeverage", minimum=1, maximum=125),
+            maxDailyOrders=_integer(row.get("maxDailyOrders", 20), "config.maxDailyOrders"),
+            maxDailyLosses=_integer(row.get("maxDailyLosses", 5), "config.maxDailyLosses"),
+            marginPerOrderUSD=_number(row.get("marginPerOrderUSD", 500), "config.marginPerOrderUSD"),
+            maxLeverage=_number(row.get("maxLeverage", 5), "config.maxLeverage"),
+            stopLossCooldownSeconds=_number(
+                row.get("stopLossCooldownSeconds", DEFAULT_STOP_LOSS_COOLDOWN_SECONDS),
+                "config.stopLossCooldownSeconds",
+            ),
+            recentStopLossWindowSeconds=_number(
+                row.get("recentStopLossWindowSeconds", DEFAULT_RECENT_STOP_LOSS_WINDOW_SECONDS),
+                "config.recentStopLossWindowSeconds",
+            ),
+            recentStopLossLimit=_integer(
+                row.get("recentStopLossLimit", DEFAULT_RECENT_STOP_LOSS_LIMIT),
+                "config.recentStopLossLimit",
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -520,18 +592,14 @@ class AIConfig:
         result["allowedInstruments"] = list(self.allowedInstruments)
         return result
 
-    def clone_for_provider(self, provider: AIProvider) -> "AIConfig":
-        """Clone every strategy parameter while changing only the provider."""
-        values = self.to_dict()
-        values["provider"] = provider
-        return AIConfig.from_dict(values)
-
-
 # These are the only configuration fields an AI conversation may suggest.
-# Worker enablement and account mode remain human-controlled operations.
+# Worker enablement, account mode, and the hard protective controls
+# (requireStopLoss, the stop-loss re-entry guards, cooldownSeconds) remain
+# human-controlled operations: spec/AI_DECISION_POLICY.md forbids the model
+# from changing fail-safe behaviour.
 AI_CHAT_PATCH_FIELDS: frozenset[str] = frozenset({
     "allowedInstruments", "minimumConfidence", "decisionIntervalSeconds",
-    "cooldownSeconds", "allowOpen", "allowClose", "allowCancel", "requireStopLoss",
+    "allowOpen", "allowClose", "allowCancel",
     "maxDailyOrders", "maxDailyLosses", "marginPerOrderUSD", "maxLeverage",
 })
 
@@ -575,22 +643,19 @@ def normalize_ai_chat_patch(value: Mapping[str, Any] | None) -> dict[str, Any]:
         row["allowedInstruments"] = normalize_contract_ids(
             row["allowedInstruments"], "chat.suggestion.allowedInstruments", allow_empty=False
         )
-    for key in ("allowOpen", "allowClose", "allowCancel", "requireStopLoss"):
+    for key in ("allowOpen", "allowClose", "allowCancel"):
         if key in row and not isinstance(row[key], bool):
             raise SchemaError(f"chat.suggestion.{key} must be boolean")
     if "minimumConfidence" in row:
         row["minimumConfidence"] = _number(row["minimumConfidence"], "chat.suggestion.minimumConfidence", minimum=0, maximum=1)
-    for key in ("decisionIntervalSeconds", "cooldownSeconds"):
-        if key in row:
-            row[key] = _number(row[key], f"chat.suggestion.{key}", minimum=0.0 if key == "cooldownSeconds" else 0.1)
-    if "cooldownSeconds" in row:
-        # Keep old chat payloads schema-compatible while making the removed
-        # time-based restriction a no-op.
-        row["cooldownSeconds"] = 0.0
+    if "decisionIntervalSeconds" in row:
+        row["decisionIntervalSeconds"] = _number(row["decisionIntervalSeconds"], "chat.suggestion.decisionIntervalSeconds", minimum=0.1)
     for key in ("maxDailyOrders", "maxDailyLosses"):
         if key in row:
             value = row[key]
-            if isinstance(value, bool) or not isinstance(value, int) or value < (1 if key == "maxDailyOrders" else 0) or value > 10000:
+            # Both caps require at least one trade: zero would mean "never
+            # open again", which allowOpen=false already expresses.
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > 10000:
                 raise SchemaError(f"chat.suggestion.{key} must be an integer within the configured range")
     if "marginPerOrderUSD" in row:
         row["marginPerOrderUSD"] = _number(row["marginPerOrderUSD"], "chat.suggestion.marginPerOrderUSD", minimum=0.01, maximum=1_000_000)
@@ -701,14 +766,14 @@ def decision_json_schema(
         # fields remain nullable so a hold intent can still be concise.
         "required": [
             "schemaVersion", "decisionId", "snapshotId", "action", "instrumentID", "direction",
-            "orderType", "riskBudgetPercent", "limitPrice", "stopLossPrice", "takeProfitPrice",
+            "orderType", "limitPrice", "stopLossPrice", "takeProfitPrice",
             "takeProfitLevels", "winRate", "riskRewardRatio", "leverage", "confidence", "validUntil", "reasonCode", "reason", "orderID", "assessments",
         ],
         "properties": {
             "schemaVersion": {"type": "integer", "const": 1}, "decisionId": {"type": "string", "minLength": 1},
             "snapshotId": {"type": "string", "minLength": 1}, "action": {"type": "string", "enum": ["hold", "open", "close", "cancel"]},
             "instrumentID": {"type": ["string", "null"], "pattern": "^[A-Z0-9]+-USDT-SWAP$"}, "direction": {"type": ["string", "null"], "enum": ["long", "short", None]},
-            "orderType": {"type": ["string", "null"], "enum": ["market", "limit", None]}, "riskBudgetPercent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+            "orderType": {"type": ["string", "null"], "enum": ["market", "limit", None]},
             "limitPrice": {"type": ["number", "null"], "minimum": 0}, "stopLossPrice": {"type": ["number", "null"], "minimum": 0},
             "takeProfitPrice": {"type": ["number", "null"], "minimum": 0}, "leverage": {"type": ["number", "null"], "minimum": 0}, "confidence": {"type": "number", "minimum": 0, "maximum": 1},
             "takeProfitLevels": {
@@ -742,13 +807,11 @@ def ai_chat_json_schema() -> dict[str, Any]:
         },
         "minimumConfidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
         "decisionIntervalSeconds": {"type": ["number", "null"], "minimum": 0.1},
-        "cooldownSeconds": {"type": ["number", "null"], "minimum": 0},
         "allowOpen": {"type": ["boolean", "null"]},
         "allowClose": {"type": ["boolean", "null"]},
         "allowCancel": {"type": ["boolean", "null"]},
-        "requireStopLoss": {"type": ["boolean", "null"]},
         "maxDailyOrders": {"type": ["integer", "null"], "minimum": 1, "maximum": 10000},
-        "maxDailyLosses": {"type": ["integer", "null"], "minimum": 0, "maximum": 10000},
+        "maxDailyLosses": {"type": ["integer", "null"], "minimum": 1, "maximum": 10000},
         "marginPerOrderUSD": {"type": ["number", "null"], "minimum": 0.01, "maximum": 1000000},
         "maxLeverage": {"type": ["number", "null"], "minimum": 1, "maximum": 125},
     }

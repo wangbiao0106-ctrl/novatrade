@@ -22,6 +22,16 @@ private extension AIInstrumentAssessment {
     var winRateLabel: String { winRate.map { String(format: "%.1f%%", $0 * 100) } ?? "未估计" }
     var riskRewardLabel: String { riskRewardRatio.map { String(format: "%.2f", $0) } ?? "未估计" }
     var eligibilityLabel: String { entryEligible ? "模型通过" : "需等待" }
+    var takeProfitLabel: String {
+        guard let levels = takeProfitLevels, !levels.isEmpty else { return assessmentPrice(takeProfitPrice) }
+        return "\(levels.count) 档止盈"
+    }
+    var takeProfitDetails: String {
+        guard let levels = takeProfitLevels, !levels.isEmpty else { return assessmentPrice(takeProfitPrice) }
+        return levels.enumerated().map { index, level in
+            "第 \(index + 1) 档：\(assessmentPrice(level.price)) · 比例 \(level.quantityPercent.formatted(.number.precision(.fractionLength(0...6))))%"
+        }.joined(separator: "\n")
+    }
 }
 
 /// Preserve the proposed price's digits, including very small token prices.
@@ -97,7 +107,9 @@ struct AIAssessmentsSheet: View {
                     .width(min: 110, ideal: 130)
                 TableColumn("止损价") { row in Text(assessmentPrice(row.stopLossPrice)).monospacedDigit() }
                     .width(min: 110, ideal: 130)
-                TableColumn("止盈价") { row in Text(assessmentPrice(row.takeProfitPrice)).monospacedDigit() }
+                TableColumn("止盈方案") { row in
+                    Text(row.takeProfitLabel).monospacedDigit().help(row.takeProfitDetails)
+                }
                     .width(min: 110, ideal: 130)
                 TableColumn("模型条件") { row in Text(row.eligibilityLabel) }
                     .width(min: 70, ideal: 85)
@@ -109,6 +121,9 @@ struct AIAssessmentsSheet: View {
                     Text("\(selectedAssessment.instrumentID) · \(selectedAssessment.directionLabel)")
                         .font(.headline)
                     AIAssessmentReason(assessment: selectedAssessment)
+                    if let levels = selectedAssessment.takeProfitLevels, !levels.isEmpty {
+                        AITakeProfitPlanView(levels: levels)
+                    }
                 }
                 .textSelection(.enabled)
                 .font(.callout)

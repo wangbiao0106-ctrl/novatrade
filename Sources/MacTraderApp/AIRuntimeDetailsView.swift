@@ -5,16 +5,10 @@ import TradingDomain
 /// Decision history uses only its own audit values, never the latest status.
 struct AIRuntimeDetailsView: View {
     @ObservedObject var model: DashboardModel
-    let strategy: AIStrategyID
     @State private var selectedAssessment: AIRuntimeAssessmentSelection?
 
-    init(model: DashboardModel, strategy: AIStrategyID = .codex) {
-        self.model = model
-        self.strategy = strategy
-    }
-
     private var entries: [AIRuntimeLogEntry] {
-        let records = model.aiDecisions(for: strategy).enumerated().sorted { lhs, rhs in
+        let records = model.aiDecisions.enumerated().sorted { lhs, rhs in
             let leftSecond = lhs.element.at?.timeIntervalSince1970.rounded(.down) ?? -.infinity
             let rightSecond = rhs.element.at?.timeIntervalSince1970.rounded(.down) ?? -.infinity
             if leftSecond == rightSecond { return lhs.offset > rhs.offset }
@@ -41,7 +35,7 @@ struct AIRuntimeDetailsView: View {
 
     private var submissions: [String: LiveOrderResult] {
         var result: [String: LiveOrderResult] = [:]
-        for record in model.aiAudit(for: strategy).reversed() {
+        for record in model.aiAudit.reversed() {
             guard record.type == "submitted", let order = record.order,
                   let clientID = order.clientOrderID, result[clientID] == nil else { continue }
             result[clientID] = order
@@ -186,6 +180,11 @@ private struct AIRuntimeDecisionRow: View {
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
+            if let levels = decision.takeProfitLevels, !levels.isEmpty {
+                AITakeProfitPlanView(levels: levels)
+            } else if audit.accepted == false, let levels = audit.rawDecision?.takeProfitLevels, !levels.isEmpty {
+                AITakeProfitPlanView(levels: levels, title: "模型原始分批止盈方案（未执行）")
+            }
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(executionLabel)
                     .foregroundStyle(executionColor)

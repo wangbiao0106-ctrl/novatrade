@@ -16,6 +16,20 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
+try:
+    from .ai_schema import (
+        DEFAULT_RECENT_STOP_LOSS_LIMIT,
+        DEFAULT_RECENT_STOP_LOSS_WINDOW_SECONDS,
+        DEFAULT_STOP_LOSS_COOLDOWN_SECONDS,
+    )
+except ImportError:  # bundled backend modules are launched as scripts
+    from ai_schema import (
+        DEFAULT_RECENT_STOP_LOSS_LIMIT,
+        DEFAULT_RECENT_STOP_LOSS_WINDOW_SECONDS,
+        DEFAULT_STOP_LOSS_COOLDOWN_SECONDS,
+    )
+
+
 class OrderGatewayError(ValueError):
     pass
 
@@ -40,6 +54,36 @@ def _now() -> str:
 
 def _utc_day(value: datetime | None = None) -> str:
     return (value or datetime.now(timezone.utc)).astimezone(timezone.utc).date().isoformat()
+
+
+def _event_datetime(value: Any) -> datetime | None:
+    """Parse ISO or OKX millisecond timestamps into an aware UTC datetime."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        raw = str(value).strip()
+        if not raw:
+            return None
+        # OKX history fields such as actualTriggerTime are epoch milliseconds.
+        if raw.replace(".", "", 1).isdigit():
+            timestamp = float(raw)
+            if not math.isfinite(timestamp):
+                return None
+            if abs(timestamp) >= 100_000_000_000:
+                timestamp /= 1000.0
+            return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _iso_datetime(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
@@ -107,6 +151,10 @@ class OrderGateway:
             "maxMarginPercent": 25.0,
             "minOrderIntervalSeconds": 15.0,
             "maxOrdersPerHour": 60.0,
+            # Final leverage boundary. The AI policy caps at AIConfig.maxLeverage
+            # (itself <= 125); this is what stops a hand-written live request
+            # from asking the exchange for an unbounded multiplier.
+            "maxLeverage": 125.0,
             **(limits or {}),
         }
         self._lock = asyncio.Lock()
@@ -141,11 +189,99 @@ class OrderGateway:
         rows = self._state.setdefault("reservations", {})
         return rows if isinstance(rows, dict) else {}
 
-    def snapshot(self) -> dict[str, Any]:
+    def _settled_stop_loss_events(self) -> list[tuple[datetime, dict[str, Any]]]:
+        """Return fully settled native stop-loss events from the durable audit."""
+        events: list[tuple[datetime, dict[str, Any]]] = []
+        self._guard_history_invalid = False
+        rows = self._state.get("audit", [])
+        if not isinstance(rows, list):
+            self._guard_history_invalid = True
+            return events
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if row.get("type") != "exit-settled" or str(row.get("actualSide") or "").lower() != "sl":
+                continue
+            if row.get("positionOpen") is not False:
+                # A partial or unconfirmed exit cannot start a new-entry
+                # timer, but a settled event with an unknown state is not
+                # safe to treat as a clean ledger either.
+                if "positionOpen" not in row:
+                    self._guard_history_invalid = True
+                continue
+            # Prefer the exchange trigger time and fall back to the local
+            # durable append time when older records lack a parseable trigger.
+            timestamp = _event_datetime(row.get("triggerTime")) or _event_datetime(row.get("at"))
+            instrument_id = str(row.get("instrumentID") or "").strip()
+            if timestamp is None or not instrument_id:
+                self._guard_history_invalid = True
+                continue
+            event = dict(row)
+            event["instrumentID"] = instrument_id
+            event["closedAt"] = _iso_datetime(timestamp)
+            events.append((timestamp, event))
+        events.sort(key=lambda item: item[0])
+        return events
+
+    def guard_snapshot(
+        self, *, stop_loss_cooldown_seconds: float = DEFAULT_STOP_LOSS_COOLDOWN_SECONDS,
+        recent_stop_loss_window_seconds: float = DEFAULT_RECENT_STOP_LOSS_WINDOW_SECONDS,
+        recent_stop_loss_limit: int = DEFAULT_RECENT_STOP_LOSS_LIMIT,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Project durable stop-loss gates for account snapshots and policy."""
+        try:
+            cooldown = float(stop_loss_cooldown_seconds)
+            window = float(recent_stop_loss_window_seconds)
+        except (TypeError, ValueError) as error:
+            raise OrderGatewayError("stop-loss guard configuration is invalid") from error
+        if not math.isfinite(cooldown) or cooldown < 0 or not math.isfinite(window) or window <= 0:
+            raise OrderGatewayError("stop-loss guard configuration is invalid")
+        if isinstance(recent_stop_loss_limit, bool) or not isinstance(recent_stop_loss_limit, int) or recent_stop_loss_limit < 1:
+            raise OrderGatewayError("stop-loss guard configuration is invalid")
+        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        events = self._settled_stop_loss_events()
+        recent = [event for timestamp, event in events if current.timestamp() - timestamp.timestamp() <= window]
+        cooldowns: dict[str, dict[str, Any]] = {}
+        if cooldown > 0:
+            for timestamp, event in events:
+                blocked_until_timestamp = timestamp.timestamp() + cooldown
+                if blocked_until_timestamp <= current.timestamp():
+                    continue
+                instrument_id = str(event["instrumentID"])
+                candidate = {
+                    "closedAt": event["closedAt"],
+                    "blockedUntil": _iso_datetime(datetime.fromtimestamp(blocked_until_timestamp, tz=timezone.utc)),
+                    "reason": "stop_loss",
+                    "realizedPnL": event.get("realizedPnL"),
+                }
+                previous = cooldowns.get(instrument_id)
+                if previous is None or str(candidate["closedAt"]) > str(previous["closedAt"]):
+                    cooldowns[instrument_id] = candidate
+        burst_blocked_until = None
+        if len(recent) >= recent_stop_loss_limit:
+            oldest = min((_event_datetime(event["closedAt"]) for event in recent), default=None)
+            if oldest is not None:
+                blocked_until_timestamp = oldest.timestamp() + window
+                if blocked_until_timestamp > current.timestamp():
+                    burst_blocked_until = _iso_datetime(
+                        datetime.fromtimestamp(blocked_until_timestamp, tz=timezone.utc)
+                    )
+        return {
+            "reentryGuardAvailable": not getattr(self, "_guard_history_invalid", False),
+            "reentryCooldowns": cooldowns,
+            "recentStopLosses": recent,
+            "recentStopLossWindowSeconds": window,
+            "recentStopLossLimit": recent_stop_loss_limit,
+            "recentStopLossBurstBlockedUntil": burst_blocked_until,
+        }
+
+    def snapshot(self, **guard_options: Any) -> dict[str, Any]:
         return {
             "reservations": self.reservations.copy(),
             "dailyOrderCounts": dict(self._state.get("dailyOrderCounts", {})),
             "updatedAt": self._state.get("updatedAt"),
+            **self.guard_snapshot(**guard_options),
         }
 
     def daily_order_count(self, day: str | None = None) -> int:
@@ -369,6 +505,8 @@ class OrderGateway:
             notional = abs(quantity * instrument.ctVal * instrument.ctMult * order_price)
             reduce_only = bool(request.get("reduceOnly") or force_reduce_only)
             leverage = _number(request.get("leverage", 1), "leverage", positive=True)
+            if not reduce_only and leverage > float(self.limits["maxLeverage"]):
+                raise OrderGatewayError("leverage exceeds the configured maximum")
             margin_budget = request.get("marginUSD")
             if margin_budget is not None and not reduce_only:
                 margin_budget = _number(margin_budget, "marginUSD", positive=True)
@@ -402,6 +540,7 @@ class OrderGateway:
                 if unresolved_key in self.reservations:
                     raise OrderGatewayError("AI 上一次开仓结果未确认，暂不重复提交")
                 await self._reconcile_active_locked(demo=demo, instrument_id=instrument_id)
+                self._check_ai_entry_guard_locked(request, instrument_id, now)
             if source == "ai" and not reduce_only and self._active_ai_entry(instrument_id, client_id, demo):
                 raise OrderGatewayError("AI 同一合约已有持仓或挂单，请先撤单或平仓后再开仓")
             current_total = sum(
@@ -621,6 +760,38 @@ class OrderGateway:
             self._state["updatedAt"] = _now()
             self._write()
             return result
+
+    def _check_ai_entry_guard_locked(self, request: dict[str, Any], instrument_id: str, now: datetime) -> None:
+        """Apply durable stop-loss re-entry and burst gates under the ledger lock.
+
+        The values travel in the request because the AI config centre can change
+        them while this gateway instance is alive; the fallbacks are the shared
+        defaults, never per-call literals, so the policy has one definition.
+        """
+        try:
+            cooldown = float(request.get("stopLossCooldownSeconds", DEFAULT_STOP_LOSS_COOLDOWN_SECONDS))
+            window = float(request.get("recentStopLossWindowSeconds", DEFAULT_RECENT_STOP_LOSS_WINDOW_SECONDS))
+            limit = request.get("recentStopLossLimit", DEFAULT_RECENT_STOP_LOSS_LIMIT)
+        except (TypeError, ValueError) as error:
+            raise OrderGatewayError("stop-loss guard configuration is invalid") from error
+        if not math.isfinite(cooldown) or cooldown < 0 or not math.isfinite(window) or window <= 0:
+            raise OrderGatewayError("stop-loss guard configuration is invalid")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise OrderGatewayError("stop-loss guard configuration is invalid")
+        guard = self.guard_snapshot(
+            stop_loss_cooldown_seconds=cooldown,
+            recent_stop_loss_window_seconds=window,
+            recent_stop_loss_limit=limit,
+            now=now,
+        )
+        cooldown_row = guard["reentryCooldowns"].get(instrument_id)
+        if isinstance(cooldown_row, dict) and cooldown_row.get("blockedUntil"):
+            until = str(cooldown_row["blockedUntil"])
+            raise OrderGatewayError(f"AI re-entry blocked for {instrument_id} until {until}: previous stop-loss cooldown")
+        recent = guard["recentStopLosses"]
+        burst_until = guard.get("recentStopLossBurstBlockedUntil")
+        if isinstance(recent, list) and len(recent) >= limit and burst_until:
+            raise OrderGatewayError(f"AI entries paused until {burst_until}: {len(recent)} stop-loss exits in {window:g}s")
 
     async def audit(self) -> list[dict[str, Any]]:
         async with self._lock:

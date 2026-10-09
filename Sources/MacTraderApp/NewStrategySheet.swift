@@ -411,9 +411,12 @@ struct NewStrategySheet: View {
         return capitalAllocation.capital(for: capitalAllocation.availableAllocationPercent)
     }
 
-    /// Strategy entries follow the account selected in the connected OKX
-    /// profile. The strategy definition never chooses paper versus live.
+    /// Strategy entries follow the selected account. The strategy definition
+    /// never chooses paper versus live.
     private var submissionTarget: (text: String, icon: String, color: Color) {
+        if model.accountOverview.isLocalPaper {
+            return ("纸面交易 · 本地撮合成交", "doc.text", .secondary)
+        }
         switch model.accountOverview.mode {
         case .paper: return ("按当前 OKX 模拟账户提交", "shield.checkered", .secondary)
         case .live: return ("按当前 OKX 实盘账户提交", "bolt.shield.fill", .orange)

@@ -25,18 +25,23 @@
     "minimum_confidence": 0.65,
     "decision_interval_seconds": 30,
     "cli_timeout_seconds": 90,
+    "snapshot_max_age_seconds": 90,
     "max_output_bytes": 1000000,
     "max_consecutive_failures": 3,
     "max_daily_orders": 20,
     "max_daily_losses": 5,
     "margin_per_order_usd": 500,
-    "max_leverage": 5
+    "max_leverage": 5,
+    "stop_loss_cooldown_seconds": 14400,
+    "recent_stop_loss_window_seconds": 3600,
+    "recent_stop_loss_limit": 2
   },
   "risk_policy": {
     "allow_open": true,
     "allow_close": true,
     "allow_cancel": true,
     "require_stop_loss": true,
+    "account_daily_loss_percent": 5.0,
     "account_data_unknown": "fail_closed",
     "order_gateway": "shared_durable_ledger"
   }

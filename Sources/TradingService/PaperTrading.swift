@@ -685,7 +685,7 @@ public actor PaperBroker {
             let fee = abs(price * order.quantity) * feeRate
             let filled = PaperOrder(id: order.id, strategyID: order.strategyID, instrumentID: order.instrumentID, side: order.side, quantity: order.quantity, requestedAt: order.requestedAt, fillPrice: price, status: "filled", remoteOrderID: order.remoteOrderID)
             if let index = orders.firstIndex(where: { $0.id == order.id }) { orders[index] = filled }
-            fills.append(PaperFill(orderID: order.id, price: price, quantity: order.quantity, fee: fee, timestamp: timestamp))
+            fills.append(PaperFill(orderID: order.id, instrumentID: order.instrumentID, side: order.side, price: price, quantity: order.quantity, fee: fee, timestamp: timestamp))
             positions[order.instrumentID] = PaperPosition(instrumentID: order.instrumentID, side: order.side, quantity: order.quantity, entryPrice: price, markPrice: price, updatedAt: timestamp)
             positionStrategyIDs[order.instrumentID] = order.strategyID
             positionRiskAmounts[order.instrumentID] = reservedOrderRisk
@@ -711,7 +711,7 @@ public actor PaperBroker {
             let fee = abs(price * executedQuantity) * feeRate
             let filled = PaperOrder(id: order.id, strategyID: order.strategyID, instrumentID: order.instrumentID, side: order.side, quantity: order.quantity, requestedAt: order.requestedAt, fillPrice: price, status: "filled", remoteOrderID: order.remoteOrderID)
             if let index = orders.firstIndex(where: { $0.id == order.id }) { orders[index] = filled }
-            fills.append(PaperFill(orderID: order.id, price: price, quantity: executedQuantity, fee: fee, timestamp: timestamp))
+            fills.append(PaperFill(orderID: order.id, instrumentID: order.instrumentID, side: order.side, price: price, quantity: executedQuantity, fee: fee, timestamp: timestamp))
             let direction: Decimal = existing.side == "short" ? -1 : 1
             let strategyID = positionStrategyIDs[order.instrumentID] ?? order.strategyID
             let realized = (price - existing.entryPrice) * closeQuantity * direction - fee

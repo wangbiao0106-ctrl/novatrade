@@ -30,17 +30,29 @@ import uvicorn
 import websockets
 
 try:
-    from .ai_policy import _check_protection_geometry, entry_exposure_error, parse_time, snapshot_freshness
+    from .ai_policy import (
+        ACCOUNT_DAILY_LOSS_PERCENT,
+        MIN_EXIT_REASON_LENGTH,
+        MIN_PROTECTION_REPLACEMENT_CONFIDENCE,
+        _check_protection_geometry, entry_exposure_error, parse_time, snapshot_freshness,
+    )
     from .ai_schema import AIDecision, AIChatRequest, AIConfig, AISnapshot, SchemaError, normalize_contract_ids
     from .ai_worker import AIWorker, CodexError
     from .exit_audit import sync_native_protection_exits
     from .order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError
+    from .paper_trading import PaperTradingAccount
 except ImportError:  # bundled backend/main.py is launched as a script
-    from ai_policy import _check_protection_geometry, entry_exposure_error, parse_time, snapshot_freshness
+    from ai_policy import (
+        ACCOUNT_DAILY_LOSS_PERCENT,
+        MIN_EXIT_REASON_LENGTH,
+        MIN_PROTECTION_REPLACEMENT_CONFIDENCE,
+        _check_protection_geometry, entry_exposure_error, parse_time, snapshot_freshness,
+    )
     from ai_schema import AIDecision, AIChatRequest, AIConfig, AISnapshot, SchemaError, normalize_contract_ids
     from ai_worker import AIWorker, CodexError
     from exit_audit import sync_native_protection_exits
     from order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError
+    from paper_trading import PaperTradingAccount
 
 
 def load_env_file() -> None:
@@ -67,22 +79,91 @@ PORT = int(os.getenv("NOVATRADE_FASTAPI_PORT", "8787"))
 OKX_REST = os.getenv("OKX_REST_URL", "https://www.okx.com/api/v5").rstrip("/")
 OKX_WS = os.getenv("OKX_WS_URL", "wss://ws.okx.com:8443/ws/v5/business")
 MAX_CANDLES = 300
-AI_SNAPSHOT_MAX_AGE_SECONDS = 90.0
 OKX_API_KEY = os.getenv("OKX_API_KEY", "")
 OKX_SECRET_KEY = os.getenv("OKX_SECRET_KEY", "")
 OKX_PASSPHRASE = os.getenv("OKX_PASSPHRASE", "")
 OKX_DEMO = os.getenv("OKX_DEMO", "0").lower() in {"1", "true", "yes"}
 OKX_PROFILE = os.getenv("OKX_PROFILE", "python-fastapi")
 OKX_SITE = os.getenv("OKX_SITE", "global")
+TRADING_MODE = os.getenv("NOVATRADE_TRADING_MODE", "exchange").strip().lower()
+if TRADING_MODE not in {"exchange", "paper"}:
+    raise ValueError("NOVATRADE_TRADING_MODE must be exchange or paper")
+PAPER_INITIAL_USDT = float(os.getenv("NOVATRADE_PAPER_INITIAL_USDT", "5000"))
+if not math.isfinite(PAPER_INITIAL_USDT) or PAPER_INITIAL_USDT <= 0:
+    raise ValueError("NOVATRADE_PAPER_INITIAL_USDT must be positive and finite")
+if TRADING_MODE == "paper":
+    # Paper fills must use the production feed even when old demo overrides
+    # or exchange credentials remain in the user's environment.
+    OKX_REST = "https://www.okx.com/api/v5"
+    OKX_WS = "wss://ws.okx.com:8443/ws/v5/business"
 
 
-# Keep one connection pool for all public/private REST requests. Creating a
-# fresh AsyncClient for every request forces a new TLS handshake and made
-# switching the chart interval noticeably slower than the OKX client.
-OKX_HTTP_CLIENT = httpx.AsyncClient(
-    timeout=httpx.Timeout(20.0),
-    limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
-)
+# Keep one connection pool per asyncio event loop for all public/private REST
+# requests. `httpx.AsyncClient` owns asyncio futures through its connection
+# pool, so one module-level client cannot safely be reused by tests or a host
+# that recreates the loop. The facade keeps the existing injectable `get` and
+# `request` methods while routing each call to the pool for its current loop.
+class _LoopAwareHTTPClient:
+    def __init__(self) -> None:
+        self._clients: dict[asyncio.AbstractEventLoop, httpx.AsyncClient] = {}
+
+    def _client_for_loop(self) -> httpx.AsyncClient:
+        loop = asyncio.get_running_loop()
+        client = self._clients.get(loop)
+        if client is None or client.is_closed:
+            client = httpx.AsyncClient(
+                timeout=httpx.Timeout(20.0),
+                limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
+            )
+            self._clients[loop] = client
+        return client
+
+    async def get(self, *args: Any, **kwargs: Any) -> httpx.Response:
+        return await self._client_for_loop().get(*args, **kwargs)
+
+    async def request(self, *args: Any, **kwargs: Any) -> httpx.Response:
+        return await self._client_for_loop().request(*args, **kwargs)
+
+    async def aclose(self) -> None:
+        clients = list(self._clients.values())
+        self._clients.clear()
+        for client in clients:
+            with contextlib.suppress(Exception):
+                await client.aclose()
+
+
+OKX_HTTP_CLIENT = _LoopAwareHTTPClient()
+
+
+class _LoopAwareAsyncLock:
+    """Keep an asyncio lock per event loop for reusable module state."""
+
+    def __init__(self) -> None:
+        self._locks: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
+
+    def _lock_for_loop(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        lock = self._locks.get(loop)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[loop] = lock
+        return lock
+
+    async def acquire(self) -> bool:
+        return await self._lock_for_loop().acquire()
+
+    def release(self) -> None:
+        self._lock_for_loop().release()
+
+    def locked(self) -> bool:
+        return self._lock_for_loop().locked()
+
+    async def __aenter__(self) -> "_LoopAwareAsyncLock":
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        self.release()
 
 
 def now_iso() -> str:
@@ -145,15 +226,55 @@ def authorized(headers: Any, host: str | None, origin: str | None) -> bool:
 
 app = FastAPI(title="NovaTrade FastAPI", version="1")
 ai_worker: AIWorker | None = None
-# Strategy-specific workers share the market collector and order gateway but
-# keep provider config, lifecycle state and audit ledgers independent.
+# The Codex control-plane API retains its stable strategy identifier.
 ai_workers: dict[str, AIWorker] = {}
 order_gateway: OrderGateway | None = None
 native_exit_task: asyncio.Task | None = None
-native_exit_sync_lock = asyncio.Lock()
+native_exit_sync_lock = _LoopAwareAsyncLock()
 # Protection reconciliation can run from both AI workers. Serialize the
 # exchange write so two strategies cannot attach duplicate OCOs to one leg.
-position_protection_lock = asyncio.Lock()
+position_protection_lock = _LoopAwareAsyncLock()
+paper_account: PaperTradingAccount | None = None
+paper_market_task: asyncio.Task | None = None
+paper_quote_lock = _LoopAwareAsyncLock()
+paper_instrument_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
+
+
+def local_paper_mode() -> bool:
+    return TRADING_MODE == "paper"
+
+
+def _get_paper_account() -> PaperTradingAccount:
+    global paper_account
+    if paper_account is None:
+        paper_account = PaperTradingAccount(state_dir() / "paper-account.json", initial_balance=PAPER_INITIAL_USDT)
+    return paper_account
+
+
+async def _refresh_paper_quotes() -> None:
+    """Match only against production public quotes, including off-screen contracts."""
+    async with paper_quote_lock:
+        broker = _get_paper_account()
+        instruments = broker.tracked_instruments()
+        if not instruments:
+            return
+        payload = await okx_get("/market/tickers", {"instType": "SWAP"})
+        quotes = {str(row.get("instId")): row for row in payload.get("data", []) if isinstance(row, dict)}
+        for instrument in instruments:
+            row = quotes.get(instrument, {})
+            last = as_float(row.get("last"))
+            if last <= 0:
+                continue
+            await broker.mark(instrument, last, bid=as_float(row.get("bidPx")) or None, ask=as_float(row.get("askPx")) or None)
+
+
+async def _paper_market_loop() -> None:
+    while True:
+        try:
+            await _refresh_paper_quotes()
+        except (HTTPException, httpx.HTTPError, ValueError) as error:
+            append_runtime_event("warning", f"纸面撮合行情刷新失败：{_ai_collection_error(error)}")
+        await asyncio.sleep(1)
 
 # The API configuration center owns the two decision providers.  Keep this
 # catalog explicit so the UI can show where a strategy is defined and which
@@ -172,21 +293,7 @@ AI_STRATEGY_CATALOG: dict[str, dict[str, Any]] = {
         "liveGate": {
             "requiresManualEnable": True,
             "requiresLiveTradingSwitch": True,
-            "demoMode": "demo-active",
-            "liveMode": "live-armed",
-        },
-    },
-    "deepseek": {
-        "packageID": "deepseek_ai_decision",
-        "sourceOfTruth": "strategies/deepseek_ai_decision/STRATEGY.md",
-        "runtime": {
-            "handler": "backend.ai_worker.DeepSeekHarnessRunner",
-            "decisionEndpoint": "/api/v1/ai/strategies/deepseek",
-            "eventFingerprint": "market-facts-v1",
-        },
-        "liveGate": {
-            "requiresManualEnable": True,
-            "requiresLiveTradingSwitch": True,
+            "paperMode": "paper-active",
             "demoMode": "demo-active",
             "liveMode": "live-armed",
         },
@@ -196,7 +303,12 @@ AI_STRATEGY_CATALOG: dict[str, dict[str, Any]] = {
 
 @app.on_event("shutdown")
 async def close_okx_http_client() -> None:
-    global native_exit_task
+    global native_exit_task, paper_market_task
+    if paper_market_task is not None:
+        paper_market_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await paper_market_task
+        paper_market_task = None
     if native_exit_task is not None:
         native_exit_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -375,6 +487,8 @@ def okx_signature(timestamp: str, method: str, request_path: str, payload: str) 
 
 
 async def okx_private_request(method: str, path: str, *, params: dict[str, str] | None = None, body: Any = None) -> dict[str, Any]:
+    if local_paper_mode():
+        raise HTTPException(status_code=409, detail="本地纸面账户禁止调用 OKX 私有接口")
     if not private_ready():
         raise HTTPException(status_code=503, detail="OKX private REST credentials are not configured")
     query = f"?{urlencode(params)}" if params else ""
@@ -421,7 +535,7 @@ async def okx_private_request(method: str, path: str, *, params: dict[str, str] 
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    return {"status": "ok", "version": "fastapi-1", "mode": "paper", "updatedAt": now_iso()}
+    return {"status": "ok", "version": "fastapi-1", "mode": "paper" if local_paper_mode() or OKX_DEMO else "live" if private_ready() else "readOnly", "updatedAt": now_iso()}
 
 
 @app.get("/api/v1/contracts")
@@ -578,6 +692,8 @@ def legacy_entry_by_name(state: dict[str, Any], config: dict[str, Any], key: str
 
 
 async def strategy_capital_base(state: dict[str, Any]) -> float:
+    if local_paper_mode():
+        return as_float(_get_paper_account().account_snapshot().get("equityUSD"))
     risk_state = state.get("risk") if isinstance(state.get("risk"), dict) else {}
     if private_ready():
         try:
@@ -654,11 +770,29 @@ def strategy_target_snapshot(config: dict[str, Any], contracts_data: list[dict[s
 
 @app.get("/api/v1/account")
 async def account() -> dict[str, Any]:
+    if local_paper_mode():
+        await _refresh_paper_quotes()
+        worker = ai_workers.get("codex") or ai_worker
+        config = worker.config if worker is not None else AIConfig()
+        return _get_paper_account().account_snapshot(
+            stop_loss_cooldown_seconds=config.stopLossCooldownSeconds,
+            recent_stop_loss_window_seconds=config.recentStopLossWindowSeconds,
+            recent_stop_loss_limit=config.recentStopLossLimit,
+        )
+    worker = ai_workers.get("codex") or ai_worker
+    guard_config = worker.config if worker is not None else AIConfig()
+    gateway = _get_order_gateway()
+    guard_projection = getattr(gateway, "guard_snapshot", None)
+    live_guard = guard_projection(
+        stop_loss_cooldown_seconds=guard_config.stopLossCooldownSeconds,
+        recent_stop_loss_window_seconds=guard_config.recentStopLossWindowSeconds,
+        recent_stop_loss_limit=guard_config.recentStopLossLimit,
+    ) if callable(guard_projection) else {}
     if not private_ready():
         return {"mode": "readOnly", "profile": None, "site": None, "label": None, "authenticated": False,
                 "equityUSD": None, "availableEquityUSD": None, "totalAssetValueUSD": None, "todayPnLUSD": None,
                 "todayLossCount": None, "assets": [], "positions": [], "pendingOrders": None,
-                "pendingOrdersKnown": False, "updatedAt": now_iso()}
+                "pendingOrdersKnown": False, "updatedAt": now_iso(), **live_guard}
     balance, config, position_payload = await asyncio.gather(
         okx_private_request("GET", "/account/balance"),
         okx_private_request("GET", "/account/config"),
@@ -765,6 +899,7 @@ async def account() -> dict[str, Any]:
             },
             "assets": assets, "positions": positions, "positionsKnown": positions_available,
             "pendingOrders": pending_orders, "pendingOrdersKnown": pending_orders is not None,
+            **live_guard,
             "updatedAt": now_iso()}
 
 
@@ -1091,15 +1226,20 @@ async def _cancel_position_protections(instrument_id: str, protection: dict[str,
 def _protection_needs_adjustment(
     position: dict[str, Any], protection: dict[str, Any], assessment: Any, decision: AIDecision,
 ) -> bool:
-    """Permit line changes only for a high-confidence, material re-evaluation."""
+    """Permit only high-confidence, material line changes toward profit.
+
+    Protection replacement is atomic: a worse stop paired with a better target
+    must not replace the existing set. For a long position, higher stops and
+    targets are safer; for a short position, lower stops and targets are safer.
+    """
     direction = _position_direction(position)
     if direction not in {"long", "short"} or not protection.get("algoIDs"):
         return False
     model_confidence = as_float(getattr(decision, "confidence", 0))
     assessment_confidence = as_float(getattr(assessment, "confidence", 0))
-    if model_confidence < 0.80 or assessment_confidence < 0.80:
+    if model_confidence < MIN_PROTECTION_REPLACEMENT_CONFIDENCE or assessment_confidence < MIN_PROTECTION_REPLACEMENT_CONFIDENCE:
         return False
-    if len(str(getattr(decision, "reason", "") or "").strip()) < 8 or len(str(getattr(assessment, "reason", "") or "").strip()) < 8:
+    if len(str(getattr(decision, "reason", "") or "").strip()) < MIN_EXIT_REASON_LENGTH or len(str(getattr(assessment, "reason", "") or "").strip()) < MIN_EXIT_REASON_LENGTH:
         return False
     targets = [row["price"] for row in _active_assessment_targets(position, assessment)]
     current_targets = [as_float(value) for value in protection.get("takeProfitPrices", [])]
@@ -1110,6 +1250,15 @@ def _protection_needs_adjustment(
     if not targets or not current_targets or not current_stops or proposed_stop <= 0:
         return False
 
+    if not _protection_moves_toward_profit(
+        direction,
+        current_stops=current_stops,
+        proposed_stop=proposed_stop,
+        current_targets=current_targets,
+        proposed_targets=targets,
+    ):
+        return False
+
     def materially_different(left: list[float], right: list[float]) -> bool:
         if len(left) != len(right):
             return True
@@ -1118,8 +1267,89 @@ def _protection_needs_adjustment(
     return materially_different(targets, current_targets) or materially_different([proposed_stop], current_stops)
 
 
+def _protection_moves_toward_profit(
+    direction: str,
+    *,
+    current_stops: list[float],
+    proposed_stop: float | None,
+    current_targets: list[float],
+    proposed_targets: list[float],
+) -> bool:
+    """Return whether every replacement line is no worse than the current set."""
+    if direction not in {"long", "short"} or proposed_stop is None or proposed_stop <= 0:
+        return False
+    epsilon = 1e-12
+    if current_stops:
+        if direction == "long" and proposed_stop + epsilon < max(current_stops):
+            return False
+        if direction == "short" and proposed_stop - epsilon > min(current_stops):
+            return False
+    if current_targets and not proposed_targets:
+        return False
+    if not current_targets:
+        return True
+    reverse = direction == "short"
+    current = sorted(current_targets, reverse=reverse)
+    proposed = sorted(proposed_targets, reverse=reverse)
+    overlap = min(len(current), len(proposed))
+    if direction == "long":
+        if any(proposed[index] + epsilon < current[index] for index in range(overlap)):
+            return False
+        return len(proposed) <= len(current) or all(
+            value + epsilon >= current[-1] for value in proposed[len(current):]
+        )
+    if any(proposed[index] - epsilon > current[index] for index in range(overlap)):
+        return False
+    return len(proposed) <= len(current) or all(
+        value - epsilon <= current[-1] for value in proposed[len(current):]
+    )
+
+
 async def _reconcile_position_protections(decision: AIDecision, snapshot: AISnapshot) -> list[dict[str, Any]]:
     """Every model cycle restores missing protection on known positions."""
+    if local_paper_mode():
+        restored = []
+        broker = _get_paper_account()
+        async with position_protection_lock:
+            for position in broker.positions():
+                assessment = _position_assessment(decision, position)
+                if assessment is None or not _protection_is_reasonable(position, assessment):
+                    continue
+                missing_tp = not position.get("takeProfitPrice")
+                missing_sl = not position.get("stopLossPrice")
+                protection = {"algoIDs": [position["id"]], "takeProfitPrices": [row["price"] for row in position.get("takeProfitLevels", []) if not row.get("executed") and row.get("quantity", 0) > 0] or [position.get("takeProfitPrice")], "stopLossPrices": [position.get("stopLossPrice")]}
+                if not missing_tp and not missing_sl and not _protection_needs_adjustment(position, protection, assessment, decision):
+                    continue
+                adjust = not missing_tp and not missing_sl
+                current_target_prices = [value for value in protection["takeProfitPrices"] if as_float(value) > 0]
+                current_stop_prices = [value for value in protection["stopLossPrices"] if as_float(value) > 0]
+                proposed_target_prices = [row["price"] for row in _active_assessment_targets(position, assessment)]
+                proposed_stop_price = as_float(getattr(assessment, "stopLossPrice", None))
+                if not _protection_moves_toward_profit(
+                    _position_direction(position),
+                    current_stops=current_stop_prices,
+                    proposed_stop=proposed_stop_price,
+                    current_targets=current_target_prices,
+                    proposed_targets=proposed_target_prices,
+                ):
+                    append_runtime_event(
+                        "info", f"{position['instrumentID']} 跳过逆向止盈止损调整",
+                        {
+                            "type": "position-protection-regression-skipped", "instrumentID": position["instrumentID"],
+                            "decisionID": decision.decisionId, "currentStopLossPrices": current_stop_prices,
+                            "currentTakeProfitPrices": current_target_prices, "proposedStopLossPrice": proposed_stop_price,
+                            "proposedTakeProfitPrices": proposed_target_prices,
+                        },
+                    )
+                    continue
+                result = await broker.update_protection(
+                    position["id"],
+                    stop_loss=getattr(assessment, "stopLossPrice", None) if missing_sl or adjust else None,
+                    take_profit_levels=(_active_assessment_targets(position, assessment) or None) if missing_tp or adjust else None,
+                    take_profit=getattr(assessment, "takeProfitPrice", None) if missing_tp or adjust else None,
+                )
+                restored.append(result)
+        return restored
     if not OKX_DEMO and not bool(read_state("live-trading.json", {}).get("enabled", False)):
         return []
     account_data = snapshot.account if isinstance(snapshot.account, dict) else {}
@@ -1153,6 +1383,35 @@ async def _reconcile_position_protections(decision: AIDecision, snapshot: AISnap
                 continue
             has_tp = bool(current and current.get("takeProfitPrice")) or bool(position.get("takeProfitPrice"))
             has_sl = bool(current and current.get("stopLossPrice")) or bool(position.get("stopLossPrice"))
+            current_target_prices = [
+                as_float(value) for value in (current or {}).get("takeProfitPrices", []) if as_float(value) > 0
+            ]
+            if not current_target_prices and as_float(position.get("takeProfitPrice")) > 0:
+                current_target_prices = [as_float(position["takeProfitPrice"])]
+            current_stop_prices = [
+                as_float(value) for value in (current or {}).get("stopLossPrices", []) if as_float(value) > 0
+            ]
+            if not current_stop_prices and as_float(position.get("stopLossPrice")) > 0:
+                current_stop_prices = [as_float(position["stopLossPrice"])]
+            proposed_target_prices = [row["price"] for row in _active_assessment_targets(position, assessment)]
+            proposed_stop_price = as_float(getattr(assessment, "stopLossPrice", None))
+            if (has_tp or has_sl) and not _protection_moves_toward_profit(
+                _position_direction(position),
+                current_stops=current_stop_prices,
+                proposed_stop=proposed_stop_price,
+                current_targets=current_target_prices,
+                proposed_targets=proposed_target_prices,
+            ):
+                append_runtime_event(
+                    "info", f"{instrument} 跳过逆向止盈止损调整",
+                    {
+                        "type": "position-protection-regression-skipped", "instrumentID": instrument,
+                        "decisionID": decision.decisionId, "currentStopLossPrices": current_stop_prices,
+                        "currentTakeProfitPrices": current_target_prices, "proposedStopLossPrice": proposed_stop_price,
+                        "proposedTakeProfitPrices": proposed_target_prices,
+                    },
+                )
+                continue
             # New entries with staged targets attach only the stop on the
             # parent order; once filled, the first protection query can show
             # a one-sided/one-target set.  Complete a demonstrably short
@@ -1340,6 +1599,8 @@ async def _guard_ai_leverage_change(request: dict[str, Any]) -> None:
 
 
 async def submit_order(request: dict[str, Any], *, demo: bool) -> dict[str, Any]:
+    if local_paper_mode():
+        raise OrderNotSubmittedError("纸面交易必须通过本地撮合账本提交")
     if not private_ready():
         raise HTTPException(status_code=503, detail="OKX private REST credentials are not configured")
     if demo != OKX_DEMO:
@@ -1423,25 +1684,31 @@ async def submit_order(request: dict[str, Any], *, demo: bool) -> dict[str, Any]
 
 
 async def _account_swap_instruments() -> dict[str, dict[str, Any]]:
-    """Use the authenticated account's market, including its demo universe.
-
-    Public instruments describe production markets; a demo account can trade
-    only a subset. Never use that public list to authorize an order.
-    """
-    payload = await okx_private_request("GET", "/account/instruments", params={"instType": "SWAP"})
+    """Use production specs for local paper, account-specific specs for OKX."""
+    global paper_instrument_cache
+    if local_paper_mode():
+        current = asyncio.get_running_loop().time()
+        if paper_instrument_cache is not None and current - paper_instrument_cache[0] < 300:
+            return paper_instrument_cache[1]
+        payload = await okx_get("/public/instruments", {"instType": "SWAP"})
+    else:
+        payload = await okx_private_request("GET", "/account/instruments", params={"instType": "SWAP"})
     rows = payload.get("data")
     if not isinstance(rows, list):
         raise HTTPException(status_code=502, detail="OKX account instrument list is invalid")
-    return {
+    result = {
         str(row["instId"]): row for row in rows
         if isinstance(row, dict) and row.get("instId") and row.get("state") == "live"
         and row.get("settleCcy") == "USDT" and row.get("ctType") == "linear"
     }
+    if local_paper_mode():
+        paper_instrument_cache = (asyncio.get_running_loop().time(), result)
+    return result
 
 
 async def _ai_trading_availability(instruments: list[str]) -> dict[str, dict[str, Any]]:
     """Keep all observed contracts, separately report account execution limits."""
-    mode = "模拟盘" if OKX_DEMO else "实盘账户"
+    mode = "纸面交易" if local_paper_mode() else "模拟盘" if OKX_DEMO else "实盘账户"
     try:
         available = await _account_swap_instruments()
     except Exception as error:
@@ -1458,7 +1725,7 @@ async def _instrument_spec(instrument_id: str) -> InstrumentSpec:
     available = await _account_swap_instruments()
     row = available.get(instrument_id)
     if row is None:
-        mode = "模拟盘" if OKX_DEMO else "实盘账户"
+        mode = "纸面交易" if local_paper_mode() else "模拟盘" if OKX_DEMO else "实盘账户"
         raise HTTPException(status_code=422, detail=f"{instrument_id} 当前 OKX {mode}不可交易，未提交订单")
     try:
         return InstrumentSpec.from_okx(row)
@@ -1501,7 +1768,7 @@ async def _gateway_submit(request: dict[str, Any], demo: bool) -> dict[str, Any]
 
 async def _sync_native_protection_once() -> list[dict[str, Any]]:
     """Reconcile native OCO exits without delaying account/order requests."""
-    if not private_ready():
+    if local_paper_mode() or not private_ready():
         return []
     async with native_exit_sync_lock:
         try:
@@ -1518,7 +1785,7 @@ async def _sync_native_protection_once() -> list[dict[str, Any]]:
 
 async def _reconcile_order_gateway_once() -> None:
     """Resolve durable unknown submissions without stopping the worker loop."""
-    if not private_ready():
+    if local_paper_mode() or not private_ready():
         return
     try:
         await _get_order_gateway().reconcile(demo=OKX_DEMO)
@@ -1667,6 +1934,7 @@ class _AIDataCollector:
 
 
 async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
+    strategy_id = _strategy_id(strategy_id)
     """Build a credential-free snapshot using the selected strategy config."""
     collection_started = now_iso()
     collection_clock = asyncio.get_running_loop().time()
@@ -1752,6 +2020,14 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
     account_snapshot, account_quality = account_result
     risk_snapshot, risk_quality = risk_result
     account_snapshot = dict(account_snapshot or {})
+    if local_paper_mode():
+        # Keep the model's projection aligned with the worker's configurable
+        # cooldowns; the paper gateway repeats the same checks atomically.
+        account_snapshot = _get_paper_account().account_snapshot(
+            stop_loss_cooldown_seconds=config.stopLossCooldownSeconds,
+            recent_stop_loss_window_seconds=config.recentStopLossWindowSeconds,
+            recent_stop_loss_limit=config.recentStopLossLimit,
+        )
     risk_snapshot = dict(risk_snapshot or {})
     # Prescreening must distinguish a confirmed empty order set from an
     # account provider that does not expose pending orders. Older providers
@@ -1774,7 +2050,7 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
     # AI entry count is local and durable in the order gateway. Keep it in
     # the credential-free snapshot so Codex can explain why a new entry may
     # be refused before the gateway's atomic quota check.
-    account_snapshot["todayAIOrderCount"] = _get_order_gateway().daily_order_count()
+    account_snapshot["todayAIOrderCount"] = _get_paper_account().daily_order_count() if local_paper_mode() else _get_order_gateway().daily_order_count()
     collection_completed = now_iso()
     # Include collection latency in freshness: stamping only the end makes
     # earlier ticker/book data appear new after a slow request or retry.
@@ -1798,18 +2074,23 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
             "maxDailyLosses": config.maxDailyLosses,
             "marginPerOrderUSD": config.marginPerOrderUSD,
             "maxLeverage": config.maxLeverage,
+            "stopLossCooldownSeconds": config.stopLossCooldownSeconds,
+            "recentStopLossWindowSeconds": config.recentStopLossWindowSeconds,
+            "recentStopLossLimit": config.recentStopLossLimit,
             "todayAIOrderCount": account_snapshot.get("todayAIOrderCount", 0),
             "todayLossCount": account_snapshot.get("todayLossCount"),
             "observationCount": len(selected),
             "selectedInstruments": list(selected),
-            "tradingMode": "demo" if OKX_DEMO else "live",
+            "tradingMode": "paper" if local_paper_mode() else "demo" if OKX_DEMO else "live",
             "tradingAvailability": trading_availability,
         },
         dataFreshness={
             # Polling cadence and order-admission freshness are separate
             # controls. A slower decision interval must not make a snapshot
-            # stale while its model call is still being evaluated.
-            "capturedAt": captured, "maxAgeSeconds": AI_SNAPSHOT_MAX_AGE_SECONDS,
+            # stale while its model call is still being evaluated. The window
+            # is configured (snapshotMaxAgeSeconds) because it must track the
+            # provider's real latency, and it also bounds the grouped pipeline.
+            "capturedAt": captured, "maxAgeSeconds": config.snapshotMaxAgeSeconds,
             "collectionStartedAt": collection_started, "collectionCompletedAt": collection_completed,
             "collectionDurationSeconds": round(asyncio.get_running_loop().time() - collection_clock, 3),
             "availability": availability, "errors": collector.errors,
@@ -1858,6 +2139,9 @@ async def _ai_cancel(decision: AIDecision, snapshot: AISnapshot, *, demo: bool) 
         except (HTTPException, httpx.HTTPError, ValueError, TypeError) as error:
             raise HTTPException(status_code=409, detail="无法刷新挂单状态，撤单已拒绝") from error
     _pending_order_for_cancel(snapshot, decision)
+    if local_paper_mode():
+        await _get_paper_account().cancel_order(decision.orderID)
+        return {"action": "cancel", "orderID": decision.orderID, "instrumentID": decision.instrumentID, "status": "cancelled", "submittedAt": now_iso()}
     gateway = _get_order_gateway()
     cancel = getattr(gateway, "cancel_order", None)
     if cancel is not None:
@@ -1878,6 +2162,9 @@ async def _ai_cancel(decision: AIDecision, snapshot: AISnapshot, *, demo: bool) 
 
 async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: str = "codex") -> dict[str, Any]:
     """Apply current account/risk state immediately before submitting an AI intent."""
+    strategy_id = _strategy_id(strategy_id)
+    worker = ai_workers.get(strategy_id) or (ai_worker if strategy_id == "codex" else None)
+    config = worker.config if worker is not None else AIConfig()
     # Protection reconciliation is intentionally independent of the selected
     # top-level action. A hold/cancel round still evaluates every existing
     # position and restores missing OCO legs from the complete assessments.
@@ -1911,16 +2198,24 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
         )
         if current_snapshot:
             try:
-                snapshot = replace(snapshot, account=await account(), risk=await risk())
+                fresh_account = await account()
+                if local_paper_mode():
+                    fresh_account = _get_paper_account().account_snapshot(
+                        stop_loss_cooldown_seconds=config.stopLossCooldownSeconds,
+                        recent_stop_loss_window_seconds=config.recentStopLossWindowSeconds,
+                        recent_stop_loss_limit=config.recentStopLossLimit,
+                    )
+                snapshot = replace(snapshot, account=fresh_account, risk=await risk())
             except (HTTPException, httpx.HTTPError, ValueError, TypeError) as error:
                 raise HTTPException(status_code=409, detail="无法刷新账户或风险状态，开仓已拒绝") from error
             risk_quality = snapshot.risk.get("dataQuality") if isinstance(snapshot.risk, dict) else None
             daily_pnl = as_float(snapshot.risk.get("dailyPnLPercent"), math.nan) if isinstance(snapshot.risk, dict) else math.nan
-            if not isinstance(risk_quality, dict) or risk_quality.get("equitySource") != "okx" or risk_quality.get("accountRefreshError") or risk_quality.get("accountRefreshRetryable"):
+            expected_source = "paper" if local_paper_mode() else "okx"
+            if not isinstance(risk_quality, dict) or risk_quality.get("equitySource") != expected_source or risk_quality.get("accountRefreshError") or risk_quality.get("accountRefreshRetryable"):
                 raise HTTPException(status_code=409, detail="risk account refresh is unavailable")
             if not isinstance(snapshot.risk.get("killSwitch"), bool) or not math.isfinite(daily_pnl):
                 raise HTTPException(status_code=409, detail="risk state is unavailable")
-            if snapshot.risk.get("killSwitch") or daily_pnl <= -5:
+            if snapshot.risk.get("killSwitch") or daily_pnl <= -ACCOUNT_DAILY_LOSS_PERCENT:
                 raise HTTPException(status_code=409, detail="risk kill switch is active")
         account_data = snapshot.account if isinstance(snapshot.account, dict) else {}
         await _reconcile_position_protections(decision, snapshot)
@@ -1928,8 +2223,6 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
             exposure_error = entry_exposure_error(account_data, decision.instrumentID)
             if exposure_error:
                 raise HTTPException(status_code=409, detail=exposure_error)
-    worker = ai_workers.get(strategy_id) or (ai_worker if strategy_id == "codex" else None)
-    config = worker.config if worker is not None else AIConfig()
     entry_deadline = None
     if decision.action == "open":
         freshness = snapshot_freshness(snapshot, config, now=datetime.now(timezone.utc))
@@ -1953,12 +2246,20 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
             raise HTTPException(status_code=409, detail="maximum daily AI losses exceeded")
     live_enabled = bool(read_state("live-trading.json", {}).get("enabled", False))
     demo = OKX_DEMO
-    if not demo and not live_enabled:
+    if not local_paper_mode() and not demo and not live_enabled:
         raise HTTPException(status_code=409, detail="live trading is disabled")
     # Recheck the account's own instrument universe before reserving margin
     # or setting leverage. The public price feed alone cannot authorize it.
     spec = await _instrument_spec(decision.instrumentID)
-    last = await _ticker_last(decision.instrumentID)
+    quote = None
+    if local_paper_mode():
+        ticker = await okx_get("/market/ticker", {"instId": decision.instrumentID})
+        quote = (ticker.get("data") or [{}])[0]
+        last = as_float(quote.get("last"))
+        if last <= 0:
+            raise HTTPException(status_code=502, detail="OKX ticker did not include a valid last price")
+    else:
+        last = await _ticker_last(decision.instrumentID)
     if decision.action == "open":
         entry_price = decision.limitPrice if decision.orderType == "limit" else last
         decision_targets = _assessment_targets(decision)
@@ -2050,6 +2351,9 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
         "reduceOnly": reduce_only, "source": "ai",
         "decisionID": decision.decisionId,
         "strategyID": strategy_id,
+        "stopLossCooldownSeconds": config.stopLossCooldownSeconds,
+        "recentStopLossWindowSeconds": config.recentStopLossWindowSeconds,
+        "recentStopLossLimit": config.recentStopLossLimit,
         # Include strategy and action in the deterministic id. Providers can
         # legitimately emit the same decisionId, while an exit must never be
         # mistaken for a retried entry by the shared gateway ledger.
@@ -2067,6 +2371,13 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
         request["quantity"] = position_quantity
         if position_side in {"long", "short"}:
             request["positionSide"] = position_side
+    if local_paper_mode():
+        try:
+            output = await _get_paper_account().submit_intent(request, instrument=spec, price=last, quote=quote, daily_order_limit=config.maxDailyOrders)
+            append_runtime_event("order", f"纸面订单 {decision.instrumentID} {side} 已本地提交", {"order": output})
+            return output
+        except OrderGatewayError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
     gateway = _get_order_gateway()
     try:
         return await gateway.submit_intent(
@@ -2078,59 +2389,50 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
 
 
 def _strategy_id(value: str) -> str:
-    if value not in {"codex", "deepseek"}:
+    if value not in AI_STRATEGY_CATALOG:
         raise HTTPException(status_code=404, detail="unknown AI strategy")
     return value
 
 
-async def _ensure_ai_worker(strategy_id: str = "codex") -> AIWorker:
+def _worker_halted(worker: Any) -> bool:
+    """Return whether a worker is latched in the failure-halt state.
+
+    Read defensively so status reads also work against fakes and future worker
+    implementations that expose the same state under a different object.
+    """
+    status = getattr(worker, "status", None)
+    return getattr(status, "state", None) == "halted"
+
+
+async def _ensure_ai_worker(strategy_id: str = "codex", *, start: bool = False) -> AIWorker:
     global ai_worker
     strategy_id = _strategy_id(strategy_id)
     existing = ai_workers.get(strategy_id)
     if existing is None:
-        if strategy_id == "codex":
-            existing = AIWorker(
-                snapshot_provider=lambda: _ai_snapshot("codex"),
-                order_gateway=lambda decision, snapshot: _ai_execute(decision, snapshot, "codex"),
-                state_dir=state_dir(), strategy_id="codex",
-            )
-            ai_worker = existing
-        else:
-            codex = await _ensure_ai_worker("codex")
-            config_path = state_dir() / "ai-config-deepseek.json"
-            if config_path.exists():
-                config = None
-            else:
-                # Copy risk/timing/observation settings, but keep a newly
-                # discovered provider disabled until a human explicitly arms
-                # it. Cloning Codex's enabled/live mode would start a second
-                # entry worker on first launch without a separate opt-in.
-                values = codex.config.to_dict()
-                values.update({"provider": "deepseek-harness", "enabled": False, "mode": "disabled"})
-                config = AIConfig.from_dict(values)
-            existing = AIWorker(
-                snapshot_provider=lambda: _ai_snapshot("deepseek"),
-                order_gateway=lambda decision, snapshot: _ai_execute(decision, snapshot, "deepseek"),
-                config=config,
-                state_dir=state_dir(), strategy_id="deepseek",
-            )
-            if existing.config.provider != "deepseek-harness":
-                existing.update_config({"provider": "deepseek-harness"})
-            if config is not None:
-                existing.update_config({})
+        existing = AIWorker(
+            snapshot_provider=lambda: _ai_snapshot("codex"),
+            order_gateway=lambda decision, snapshot: _ai_execute(decision, snapshot, "codex"),
+            state_dir=state_dir(), strategy_id="codex",
+        )
+        ai_worker = existing
         ai_workers[strategy_id] = existing
-    if existing.config.enabled and existing.config.mode not in {"disabled", "halted"}:
+    # Status/configuration reads must not resurrect a worker that halted after
+    # repeated failures. An explicit enable/config update calls `start()`;
+    # startup may start a clean persisted configuration via `start=True`.
+    if start and not _worker_halted(existing) and existing.config.enabled and existing.config.mode not in {"disabled", "halted"}:
         await existing.start()
     return existing
 
 
 @app.on_event("startup")
 async def start_ai_worker() -> None:
-    global native_exit_task
-    await _ensure_ai_worker("codex")
-    # Initialize the cloned strategy on first launch. A persisted DeepSeek
-    # file always wins on later launches, so user changes are preserved.
-    await _ensure_ai_worker("deepseek")
+    global native_exit_task, paper_market_task
+    await _ensure_ai_worker("codex", start=True)
+    if local_paper_mode():
+        _get_paper_account()
+        if paper_market_task is None or paper_market_task.done():
+            paper_market_task = asyncio.create_task(_paper_market_loop())
+        return
     await _reconcile_order_gateway_once()
     if native_exit_task is None or native_exit_task.done():
         native_exit_task = asyncio.create_task(_native_protection_loop())
@@ -2138,6 +2440,9 @@ async def start_ai_worker() -> None:
 
 @app.get("/api/v1/live/trading-status")
 async def live_trading_status() -> dict[str, Any]:
+    if local_paper_mode():
+        return {"mode": "paper", "profile": "local-paper", "enabled": False,
+                "available": False, "message": "纸面交易 · 本地撮合", "updatedAt": now_iso()}
     enabled = read_state("live-trading.json", {}).get("enabled", False)
     mode = "paper" if OKX_DEMO else "live" if private_ready() else "readOnly"
     return {"mode": mode, "profile": OKX_PROFILE if private_ready() else None, "enabled": enabled,
@@ -2147,6 +2452,8 @@ async def live_trading_status() -> dict[str, Any]:
 
 @app.post("/api/v1/live/trading/enable")
 async def enable_live_trading() -> dict[str, Any]:
+    if local_paper_mode():
+        raise HTTPException(status_code=409, detail="纸面交易模式不支持启用实盘交易")
     if not private_ready() or OKX_DEMO:
         raise HTTPException(status_code=409, detail="live trading requires non-demo OKX private credentials")
     write_state("live-trading.json", {"enabled": True})
@@ -2161,12 +2468,14 @@ async def disable_live_trading() -> dict[str, Any]:
 
 @app.post("/api/v1/live/orders")
 async def live_order(request: dict[str, Any]) -> dict[str, Any]:
+    if local_paper_mode():
+        raise HTTPException(status_code=409, detail="纸面交易模式禁止提交 OKX 实盘订单")
     if not read_state("live-trading.json", {}).get("enabled", False):
         raise HTTPException(status_code=409, detail="live trading is disabled")
     if OKX_DEMO:
         raise HTTPException(status_code=409, detail="the configured OKX account is demo mode")
     current_risk = await risk()
-    if (current_risk.get("killSwitch") or as_float(current_risk.get("dailyPnLPercent")) <= -5) and not bool(request.get("reduceOnly")):
+    if (current_risk.get("killSwitch") or as_float(current_risk.get("dailyPnLPercent")) <= -ACCOUNT_DAILY_LOSS_PERCENT) and not bool(request.get("reduceOnly")):
         raise HTTPException(status_code=409, detail="risk kill switch is active")
     instrument_id = str(request.get("instrumentID") or "")
     spec = await _instrument_spec(instrument_id)
@@ -2190,21 +2499,35 @@ async def ai_config() -> dict[str, Any]:
 
 
 def _check_strategy_provider(strategy_id: str, values: dict[str, Any]) -> None:
-    expected = "deepseek-harness" if strategy_id == "deepseek" else "codex"
+    _strategy_id(strategy_id)
+    expected = "codex"
     provider = values.get("provider")
     if provider is not None and provider != expected:
         raise HTTPException(status_code=422, detail=f"{strategy_id} strategy requires provider={expected}")
 
 
+def _check_ai_run_mode(values: dict[str, Any]) -> None:
+    mode = values.get("mode")
+    if mode in {None, "disabled", "halted", "shadow"}:
+        return
+    if local_paper_mode():
+        if mode != "paper-active":
+            raise HTTPException(status_code=409, detail="本地纸面账户只能使用 paper-active 执行模式")
+    elif mode == "paper-active":
+        raise HTTPException(status_code=409, detail="paper-active requires a local paper account")
+    if mode == "live-armed" and (OKX_DEMO or not read_state("live-trading.json", {}).get("enabled", False)):
+        raise HTTPException(status_code=409, detail="live AI mode requires the separate live trading switch")
+
+
 @app.get("/api/v1/ai/strategies")
 async def ai_strategies() -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    for strategy_id in ("codex", "deepseek"):
+    for strategy_id in AI_STRATEGY_CATALOG:
         worker = await _ensure_ai_worker(strategy_id)
         catalog = AI_STRATEGY_CATALOG[strategy_id]
         result.append({
             "id": strategy_id,
-            "name": "DeepSeek Harness AI 策略" if strategy_id == "deepseek" else "Codex AI 策略",
+            "name": "Codex AI 策略",
             "provider": worker.config.provider,
             "config": worker.get_config(),
             "status": worker.get_status(),
@@ -2235,8 +2558,7 @@ async def update_strategy_ai_config(strategy_id: str, config: dict[str, Any]) ->
     strategy_id = _strategy_id(strategy_id)
     _check_strategy_provider(strategy_id, config)
     worker = await _ensure_ai_worker(strategy_id)
-    if config.get("mode") == "live-armed" and (OKX_DEMO or not read_state("live-trading.json", {}).get("enabled", False)):
-        raise HTTPException(status_code=409, detail="live AI mode requires the separate live trading switch")
+    _check_ai_run_mode(config)
     try:
         await _validate_fixed_instruments(config)
         value = worker.update_config(config)
@@ -2277,8 +2599,7 @@ async def strategy_ai_audit(strategy_id: str) -> list[dict[str, Any]]:
 async def update_ai_config(config: dict[str, Any]) -> dict[str, Any]:
     worker = await _ensure_ai_worker()
     _check_strategy_provider("codex", config)
-    if config.get("mode") == "live-armed" and (OKX_DEMO or not read_state("live-trading.json", {}).get("enabled", False)):
-        raise HTTPException(status_code=409, detail="live AI mode requires the separate live trading switch")
+    _check_ai_run_mode(config)
     try:
         await _validate_fixed_instruments(config)
         value = worker.update_config(config)
@@ -2365,14 +2686,21 @@ async def strategy_ai_chat(strategy_id: str, request: dict[str, Any]) -> dict[st
 @app.post("/api/v1/ai/enable")
 async def enable_ai() -> dict[str, Any]:
     worker = await _ensure_ai_worker()
+    # A failure halt is cleared only by an explicit configuration update, which
+    # is the operator's review step. Enable must not double as that recovery:
+    # update_config resets the durable latch, so checking the status here (and
+    # returning before it) keeps the two paths distinct.
+    if _worker_halted(worker):
+        raise HTTPException(status_code=409, detail="AI worker is halted; save a configuration update after reviewing the error")
     if worker.config.mode == "disabled":
-        if not OKX_DEMO and not read_state("live-trading.json", {}).get("enabled", False):
+        if not local_paper_mode() and not OKX_DEMO and not read_state("live-trading.json", {}).get("enabled", False):
             raise HTTPException(status_code=409, detail="enable live trading before arming AI for live orders")
-        mode = "demo-active" if OKX_DEMO else "live-armed"
+        mode = "paper-active" if local_paper_mode() else "demo-active" if OKX_DEMO else "live-armed"
         worker.update_config({"enabled": True, "mode": mode})
     elif worker.config.mode == "halted":
-        raise HTTPException(status_code=409, detail="AI worker is halted; update config after reviewing the error")
+        raise HTTPException(status_code=409, detail="AI worker is halted; save a configuration update after reviewing the error")
     else:
+        _check_ai_run_mode({"mode": worker.config.mode})
         worker.update_config({"enabled": True})
     await worker.start()
     return worker.get_status()
@@ -2381,13 +2709,16 @@ async def enable_ai() -> dict[str, Any]:
 @app.post("/api/v1/ai/strategies/{strategy_id}/enable")
 async def enable_strategy_ai(strategy_id: str) -> dict[str, Any]:
     worker = await _ensure_ai_worker(strategy_id)
+    if _worker_halted(worker):
+        raise HTTPException(status_code=409, detail="AI worker is halted; save a configuration update after reviewing the error")
     if worker.config.mode == "disabled":
-        if not OKX_DEMO and not read_state("live-trading.json", {}).get("enabled", False):
+        if not local_paper_mode() and not OKX_DEMO and not read_state("live-trading.json", {}).get("enabled", False):
             raise HTTPException(status_code=409, detail="enable live trading before arming AI for live orders")
-        worker.update_config({"enabled": True, "mode": "demo-active" if OKX_DEMO else "live-armed"})
+        worker.update_config({"enabled": True, "mode": "paper-active" if local_paper_mode() else "demo-active" if OKX_DEMO else "live-armed"})
     elif worker.config.mode == "halted":
-        raise HTTPException(status_code=409, detail="AI worker is halted; update config after reviewing the error")
+        raise HTTPException(status_code=409, detail="AI worker is halted; save a configuration update after reviewing the error")
     else:
+        _check_ai_run_mode({"mode": worker.config.mode})
         worker.update_config({"enabled": True})
     await worker.start()
     return worker.get_status()
@@ -2409,7 +2740,7 @@ async def disable_strategy_ai(strategy_id: str) -> dict[str, Any]:
 
 @app.post("/api/v1/ai/flatten")
 async def flatten_ai(strategy_id: str = "codex") -> dict[str, Any]:
-    """Flatten the whole OKX account and stop every AI entry worker.
+    """Flatten the active account and stop every AI entry worker.
 
     Orders and positions currently have no reliable strategy ownership field,
     so a strategy-specific flatten cannot safely target only one provider.
@@ -2424,6 +2755,12 @@ async def flatten_ai(strategy_id: str = "codex") -> dict[str, Any]:
         workers = {id(item): item for item in ai_workers.values()}
     for worker in workers.values():
         await worker.disable()
+    if local_paper_mode():
+        broker = _get_paper_account()
+        cancelled = await broker.cancel_pending_orders()
+        await _refresh_paper_quotes()
+        result = await broker.flatten()
+        return {**result, "cancelledOrderIDs": cancelled + result["cancelledOrderIDs"], "strategyID": strategy_id}
     if not private_ready():
         raise HTTPException(status_code=503, detail="OKX private REST credentials are not configured")
     if not OKX_DEMO and not read_state("live-trading.json", {}).get("enabled", False):
@@ -2490,6 +2827,8 @@ async def ai_decisions() -> list[dict[str, Any]]:
 
 @app.get("/api/v1/ai/audit")
 async def ai_audit() -> list[dict[str, Any]]:
+    if local_paper_mode():
+        return _get_paper_account().audit()
     return await _get_order_gateway().audit()
 
 
@@ -2588,6 +2927,11 @@ async def strategy_targets(fresh: bool = False) -> list[dict[str, Any]]:
 @app.get("/api/v1/risk")
 async def risk() -> dict[str, Any]:
     state = runtime_state()
+    if local_paper_mode():
+        await _refresh_paper_quotes()
+        value = _get_paper_account().risk_snapshot()
+        value["strategyCapitals"] = [strategy_capital_snapshot(state, config, value["equity"]) for config in strategy_configs()]
+        return value
     stored = state.get("risk") if isinstance(state.get("risk"), dict) else {}
     base = await strategy_capital_base(state)
     equity = as_float(stored.get("equity"))
@@ -2604,20 +2948,74 @@ async def risk() -> dict[str, Any]:
         except (HTTPException, httpx.HTTPError) as error:
             refresh_error = _ai_collection_error(error)
             refresh_retryable = _AIDataCollector._retryable(error)
+    # Mark-to-market daily loss measured against the UTC day-start equity. The
+    # baseline is rolled and persisted here because an exchange account carries
+    # no other day-start record: without it the account circuit breaker could
+    # never trip outside paper mode and every entry gate would read a
+    # meaningless zero.
+    today = datetime.now(timezone.utc).date().isoformat()
+    authoritative = equity_source == "okx" and equity > 0
+    day_start = as_float(stored.get("dayStartEquity"))
+    day_start_day = str(stored.get("dayStartDay") or "")
+    persist = False
+    if authoritative and (day_start <= 0 or day_start_day != today):
+        day_start = equity
+        day_start_day = today
+        stored["dayStartEquity"] = day_start
+        stored["dayStartDay"] = today
+        stored["dayStartAt"] = today + "T00:00:00Z"
+        persist = True
+    daily_pnl = as_float(stored.get("dailyPnLPercent"))
+    if authoritative and day_start > 0:
+        daily_pnl = (equity - day_start) / day_start * 100
+    peak = as_float(stored.get("equityPeak"), equity)
+    if authoritative and equity > peak:
+        peak = equity
+        stored["equityPeak"] = peak
+        persist = True
+    drawdown = (peak - equity) / peak * 100 if peak > 0 and equity > 0 else as_float(stored.get("drawdownPercent"))
+    kill_switch = bool(stored.get("killSwitch", False))
+    reason = stored.get("reason")
+    if authoritative and daily_pnl <= -ACCOUNT_DAILY_LOSS_PERCENT and not kill_switch:
+        # Latch the account breaker so a later recovery within the same UTC day
+        # cannot silently re-open entries.
+        kill_switch = True
+        reason = f"账户日内亏损达到 {ACCOUNT_DAILY_LOSS_PERCENT:g}%"
+        stored.update({"killSwitch": True, "reason": reason})
+        persist = True
     value = {"equity": equity, "strategyCapitalBase": base if base > 0 else None,
-             "equityPeak": as_float(stored.get("equityPeak"), equity),
-             "dayStartEquity": as_float(stored.get("dayStartEquity"), equity), "dayStartAt": None,
-             "dailyPnLPercent": as_float(stored.get("dailyPnLPercent")),
-             "drawdownPercent": as_float(stored.get("drawdownPercent")),
-             "killSwitch": bool(stored.get("killSwitch", False)), "reason": stored.get("reason"),
-             "dataQuality": {"equitySource": equity_source, "accountRefreshError": refresh_error, "accountRefreshRetryable": refresh_retryable},
+             "equityPeak": peak,
+             "dayStartEquity": day_start if day_start > 0 else equity,
+             "dayStartAt": stored.get("dayStartAt"),
+             "dailyPnLPercent": daily_pnl,
+             "drawdownPercent": drawdown,
+             "killSwitch": kill_switch, "reason": reason,
+             # dailyPnLAuthoritative is deliberately not named *Available /
+             # *Error / *Retryable: it is informational, while the existing
+             # refresh-error fields remain the fail-closed signals.
+             "dataQuality": {"equitySource": equity_source, "accountRefreshError": refresh_error,
+                             "accountRefreshRetryable": refresh_retryable,
+                             "dailyPnLAuthoritative": authoritative},
              "strategyCapitals": [strategy_capital_snapshot(state, config, base) for config in strategy_configs()],
              "globalNotionals": stored.get("globalNotionals", {})}
+    if persist:
+        state["risk"] = {
+            **stored,
+            **{key: value[key] for key in (
+                "equity", "equityPeak", "dayStartEquity", "dayStartAt",
+                "dailyPnLPercent", "drawdownPercent", "killSwitch", "reason",
+            )},
+        }
+        write_state("paper-state.json", state)
     return value
 
 
 @app.post("/api/v1/risk/reset")
 async def reset_risk() -> dict[str, Any]:
+    if local_paper_mode():
+        await _refresh_paper_quotes()
+        await _get_paper_account().reset_risk()
+        return await risk()
     state = runtime_state()
     value = await risk()
     value["killSwitch"] = False
@@ -2642,6 +3040,8 @@ async def append_log(log: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/v1/paper/orders")
 async def paper_orders() -> list[dict[str, Any]]:
+    if local_paper_mode():
+        return _get_paper_account().all_orders()
     state = runtime_state()
     orders = state.get("orders")
     return orders if isinstance(orders, list) else read_state("paper-orders.json", [])
@@ -2649,10 +3049,21 @@ async def paper_orders() -> list[dict[str, Any]]:
 
 @app.post("/api/v1/paper/orders")
 async def create_paper_order(order: dict[str, Any]) -> dict[str, Any]:
+    if local_paper_mode():
+        instrument_id = str(order.get("instrumentID") or "")
+        spec = await _instrument_spec(instrument_id)
+        ticker = await okx_get("/market/ticker", {"instId": instrument_id})
+        quote = (ticker.get("data") or [{}])[0]
+        price = as_float(quote.get("last"))
+        try:
+            result = await _get_paper_account().submit_intent(order, instrument=spec, price=price, quote=quote)
+        except OrderGatewayError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return next(row for row in _get_paper_account().all_orders() if row["id"] == result["orderID"])
     if not private_ready() or not OKX_DEMO:
         raise HTTPException(status_code=503, detail="paper orders require OKX_DEMO=1 and private REST credentials")
     current_risk = await risk()
-    if (current_risk.get("killSwitch") or as_float(current_risk.get("dailyPnLPercent")) <= -5) and not bool(order.get("reduceOnly")):
+    if (current_risk.get("killSwitch") or as_float(current_risk.get("dailyPnLPercent")) <= -ACCOUNT_DAILY_LOSS_PERCENT) and not bool(order.get("reduceOnly")):
         raise HTTPException(status_code=409, detail="risk kill switch is active")
     instrument_id = str(order.get("instrumentID") or "")
     spec = await _instrument_spec(instrument_id)
@@ -2673,6 +3084,8 @@ async def create_paper_order(order: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/v1/paper/fills")
 async def paper_fills() -> list[dict[str, Any]]:
+    if local_paper_mode():
+        return _get_paper_account().all_fills()
     state = runtime_state()
     fills = state.get("fills")
     return fills if isinstance(fills, list) else read_state("paper-fills.json", [])
@@ -2680,6 +3093,9 @@ async def paper_fills() -> list[dict[str, Any]]:
 
 @app.get("/api/v1/positions")
 async def positions() -> list[dict[str, Any]]:
+    if local_paper_mode():
+        await _refresh_paper_quotes()
+        return _get_paper_account().positions()
     if not private_ready():
         raise HTTPException(status_code=503, detail="OKX private REST credentials are not configured")
     payload = await okx_private_request("GET", "/account/positions", params={"instType": "SWAP"})
@@ -2689,6 +3105,9 @@ async def positions() -> list[dict[str, Any]]:
 
 @app.get("/api/v1/orders")
 async def orders() -> list[dict[str, Any]]:
+    if local_paper_mode():
+        await _refresh_paper_quotes()
+        return _get_paper_account().pending_orders()
     if not private_ready():
         raise HTTPException(status_code=503, detail="OKX private REST credentials are not configured")
     payload = await okx_private_request("GET", "/trade/orders-pending", params={"instType": "SWAP"})

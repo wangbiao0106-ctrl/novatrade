@@ -1,7 +1,7 @@
 # NovaTrade AI 决策公共规则
 
-本文档是 Codex 和 DeepSeek AI 决策策略共用的规则说明。两份策略目录中的
-`STRATEGY.md` 只补充 provider、模型路由、输入编码和实验开关；运行时仍以
+本文档是 Codex AI 决策策略的规则说明。策略目录中的
+`STRATEGY.md` 补充模型路由、分组分析和实验开关；运行时仍以
 backend 的 schema、policy 和订单网关为最终授权边界，运行时不读取本目录文件。
 
 ## 1. 数据契约与质量
@@ -20,6 +20,35 @@ backend 的 schema、policy 和订单网关为最终授权边界，运行时不�
 - 服务器负责快照时效、账户认证、风险状态、挂单和持仓状态。任何必需状态未知
   都不能按零、无风险或可交易处理；服务端 policy 的结果高于模型自报判断。
 
+### 账户模式与执行边界
+
+账户环境由人工配置的 `NOVATRADE_TRADING_MODE=paper|exchange` 决定，交易所模式
+再由 `OKX_DEMO=1|0` 选择模拟盘或实盘，模型不能选择或切换环境。默认配置使用
+`paper`，初始资金为 5000 USDT；清理或重置账户是人工
+操作，不属于模型决策动作。
+
+| AI 运行模式 | 行为与账户要求 |
+| --- | --- |
+| `disabled` / `halted` | 停止自动评估和新交易请求 |
+| `shadow` | 记录评估和决策，不提交模型交易意图 |
+| `paper-active` | 使用本地纸面账户，仅在本地撮合订单 |
+| `demo-active` | 使用 OKX 交易所模拟账户，由 OKX 模拟盘成交 |
+| `live-armed` | 使用 OKX 实盘账户，必须同时通过独立的人工实盘开关 |
+
+- 纸面模式的 K 线、ticker、盘口、资金费率和合约规格来自 OKX 真实市场的公共
+  REST/WebSocket，不使用交易所模拟盘的账户行情。可交易性使用公共市场中的
+  存续 USDT 线性永续合约，数量仍表示合约张数，按 `ctVal × ctMult` 计算名义价值。
+- 纸面账户不需要 OKX 私有凭据。`profile=local-paper` 表示服务端已读取本地账本，
+  `authenticated=true` 表示该账本可用；它不表示连接了交易所私有账户。资产、
+  保证金、挂单、持仓、成交、手续费和盈亏保存在本地 `paper-account.json`，
+  风险权益来源必须是 `dataQuality.equitySource=paper`。
+- 纸面市价单使用当前真实公共报价并计入配置的滑点和手续费；限价单在后续报价
+  触及挂单价时撮合。止损和分批止盈由本地撮合器处理，减仓只能减少当前持仓。
+  纸面结果使用这些本地成交规则计算，不代表交易所的成交队列、流动性或实际成交。
+- 有服务器 `tradingMode` 元数据时，`paper-active`、`demo-active`、`live-armed`
+  必须分别匹配 `paper`、`demo`、`live`。账户环境不匹配时拒绝交易；纸面模式仍
+  遵守同一份 assessment、时效、开仓质量、日损、每日限额和可用保证金门禁。
+
 ## 2. 决策优先级与开仓
 
 每轮最多选择一个合约和一个动作：`open`、`close`、`cancel` 或 `hold`。开仓门禁
@@ -31,13 +60,21 @@ backend 的 schema、policy 和订单网关为最终授权边界，运行时不�
   值、保护价和限价与顶层决策逐字段一致；
 - `allowOpen`、快照时效、认证账户、可交易性、账户和风险数据质量、日限额、可用
   保证金、杠杆和执行前复核全部通过；
-- 当前合约没有有效持仓，也没有活动挂单。这里是实时敞口门禁，不再使用同合约
-  的固定时间冷却；取消或平仓后，只有新的快照重新通过门禁才可再次开仓；
+- 账户级日损熔断未触发：以 UTC 日界的日初权益为基线按 mark-to-market 计算
+  `dailyPnLPercent`，达到 **-5%** 即锁存 `killSwitch`，只拒绝新开仓，平仓和撤单
+  仍可执行。该 5% 是固定安全边界（`backend/ai_schema.py` 的
+  `ACCOUNT_DAILY_LOSS_PERCENT`），不是策略参数，也不是模型可建议的字段；
+- 当前合约没有有效持仓，也没有活动挂单。止损平仓后，同品种默认冷却 4 小时，
+  冷却状态写入纸面账本并在重启后保留；任意 60 分钟内出现 2 次止损时，所有 AI
+  新开仓暂停，直到最早一次止损离开窗口。手动订单、保护复核、合理平仓和撤单不受
+  这两个 AI 入场闸门影响；冷却结束后仍需新的快照重新通过全部门禁。
 - 模型估计满足当前配置的 confidence，以及服务端的 `winRate >= 0.45` 和
   `riskRewardRatio >= 2.0`。分批止盈按最先可达的一档计算风险收益比，每一档都必须
   位于正确的盈利方向，不能用远端小比例目标掩盖近端低质量目标；
-- 必须提供有效止损。限价单必须提供有效 `limitPrice`，且价格几何符合方向：多仓为
-  `stopLossPrice < entry < takeProfit`，空仓为 `takeProfit < entry < stopLossPrice`。
+- 必须提供有效止损。该要求由 `requireStopLoss` 控制，默认 `true`；它是人工控制的
+  保护开关，不在对话可建议字段内（见第 5 节）。限价单必须提供有效 `limitPrice`，
+  且价格几何符合方向：多仓为 `stopLossPrice < entry < takeProfit`，空仓为
+  `takeProfit < entry < stopLossPrice`。
 
 服务端始终重新核验这些条件。模型不能通过改变环境、删减 assessment、猜测缺失
 账户数据或伪造订单回执绕过门禁。
@@ -65,11 +102,19 @@ backend 的 schema、policy 和订单网关为最终授权边界，运行时不�
 - `takeProfitLevels` 最多四档，价格必须唯一并全部处于方向正确的盈利侧，
   `quantityPercent` 必须为正且合计 100%。每档使用独立 OCO，所有剩余仓位保持有效
   止损；合约最小下单单位造成的取整由执行层处理。
+- 动态复评替换保护线必须单调向盈利方向移动：多仓止损和止盈只能上移，空仓止损
+  和止盈只能下移；如果同一组调整中任一侧逆向，整组调整跳过并保留现有保护。
 - 多档开仓不会把任意单一 `takeProfitPrice` 当成全部分批目标。开仓阶段可先附加
   止损，完整分批 OCO 在持仓可见后由管理流程补齐；单目标订单仍可使用单一附加保护。
 - 已有保护线只有在模型和对应 assessment 的 confidence 都至少为 `0.80`，且最新
   复评使止盈或止损发生至少 1% 的实质变化时才可替换。普通价格噪声、缺少证据或
-  无法确认保护单归属时不得撤换。
+  无法确认保护单归属时不得撤换。这两条门禁实现在执行层：置信度常量
+  `MIN_PROTECTION_REPLACEMENT_CONFIDENCE` 与替换判定位于
+  [`backend/main.py`](../backend/main.py) 的 `_protection_needs_adjustment`，分批档
+  位上限与 100% 合计校验位于 [`backend/ai_schema.py`](../backend/ai_schema.py) 的
+  `_take_profit_levels`。
+- 模型和 assessment 的 `reason` 都必须至少 8 个字符（`MIN_EXIT_REASON_LENGTH`）
+  才能触发保护线替换，与平仓/撤单的理由要求一致。
 - OCO “触发”不等于平仓成功。只有子单有实际成交且持仓状态确认符合结果时，才可
   记录平仓完成并释放开仓账本；部分成交或状态未知都保留剩余风险和 reservation。
 
@@ -82,11 +127,16 @@ backend 的 schema、policy 和订单网关为最终授权边界，运行时不�
 
 任何 schema、policy、快照时效、provider、网关或订单提交结果未知都按 fail-closed
 处理。模型不能读取凭据、调用交易工具、执行命令或直接下单；只有服务端订单网关
-可以提交、撤销或修改交易请求。默认运行模式为关闭或 `shadow`，进入模拟盘或实盘
-仍需人工启用相应闸门。
+可以提交、撤销或修改交易请求。默认运行模式为关闭或 `shadow`，进入纸面交易、
+交易所模拟盘或实盘仍需人工启用对应账户模式；实盘还需要独立人工授权开关。
 
-## 6. Provider 规则边界
+连续 `maxConsecutiveFailures`（默认 3）次模型或流程失败会进入 `halted` 并**持久化**：
+重启服务、读取状态或调用启用接口都不会恢复交易，只有人工保存一次配置更新
+（`PATCH /api/v1/ai/config`，即审阅错误后的显式操作）才清除熔断闩锁。可对话建议的
+配置字段不含 `requireStopLoss`、止损冷却参数、`enabled`、`mode`、`provider` 与
+`maxOutputBytes`，模型不能放宽保护类开关。
 
-Codex 和 DeepSeek 必须使用相同的快照、schema、policy 和订单网关语义。provider
-差异只包括模型路由、ACP/profile、K 线输入编码和实验阶段开关；这些差异不能改变
-观察池、开仓门禁、持仓管理、保护单或故障安全行为。
+## 6. 模型调用边界
+
+Codex 的模型路由、分组分析和实验阶段开关必须遵守服务端的快照、schema、policy
+和订单网关语义，不能改变观察池、开仓门禁、持仓管理、保护单或故障安全行为。

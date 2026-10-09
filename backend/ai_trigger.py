@@ -11,7 +11,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 import math
-import os
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 try:
@@ -65,6 +65,19 @@ def _price_bucket(value: Any, atr: Any) -> int | None:
     volatility = _number(atr)
     scale = abs(float(volatility)) * 0.25 if volatility and volatility > 0 else abs(float(price)) * 0.001
     return _bucket(price, max(scale, 1e-12))
+
+
+def _guard_timestamp(value: Any) -> datetime | None:
+    """Parse a timezone-aware guard timestamp without raising from prescreening."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
 
 
 def _stable(value: Any) -> Any:
@@ -181,6 +194,25 @@ def _account_view(account: Mapping[str, Any]) -> dict[str, Any]:
                 "takeProfitPrice", "stopLossPrice",
             )
         }))
+    now = datetime.now(timezone.utc)
+    active_cooldowns: dict[str, Any] = {}
+    cooldowns = account.get("reentryCooldowns")
+    if isinstance(cooldowns, Mapping):
+        for instrument, row in cooldowns.items():
+            if not isinstance(instrument, str) or not isinstance(row, Mapping):
+                continue
+            blocked_until = row.get("blockedUntil")
+            parsed = _guard_timestamp(blocked_until)
+            if parsed is not None and parsed > now:
+                active_cooldowns[instrument] = blocked_until
+    burst_until = account.get("recentStopLossBurstBlockedUntil")
+    burst_active = False
+    if burst_until is not None:
+        parsed_burst = _guard_timestamp(burst_until)
+        # Invalid state is intentionally visible to the worker. The policy
+        # will fail closed, while the fingerprint change ensures the worker
+        # does not silently prescreen a stale, malformed account snapshot.
+        burst_active = parsed_burst is None or parsed_burst > now
     return {
         "authenticated": account.get("authenticated"),
         "equityUSD": account.get("equityUSD"),
@@ -192,6 +224,11 @@ def _account_view(account: Mapping[str, Any]) -> dict[str, Any]:
         # static market snapshot can be prescreened forever after the quota is
         # reached, even though the admissible action has changed.
         "todayAIOrderCount": account.get("todayAIOrderCount"),
+        "reentryCooldowns": active_cooldowns,
+        "reentryGuardAvailable": account.get("reentryGuardAvailable"),
+        "recentStopLossCount": len(account.get("recentStopLosses", [])) if isinstance(account.get("recentStopLosses"), list) else None,
+        "recentStopLossLimit": account.get("recentStopLossLimit"),
+        "recentStopLossBurstActive": burst_active,
         "pendingOrdersKnown": account.get("pendingOrdersKnown"),
         "positions": sorted(position_view, key=lambda item: (str(item.get("instrumentID")), str(item.get("id")))),
         "pendingOrders": sorted(pending_view, key=lambda item: (str(item.get("instrumentID")), str(item.get("id")))),
@@ -249,18 +286,9 @@ def decision_fingerprint(snapshot: AISnapshot, config: AIConfig) -> str:
     methodology = facts_payload.get("methodology") if isinstance(facts_payload, Mapping) else None
     structure_hash = sha256(json.dumps(methodology, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     route = {
-        "model": os.getenv("NOVATRADE_DEEPSEEK_MODEL", "deepseek-v4-pro")
-        if config.provider == "deepseek-harness" else config.routineModel,
-        "reasoningEffort": os.getenv("NOVATRADE_DEEPSEEK_REASONING_EFFORT", "low")
-        if config.provider == "deepseek-harness" else config.routineReasoningEffort,
+        "model": config.routineModel,
+        "reasoningEffort": config.routineReasoningEffort,
     }
-    if config.provider == "deepseek-harness":
-        # DeepSeek-only prompt controls must not perturb Codex/GPT event
-        # semantics or trigger extra model calls in the other worker.
-        route.update({
-            "profile": os.getenv("NOVATRADE_DEEPSEEK_PROFILE", "optimized").strip().lower(),
-            "encoding": os.getenv("NOVATRADE_DEEPSEEK_ENCODING", "compact60").strip().lower(),
-        })
     payload = {
         "version": FINGERPRINT_VERSION,
         "observedInstruments": snapshot.observed_instruments(),
@@ -274,6 +302,13 @@ def decision_fingerprint(snapshot: AISnapshot, config: AIConfig) -> str:
             "mode": config.mode,
             "allowedInstruments": list(config.allowedInstruments),
             "minimumConfidence": config.minimumConfidence,
+            # decisionIntervalSeconds is the fallback snapshot age limit for
+            # providers without explicit freshness metadata, and
+            # snapshotMaxAgeSeconds is the real admission window: a change to
+            # either one changes entry admissibility and must move the
+            # fingerprint.
+            "decisionIntervalSeconds": config.decisionIntervalSeconds,
+            "snapshotMaxAgeSeconds": config.snapshotMaxAgeSeconds,
             "allowOpen": config.allowOpen,
             "allowClose": config.allowClose,
             "allowCancel": config.allowCancel,
@@ -282,6 +317,9 @@ def decision_fingerprint(snapshot: AISnapshot, config: AIConfig) -> str:
             "maxDailyLosses": config.maxDailyLosses,
             "marginPerOrderUSD": config.marginPerOrderUSD,
             "maxLeverage": config.maxLeverage,
+            "stopLossCooldownSeconds": config.stopLossCooldownSeconds,
+            "recentStopLossWindowSeconds": config.recentStopLossWindowSeconds,
+            "recentStopLossLimit": config.recentStopLossLimit,
         },
         "route": route,
         "structure": {
