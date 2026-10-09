@@ -30,6 +30,7 @@ import uvicorn
 import websockets
 
 try:
+    from .ai_entry_preflight import EntryPreflightRejected, check_entry_preflight
     from .ai_policy import (
         ACCOUNT_DAILY_LOSS_PERCENT,
         MIN_EXIT_REASON_LENGTH,
@@ -42,6 +43,7 @@ try:
     from .order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError
     from .paper_trading import PaperTradingAccount
 except ImportError:  # bundled backend/main.py is launched as a script
+    from ai_entry_preflight import EntryPreflightRejected, check_entry_preflight
     from ai_policy import (
         ACCOUNT_DAILY_LOSS_PERCENT,
         MIN_EXIT_REASON_LENGTH,
@@ -1598,6 +1600,35 @@ async def _guard_ai_leverage_change(request: dict[str, Any]) -> None:
             raise OrderNotSubmittedError("当前合约已有挂单，订单未提交；请先撤单")
 
 
+async def _ai_entry_preflight(
+    request: dict[str, Any], *, fee_rate: float | None = None, slippage_bps: float | None = None,
+) -> dict[str, Any]:
+    """Refresh all executable-price inputs at the final submission boundary."""
+    _assert_ai_entry_current(request)
+    instrument = str(request.get("instrumentID") or "")
+    try:
+        responses = await asyncio.wait_for(asyncio.gather(
+            okx_get("/market/ticker", {"instId": instrument}),
+            okx_get("/market/books", {"instId": instrument, "sz": "5"}),
+            okx_get("/public/mark-price", {"instType": "SWAP", "instId": instrument}),
+        ), timeout=5)
+        rows = []
+        for response in responses:
+            data = response.get("data") if isinstance(response, dict) else None
+            if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict):
+                raise EntryPreflightRejected("AI entry preflight: current market data is unavailable")
+            rows.append(data[0])
+        result = check_entry_preflight(
+            request, *rows, now=datetime.now(timezone.utc), fee_rate=fee_rate, slippage_bps=slippage_bps,
+        )
+    except EntryPreflightRejected:
+        raise
+    except (HTTPException, httpx.HTTPError, asyncio.TimeoutError, ValueError, TypeError) as error:
+        raise EntryPreflightRejected("AI entry preflight: unable to refresh current market data") from error
+    _assert_ai_entry_current(request)
+    return result
+
+
 async def submit_order(request: dict[str, Any], *, demo: bool) -> dict[str, Any]:
     if local_paper_mode():
         raise OrderNotSubmittedError("纸面交易必须通过本地撮合账本提交")
@@ -1672,6 +1703,9 @@ async def submit_order(request: dict[str, Any], *, demo: bool) -> dict[str, Any]
     # entry gate covers that final race window as well.
     if request.get("leverage") is not None and not request.get("reduceOnly"):
         await _guard_ai_leverage_change(request)
+        _assert_ai_entry_current(request)
+    if request.get("source") == "ai" and not request.get("reduceOnly"):
+        await _ai_entry_preflight(request)
         _assert_ai_entry_current(request)
     result = await okx_private_request("POST", "/trade/order", body=body)
     row = (result.get("data") or [{}])[0]
@@ -2367,15 +2401,30 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
         request["leverage"] = leverage
         request["marginUSD"] = config.marginPerOrderUSD
         request["_aiEntryDeadline"] = entry_deadline
+        reference = snapshot.tickers.get(decision.instrumentID, {})
+        request["_aiEntryReferencePrice"] = reference.get("last") if isinstance(reference, dict) else None
+        request["_aiEntryPlannedEntryPrice"] = (
+            decision.limitPrice if decision.orderType == "limit" else request["_aiEntryReferencePrice"]
+        )
+        request["_aiEntryTickSize"] = spec.tickSize
+        request["_aiEntryContractValue"] = spec.ctVal * spec.ctMult
     elif position_quantity > 0:
         request["quantity"] = position_quantity
         if position_side in {"long", "short"}:
             request["positionSide"] = position_side
     if local_paper_mode():
         try:
-            output = await _get_paper_account().submit_intent(request, instrument=spec, price=last, quote=quote, daily_order_limit=config.maxDailyOrders)
+            broker = _get_paper_account()
+            output = await broker.submit_intent(
+                request, instrument=spec, price=last, quote=quote, daily_order_limit=config.maxDailyOrders,
+                entry_preflight=lambda value: _ai_entry_preflight(
+                    value, fee_rate=broker.fee_rate, slippage_bps=broker.slippage_bps,
+                ),
+            )
             append_runtime_event("order", f"纸面订单 {decision.instrumentID} {side} 已本地提交", {"order": output})
             return output
+        except EntryPreflightRejected:
+            raise
         except OrderGatewayError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
     gateway = _get_order_gateway()
@@ -2384,6 +2433,8 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
             request, demo=demo, instrument=spec, price=last,
             available_equity=equity, daily_order_limit=config.maxDailyOrders,
         )
+    except EntryPreflightRejected:
+        raise
     except OrderGatewayError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

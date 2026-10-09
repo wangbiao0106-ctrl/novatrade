@@ -13,3 +13,5 @@ python3 scripts/test_ai_gateway.py
 ```
 
 事件预筛仍保持关闭，直到脱敏回放证明没有遗漏开仓、平仓或撤单触发。
+
+下单前行情复核的确定性回放及验收入口见 [`ENTRY_PREFLIGHT.md`](ENTRY_PREFLIGHT.md)。

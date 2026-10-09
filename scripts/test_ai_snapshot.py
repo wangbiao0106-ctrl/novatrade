@@ -219,6 +219,25 @@ class AISnapshotTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AISubmissionFreshnessTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        for method in ("get", "request"):
+            guard = patch.object(main.OKX_HTTP_CLIENT, method, new=AsyncMock(
+                side_effect=AssertionError("Unexpected exchange network request")))
+            guard.start()
+            self.addCleanup(guard.stop)
+        guard = patch.object(main, "okx_get", new=AsyncMock(side_effect=self.public_prices))
+        guard.start()
+        self.addCleanup(guard.stop)
+
+    async def public_prices(self, route, params):
+        timestamp = str(int(main.datetime.now(timezone.utc).timestamp() * 1000))
+        rows = {
+            "/market/ticker": {"instId": "BTC-USDT-SWAP", "last": "100", "ts": timestamp},
+            "/market/books": {"bids": [["99.99", "100"]], "asks": [["100.01", "100"]], "ts": timestamp},
+            "/public/mark-price": {"instId": "BTC-USDT-SWAP", "markPx": "100", "ts": timestamp},
+        }
+        return {"data": [rows[route]]}
+
     def fake_clock(self):
         captured = datetime(2026, 10, 5, 16, 28, 30, tzinfo=timezone.utc)
         clock = [captured + timedelta(seconds=19)]
@@ -233,6 +252,8 @@ class AISubmissionFreshnessTests(unittest.IsolatedAsyncioTestCase):
     def entry_request(self, deadline):
         return {"instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "market",
                 "quantity": 1, "clientOrderID": "aifreshness", "source": "ai", "leverage": 1,
+                "stopLossTriggerPrice": 90, "takeProfitTriggerPrice": 130,
+                "_aiEntryReferencePrice": 100, "_aiEntryPlannedEntryPrice": 100,
                 "_aiEntryDeadline": deadline}
 
     def gateway(self, directory):
@@ -256,6 +277,8 @@ class AISubmissionFreshnessTests(unittest.IsolatedAsyncioTestCase):
             "/account/positions", "/trade/orders-pending", "/trade/order",
         ])
         self.assertTrue(all("_aiEntryDeadline" not in call.kwargs.get("body", {}) for call in writes.await_args_list))
+        self.assertTrue(all(not any(key.startswith("_aiEntry") for key in call.kwargs.get("body", {}))
+                            for call in writes.await_args_list))
 
     async def test_staged_take_profit_is_deferred_instead_of_silently_attaching_first_target(self):
         captured, _, clock_type = self.fake_clock()
@@ -267,8 +290,8 @@ class AISubmissionFreshnessTests(unittest.IsolatedAsyncioTestCase):
             "takeProfitTriggerPrice": 110,
             "stopLossTriggerPrice": 90,
             "takeProfitLevels": [
-                {"price": 110, "quantityPercent": 50},
-                {"price": 120, "quantityPercent": 50},
+                {"price": 130, "quantityPercent": 50},
+                {"price": 140, "quantityPercent": 50},
             ],
         })
         with patch.object(main, "private_ready", return_value=True), \

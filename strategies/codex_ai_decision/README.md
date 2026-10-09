@@ -13,7 +13,7 @@
 - 配置中心 ID：`codex`
 - 实验室包 ID：`codex_ai_decision`
 - provider：`codex`，固定 `gpt-6-luna / medium`
-- 规则版本：1.1；默认每 10 分钟开始一次扫描，采集和推理耗时计入周期；事件预筛
+- 规则版本：1.2；默认每 10 分钟开始一次扫描，采集和推理耗时计入周期；事件预筛
   默认关闭，开启前需完成回放验收
 - 已收盘 4H K 线是多空入场的主依据，至少保留 20 根有效历史；其他周期、盘口和
   实时价格辅助执行与风控。历史不足时拒绝新开仓，已有持仓和挂单仍可管理
@@ -37,6 +37,11 @@ Swift 客户端通过 API 对齐配置与审计契约：参数设置可保存快
 扫描节奏与主周期的回归回放分别位于 `tests/test_scan_schedule.py` 和
 `tests/test_four_hour_scan.py`；默认值及 4H 主周期参数由 `tests/test_contract.py`
 与服务端常量逐项对齐。快照有效期独立保持默认 90 秒。
+
+规则 v1.2 增加实际发单前的实时 ticker / 五档盘口 / 标记价格复核，固定门禁位于
+`config/strategy.json` 的 `entry_preflight`，运行时实现为 `backend/ai_entry_preflight.py`。
+回放说明见 [`research/ENTRY_PREFLIGHT.md`](research/ENTRY_PREFLIGHT.md)，参数一致性和
+拒绝/通过场景由 `tests/test_entry_preflight.py` 验证；复核拒绝保留评估，不计入失败熔断。
 
 验证 AI worker 契约：
 

@@ -31,6 +31,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.9
 from typing import Any, Protocol
 
 try:
+    from .ai_entry_preflight import EntryPreflightRejected, ENTRY_PREFLIGHT_LIMITS
     from .ai_market_facts import market_facts, primary_entry_quality
     from .ai_trigger import decision_fingerprint, managed_state, structure_identity, trigger_reason
     from .ai_policy import (
@@ -50,6 +51,7 @@ try:
         normalize_contract_ids,
     )
 except ImportError:  # launched from bundled backend/main.py as a script
+    from ai_entry_preflight import EntryPreflightRejected, ENTRY_PREFLIGHT_LIMITS
     from ai_market_facts import market_facts, primary_entry_quality
     from ai_trigger import decision_fingerprint, managed_state, structure_identity, trigger_reason
     from ai_policy import (
@@ -123,7 +125,9 @@ _SHARED_POLICY_RULES = (
     "the contract is available, and there is no current position or active pending order for it. "
     "Use hold for an absent or blocked entry candidate, but do not let an entry block erase analysis or management actions. "
     "Select at most one contract and one action per round. Copy the selected assessment's direction, quality values, protection "
-    "levels, and limitPrice exactly into an open decision.\n"
+    "levels, and limitPrice exactly into an open decision. The finalEntryPreflight limits in SERVER ENTRY GATES are checked again "
+    "against fresh ticker, execution depth and mark price immediately before submission; plan net reward/risk after their fee "
+    "and slippage budgets, never assume an expired or materially changed market remains tradable.\n"
     "3. POSITION AND ORDER MANAGEMENT: Every round first considers current positions and pending orders. "
     "A position or pending order blocks replacement open for that contract; it does not block protection review or a justified exit. "
     "Close only for materially invalidated market evidence or ORDER_MISTAKE, using the actual position direction. "
@@ -753,6 +757,7 @@ class CodexRunner:
             "minimumConfidence": config.minimumConfidence,
             "minimumWinRate": MIN_OPEN_WIN_RATE,
             "minimumRiskRewardRatio": MIN_OPEN_RISK_REWARD_RATIO,
+            "finalEntryPreflight": dict(ENTRY_PREFLIGHT_LIMITS),
             "allowOpen": config.allowOpen,
             "allowClose": config.allowClose,
             "allowCancel": config.allowCancel,
@@ -1535,7 +1540,27 @@ class AIWorker:
                 and (result.decision.action != "hold" or managed_state(parsed_snapshot))
             )
             if should_reconcile:
-                await self.order_gateway(result.decision, parsed_snapshot)
+                try:
+                    await self.order_gateway(result.decision, parsed_snapshot)
+                except EntryPreflightRejected as error:
+                    # A changed market is a deterministic entry rejection,
+                    # not a provider/unknown-submission failure. Preserve the
+                    # complete analysis and do not consume entry allowance.
+                    reason = str(error)[:500]
+                    hold = replace(result.decision, action="hold", reasonCode="ENTRY_PREFLIGHT_REJECTED", reason=reason)
+                    result = PolicyResult(False, hold, reason)
+                    self._audit({"type": "decision", "accepted": False, "reason": reason,
+                                 "decision": hold.to_dict(), "rawDecision": decision.to_dict(),
+                                 "snapshotId": parsed_snapshot.snapshotId, "instruments": decision_instruments,
+                                 "freshness": snapshot_freshness(parsed_snapshot, self.config)})
+                    self.status = replace(
+                        self.status, lastDecision=hold.to_dict(), lastError=None,
+                        consecutiveFailures=0, updatedAt=_now_iso(),
+                        lastEvaluationSource="model", lastEvaluationAt=_now_iso(), skippedCycles=0,
+                        lastDecisionFreshness=snapshot_freshness(parsed_snapshot, self.config),
+                    )
+                    self._persist()
+                    return result
                 # A gateway return is the only point at which an entry is
                 # known to have been submitted. In particular, an
                 # OrderNotSubmittedError must not record a submitted entry.

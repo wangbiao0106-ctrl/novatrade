@@ -49,6 +49,8 @@ def instrument_row(instrument: str = BTC, **overrides) -> dict:
 def entry_request() -> dict:
     return {"instrumentID": BTC, "side": "buy", "orderType": "limit", "price": 100,
             "quantity": 1, "leverage": 1, "source": "ai", "clientOrderID": "aiexecution1",
+            "stopLossTriggerPrice": 90, "takeProfitTriggerPrice": 130,
+            "_aiEntryReferencePrice": 100, "_aiEntryPlannedEntryPrice": 100,
             "_aiEntryDeadline": (datetime.now(timezone.utc) + timedelta(minutes=2)).timestamp()}
 
 
@@ -472,6 +474,21 @@ class AIExecutionPolicyTests(unittest.TestCase):
 
 
 class OrderSubmissionOutcomeTests(NoNetworkTests):
+    def setUp(self):
+        super().setUp()
+        guard = patch.object(main, "okx_get", new=AsyncMock(side_effect=self.public_prices))
+        guard.start()
+        self.addCleanup(guard.stop)
+
+    async def public_prices(self, route, params):
+        timestamp = str(int(datetime.now(timezone.utc).timestamp() * 1000))
+        rows = {
+            "/market/ticker": {"instId": BTC, "last": "100", "ts": timestamp},
+            "/market/books": {"bids": [["99.99", "100"]], "asks": [["100.01", "100"]], "ts": timestamp},
+            "/public/mark-price": {"instId": BTC, "markPx": "100", "ts": timestamp},
+        }
+        return {"data": [rows[route]]}
+
     def gateway(self, path, *, lookup=None):
         async def submit(payload, demo):
             return await main.submit_order(payload, demo=demo)

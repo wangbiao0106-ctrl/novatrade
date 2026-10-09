@@ -61,10 +61,16 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
         return self.worker.config.to_dict()
 
     async def public(self, route, params):
+        timestamp = str(int(datetime.now(timezone.utc).timestamp() * 1000))
         if route == "/public/instruments":
             return {"data": [SPEC, {**SPEC, "instId": "BAD-USDT-SWAP", "state": "suspend"}]}
         if route in {"/market/ticker", "/market/tickers"}:
-            return {"data": [self.quote]}
+            return {"data": [{**self.quote, "ts": timestamp}]}
+        if route == "/market/books":
+            return {"data": [{"bids": [[self.quote["bidPx"], "10000"]],
+                              "asks": [[self.quote["askPx"], "10000"]], "ts": timestamp}]}
+        if route == "/public/mark-price":
+            return {"data": [{"instId": BTC, "markPx": self.quote["last"], "ts": timestamp}]}
         raise AssertionError(route)
 
     async def entry(self, **overrides):
@@ -140,15 +146,17 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ai_entry_and_close_use_local_account_and_keep_contract_sizing(self):
         self.update_config({"enabled": True, "mode": "paper-active"})
+        self.quote.update(bidPx="100", askPx="100.1")
         now = datetime.now(timezone.utc)
         iso = lambda value: value.isoformat(timespec="seconds").replace("+00:00", "Z")
         snapshot = AISnapshot(snapshotId="paper-test", capturedAt=iso(now), instruments=[{"id": BTC}],
+                              tickers={BTC: dict(self.quote)},
                               account=await main.account(), risk=await main.risk(),
                               ai={"tradingMode": "paper"}, dataFreshness={"maxAgeSeconds": 90})
         decision = AIDecision.from_dict({"schemaVersion": 1, "decisionId": "entry", "snapshotId": snapshot.snapshotId,
                                         "action": "open", "instrumentID": BTC, "direction": "long", "orderType": "market",
-                                        "stopLossPrice": 90, "takeProfitPrice": 120, "leverage": 2,
-                                        "winRate": .7, "riskRewardRatio": 2, "confidence": .9,
+                                        "stopLossPrice": 90, "takeProfitPrice": 130, "leverage": 2,
+                                        "winRate": .7, "riskRewardRatio": 3, "confidence": .9,
                                         "validUntil": iso(now + timedelta(minutes=1)), "reasonCode": "test", "reason": "paper integration test"})
         result = await main._ai_execute(decision, snapshot)
         self.assertEqual(result["executionMode"], "paper")

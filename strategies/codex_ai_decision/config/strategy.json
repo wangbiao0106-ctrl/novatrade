@@ -1,6 +1,6 @@
 {
   "strategy_id": "codex_ai_decision",
-  "version": "1.1",
+  "version": "1.2",
   "source_of_truth": "strategies/codex_ai_decision/STRATEGY.md",
   "display_name": "Codex AI 决策策略",
   "name_en": "Codex AI Decision",
@@ -42,6 +42,16 @@
     "directions": ["long", "short"],
     "auxiliary_intervals": ["5m", "15m", "1H"],
     "forming_candle_role": "context_only"
+  },
+  "entry_preflight": {
+    "max_quote_age_seconds": 5,
+    "max_future_skew_seconds": 1,
+    "max_spread_bps": 10,
+    "max_price_drift_bps": 50,
+    "max_stop_distance_fraction": 0.25,
+    "fee_rate_per_side": 0.0005,
+    "slippage_bps": 2,
+    "minimum_net_risk_reward_ratio": 2.0
   },
   "risk_policy": {
     "allow_open": true,

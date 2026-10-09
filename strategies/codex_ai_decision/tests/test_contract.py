@@ -75,7 +75,7 @@ class CodexAIStrategyContractTests(unittest.TestCase):
 
     def test_four_hour_entry_profile_matches_runtime(self) -> None:
         config = strategy_config()
-        self.assertEqual(config["version"], "1.1")
+        self.assertEqual(config["version"], "1.2")
         self.assertEqual(config["entry_analysis"], {
             "primary_interval": PRIMARY_ENTRY_INTERVAL,
             "minimum_confirmed_candles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,

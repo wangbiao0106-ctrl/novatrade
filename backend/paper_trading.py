@@ -14,7 +14,7 @@ from decimal import Decimal, ROUND_FLOOR
 import json
 import math
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 try:
@@ -401,6 +401,7 @@ class PaperTradingAccount:
     async def submit_intent(
         self, request: dict[str, Any], *, instrument: InstrumentSpec, price: float,
         quote: dict[str, Any] | None = None, daily_order_limit: int | None = None,
+        entry_preflight: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
     ) -> dict[str, Any]:
         async with self._lock:
             self._roll_day()
@@ -418,7 +419,6 @@ class PaperTradingAccount:
             if side not in {"buy", "sell"} or order_type not in {"market", "limit"}:
                 raise PaperTradingError("side or order type is invalid")
             reduce_only = bool(request.get("reduceOnly"))
-            market_quote = self._quote(instrument_id, price, quote)
             request = dict(request)
             if order_type == "limit":
                 request["price"] = _aligned_price(_number(request.get("price"), "limit price", positive=True), instrument.tickSize)
@@ -430,6 +430,11 @@ class PaperTradingAccount:
                     {**level, "price": _aligned_price(level.get("price"), instrument.tickSize)} if isinstance(level, dict) else level
                     for level in request["takeProfitLevels"]
                 ]
+            if request.get("source") == "ai" and not reduce_only and entry_preflight is not None:
+                refreshed = await entry_preflight(request)
+                quote = refreshed["quote"]
+                price = quote["last"]
+            market_quote = self._quote(instrument_id, price, quote)
             limit_price = _number(request.get("price"), "limit price", positive=True) if order_type == "limit" else None
             fill_price = self._execution_price(side, market_quote, limit_price)
             sizing_price = limit_price if limit_price is not None else fill_price
