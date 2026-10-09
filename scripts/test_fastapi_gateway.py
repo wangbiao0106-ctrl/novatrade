@@ -204,6 +204,7 @@ class GatewayContractTests(unittest.TestCase):
         try:
             main.ai_worker = SimpleNamespace(config=config)
             with patch.object(main, "contracts", new=AsyncMock(return_value=rows)), \
+                 patch.object(main, "collect_market_context", new=AsyncMock(return_value=({}, {}))), \
                  patch.object(main, "market_candles", new=AsyncMock(return_value={"candles": []})), \
                  patch.object(main, "okx_get", new=AsyncMock(return_value={"data": [{}]})), \
                  patch.object(main, "_ai_trading_availability", new=AsyncMock(return_value={

@@ -13,10 +13,12 @@
 - 配置中心 ID：`codex`
 - 实验室包 ID：`codex_ai_decision`
 - provider：`codex`，固定 `gpt-6-luna / medium`
-- 规则版本：1.3；默认每 10 分钟开始一次扫描，采集和推理耗时计入周期；事件预筛
+- 规则版本：1.5；默认每 10 分钟开始一次扫描，采集和推理耗时计入周期；事件预筛
   默认关闭，开启前需完成回放验收
-- 已收盘 4H K 线是多空入场的主依据，至少保留 20 根有效历史；其他周期、盘口和
-  实时价格辅助执行与风控。历史不足时拒绝新开仓，已有持仓和挂单仍可管理
+- 15m 原始 OHLCV 优先；取消 4H 趋势和 20 根历史硬门槛，由 AI 综合多空判断。
+  行情、资金费、持仓量、多空账户比和主动买卖量优先使用 OKX v5 API；补充盘口、
+  RSI、波动率、量比、滚动加权均价及 BTC/ETH 背景。情绪指数和美联储官方消息
+  是注明范围和时间的可选外部证据；不足窗口/来源失败明确标注，不虚构。
 - 默认账户环境为本地纸面交易，启用后使用 `paper-active`；真实公共行情与本地撮合
   的执行边界见公共规则中的“账户模式与执行边界”，初始资金为 5000 USDT
 - AI 入场默认使用止损后的 4 小时同品种冷却，并在 60 分钟内累计 2 次止损后暂停
@@ -29,7 +31,7 @@
 - 开仓、平仓、撤单、持仓保护和分批止盈都必须经过服务端 policy 和共享订单网关
 - v1.3 将新开仓预估胜率下限从 45% 提高到 50%，用于纸面观察；固定质量门槛
   发布于 `config/strategy.json` 的 `entry_quality`，由 `tests/test_contract.py` 对齐
-  服务端常量。置信度按当前配置筛选，净盈亏比下限仍为 2.0
+  服务端常量。置信度按当前配置筛选，净盈亏比下限为 2.2
   50% 边界、低胜率观望和退出动作回归位于 `tests/test_win_rate_gate.py`
 
 Swift 客户端通过 API 对齐配置与审计契约：参数设置可保存快照时效和三个止损闸门，
@@ -38,12 +40,21 @@ Swift 客户端通过 API 对齐配置与审计契约：参数设置可保存快
 退役配置键只兼容读取，不再写出。客户端契约验证位于
 `Tests/OKXGatewayTests/AIRiskContractTests.swift` 和
 `Tests/OKXGatewayTests/RiskDataQualityTests.swift`，不在运行时读取本目录。
-扫描节奏与主周期的回归回放分别位于 `tests/test_scan_schedule.py` 和
-`tests/test_four_hour_scan.py`；默认值及 4H 主周期参数由 `tests/test_contract.py`
+扫描节奏与综合分析的回归回放分别位于 `tests/test_scan_schedule.py` 和
+`tests/test_holistic_scan.py`；默认值及 15m 优先分析参数由 `tests/test_contract.py`
 与服务端常量逐项对齐。快照有效期独立保持默认 90 秒。
+数据源、缺失数据、外部消息、指标和事件指纹回归位于 `tests/test_market_context.py`。
+单次扫描输入字节数和真实 provider token 用量可用
+[`research/measure_scan_input.py`](research/measure_scan_input.py) 核验；使用现有纸面
+账户做一次纯分析，不执行交易。重现命令见 [`research/README.md`](research/README.md)。
+2026-10-10 的 10 标的核验输入为 119,535 tokens、提示正文 239,870 字节；
+元数据见 [`results/scan_input_usage_2026-10-10.json`](results/scan_input_usage_2026-10-10.json)，
+统计范围、逐周期数据量和来源说明见研究 README。
 
-规则 v1.2 增加实际发单前的实时 ticker / 五档盘口 / 标记价格复核，固定门禁位于
-`config/strategy.json` 的 `entry_preflight`，运行时实现为 `backend/ai_entry_preflight.py`。
+规则 v1.4 将 AI 新开仓统一改为限价挂单，不再按分析快照价格偏移拒绝挂单。
+`config/strategy.json` 的 `entry_execution` 声明限价和交易所 `post_only` 路由，
+`entry_preflight` 声明当前行情及净盈亏比门禁；运行时实现位于
+`backend/ai_entry_preflight.py` 和 `backend/main.py`。
 回放说明见 [`research/ENTRY_PREFLIGHT.md`](research/ENTRY_PREFLIGHT.md)，参数一致性和
 拒绝/通过场景由 `tests/test_entry_preflight.py` 验证；复核拒绝保留评估，不计入失败熔断。
 

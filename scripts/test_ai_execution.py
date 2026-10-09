@@ -47,10 +47,10 @@ def instrument_row(instrument: str = BTC, **overrides) -> dict:
 
 
 def entry_request() -> dict:
-    return {"instrumentID": BTC, "side": "buy", "orderType": "limit", "price": 100,
+    return {"instrumentID": BTC, "side": "buy", "orderType": "limit", "price": 99,
             "quantity": 1, "leverage": 1, "source": "ai", "clientOrderID": "aiexecution1",
             "stopLossTriggerPrice": 90, "takeProfitTriggerPrice": 130,
-            "_aiEntryReferencePrice": 100, "_aiEntryPlannedEntryPrice": 100,
+            "_aiEntryReferencePrice": 100, "_aiEntryPlannedEntryPrice": 99,
             "_aiEntryDeadline": (datetime.now(timezone.utc) + timedelta(minutes=2)).timestamp()}
 
 
@@ -150,6 +150,7 @@ class AccountExecutionUniverseTests(NoNetworkTests):
         with patch.object(main, "ai_worker", SimpleNamespace(config=config)), \
              patch.object(main, "OKX_DEMO", True), \
              patch.object(main, "contracts", new=AsyncMock(return_value=[{"id": item} for item in instruments])), \
+             patch.object(main, "collect_market_context", new=AsyncMock(return_value=({}, {}))), \
              patch.object(main, "market_candles", new=AsyncMock(return_value={"candles": candles})), \
              patch.object(main, "okx_get", new=AsyncMock(return_value=public)), \
              patch.object(main, "account", new=AsyncMock(return_value={"authenticated": True, "todayLossCount": 0})), \
@@ -180,8 +181,8 @@ class AccountExecutionUniverseTests(NoNetworkTests):
         decision = AIDecision.from_dict({
             "schemaVersion": 1, "decisionId": "account-changed", "snapshotId": snapshot.snapshotId,
             "action": "open", "instrumentID": NEIRO, "direction": "long", "orderType": "limit",
-            "limitPrice": .1, "stopLossPrice": .09, "takeProfitPrice": .12, "leverage": 1,
-            "winRate": .5, "riskRewardRatio": 2, "confidence": .9,
+            "limitPrice": .1, "stopLossPrice": .09, "takeProfitPrice": .122, "leverage": 1,
+            "winRate": .5, "riskRewardRatio": 2.2, "confidence": .9,
             "validUntil": iso(now + timedelta(minutes=1)), "reasonCode": "test", "reason": "test",
         })
         admitted = validate_decision(decision, snapshot, config, now=now)
@@ -394,15 +395,15 @@ class AIExecutionPolicyTests(unittest.TestCase):
         return AIDecision.from_dict({
             "schemaVersion": 1, "decisionId": "execution-decision", "snapshotId": "execution-snapshot",
             "action": "open", "instrumentID": BTC, "direction": "long", "orderType": "limit",
-            "limitPrice": 100, "stopLossPrice": 90, "takeProfitPrice": 120, "leverage": 1,
-            "winRate": .5, "riskRewardRatio": 2, "confidence": .9,
+            "limitPrice": 100, "stopLossPrice": 90, "takeProfitPrice": 122, "leverage": 1,
+            "winRate": .5, "riskRewardRatio": 2.2, "confidence": .9,
             "validUntil": iso(self.now + timedelta(minutes=1)), "reasonCode": "test", "reason": "test",
             **overrides,
         })
 
     def assessment(self, instrument, **overrides):
         return {"instrumentID": instrument, "direction": "long", "winRate": .5,
-                "riskRewardRatio": 2, "limitPrice": 100, "stopLossPrice": 90, "takeProfitPrice": 120,
+                "riskRewardRatio": 2.2, "limitPrice": 100, "stopLossPrice": 90, "takeProfitPrice": 122,
                 "confidence": .9, "entryEligible": False, "unmetConditions": ["等待确认"],
                 "reason": "1H 回踩支撑，等待确认", **overrides}
 

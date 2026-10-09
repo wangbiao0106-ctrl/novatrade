@@ -154,15 +154,18 @@ class PaperModeTests(unittest.IsolatedAsyncioTestCase):
                               account=await main.account(), risk=await main.risk(),
                               ai={"tradingMode": "paper"}, dataFreshness={"maxAgeSeconds": 90})
         decision = AIDecision.from_dict({"schemaVersion": 1, "decisionId": "entry", "snapshotId": snapshot.snapshotId,
-                                        "action": "open", "instrumentID": BTC, "direction": "long", "orderType": "market",
+                                        "action": "open", "instrumentID": BTC, "direction": "long", "orderType": "limit", "limitPrice": 99,
                                         "stopLossPrice": 90, "takeProfitPrice": 130, "leverage": 2,
                                         "winRate": .7, "riskRewardRatio": 3, "confidence": .9,
                                         "validUntil": iso(now + timedelta(minutes=1)), "reasonCode": "test", "reason": "paper integration test"})
         result = await main._ai_execute(decision, snapshot)
         self.assertEqual(result["executionMode"], "paper")
         self.assertLessEqual(result["marginUSD"], self.worker.config.marginPerOrderUSD)
+        self.quote.update(last="98", bidPx="97.9", askPx="98.1")
+        await main.positions()
         self.assertEqual(len(self.broker.positions()), 1)
-        close = AIDecision.from_dict({**decision.to_dict(), "action": "close", "decisionId": "exit"})
+        close = AIDecision.from_dict({**decision.to_dict(), "action": "close", "decisionId": "exit",
+                                      "orderType": "market", "limitPrice": None})
         await main._ai_execute(close, snapshot)
         self.assertEqual(self.broker.positions(), [])
         self.assertEqual(self.broker.daily_order_count(), 1)

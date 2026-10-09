@@ -73,15 +73,16 @@ class CodexAIStrategyContractTests(unittest.TestCase):
             "provider": "codex", "model": "gpt-6-luna", "reasoning_effort": "medium",
         })
 
-    def test_four_hour_entry_profile_matches_runtime(self) -> None:
+    def test_holistic_entry_profile_matches_runtime(self) -> None:
         config = strategy_config()
-        self.assertEqual(config["version"], "1.3")
+        self.assertEqual(config["version"], "1.5")
         self.assertEqual(config["entry_analysis"], {
             "primary_interval": PRIMARY_ENTRY_INTERVAL,
             "minimum_confirmed_candles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
             "directions": ["long", "short"],
-            "auxiliary_intervals": ["5m", "15m", "1H"],
+            "auxiliary_intervals": ["5m", "1H", "4H"],
             "forming_candle_role": "context_only",
+            "direction_policy": "ai_holistic_no_4h_gate",
         })
         self.assertEqual(AIConfig().decisionIntervalSeconds, 600)
         self.assertEqual(AIConfig().snapshotMaxAgeSeconds, 90)
@@ -91,6 +92,20 @@ class CodexAIStrategyContractTests(unittest.TestCase):
             "minimum_win_rate": MIN_OPEN_WIN_RATE,
             "minimum_risk_reward_ratio": MIN_OPEN_RISK_REWARD_RATIO,
         })
+
+    def test_optional_context_sources_and_freshness_match_runtime(self) -> None:
+        from backend.ai_market_context import (
+            COLLECTION_TIMEOUT_SECONDS, DERIVATIVES_MAX_AGE_SECONDS, FED_URL,
+            GLOBAL_CACHE_SECONDS, SENTIMENT_MAX_AGE_SECONDS, SENTIMENT_URL,
+        )
+        config = strategy_config()["market_context"]
+        self.assertTrue(config["optional"])
+        self.assertEqual(config["sentiment_source"], SENTIMENT_URL)
+        self.assertEqual(config["fed_source"], FED_URL)
+        self.assertEqual(config["global_cache_seconds"], GLOBAL_CACHE_SECONDS)
+        self.assertEqual(config["sentiment_max_age_seconds"], SENTIMENT_MAX_AGE_SECONDS)
+        self.assertEqual(config["derivatives_max_age_seconds"], DERIVATIVES_MAX_AGE_SECONDS)
+        self.assertEqual(config["collection_timeout_seconds"], COLLECTION_TIMEOUT_SECONDS)
 
     def test_published_parameters_match_the_runtime_defaults(self) -> None:
         """The package's machine parameters must equal AIConfig defaults.

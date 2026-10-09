@@ -133,7 +133,7 @@ class AISnapshotTests(unittest.IsolatedAsyncioTestCase):
             "volume": 1234.12345, "quoteVolume": 123456789.12345, "confirmed": index != 74,
         } for index in range(75)]
 
-    async def snapshot(self, *, count=16, candles=None, public=None, account=None, risk=None):
+    async def snapshot(self, *, count=16, candles=None, public=None, account=None, risk=None, context=None):
         config = main.AIConfig(allowedInstruments=tuple(f"COIN{index}-USDT-SWAP" for index in range(count)))
         rows = [{"id": instrument} for instrument in config.allowedInstruments]
 
@@ -145,6 +145,7 @@ class AISnapshotTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(main, "ai_worker", SimpleNamespace(config=config)), \
              patch.object(main, "contracts", new=AsyncMock(return_value=rows)), \
+             patch.object(main, "collect_market_context", new=AsyncMock(return_value=context or ({}, {}))), \
              patch.object(main, "market_candles", new=candles or AsyncMock(return_value={"candles": self.candle_rows()})), \
              patch.object(main, "okx_get", new=public or public_rows), \
              patch.object(main, "_ai_trading_availability", new=AsyncMock(return_value={
@@ -250,10 +251,10 @@ class AISubmissionFreshnessTests(unittest.IsolatedAsyncioTestCase):
         return captured, clock, Clock
 
     def entry_request(self, deadline):
-        return {"instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "market",
+        return {"instrumentID": "BTC-USDT-SWAP", "side": "buy", "orderType": "limit", "price": 99,
                 "quantity": 1, "clientOrderID": "aifreshness", "source": "ai", "leverage": 1,
                 "stopLossTriggerPrice": 90, "takeProfitTriggerPrice": 130,
-                "_aiEntryReferencePrice": 100, "_aiEntryPlannedEntryPrice": 100,
+                "_aiEntryReferencePrice": 100, "_aiEntryPlannedEntryPrice": 99,
                 "_aiEntryDeadline": deadline}
 
     def gateway(self, directory):

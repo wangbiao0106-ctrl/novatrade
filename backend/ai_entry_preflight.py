@@ -20,8 +20,6 @@ ENTRY_PREFLIGHT_LIMITS = {
     "max_quote_age_seconds": 5.0,
     "max_future_skew_seconds": 1.0,
     "max_spread_bps": 10.0,
-    "max_price_drift_bps": 50.0,
-    "max_stop_distance_fraction": 0.25,
     "fee_rate_per_side": 0.0005,
     "slippage_bps": 2.0,
     "minimum_net_risk_reward_ratio": MIN_OPEN_RISK_REWARD_RATIO,
@@ -64,7 +62,7 @@ def check_entry_preflight(
     request: dict[str, Any], ticker: dict[str, Any], book: dict[str, Any], mark: dict[str, Any],
     *, now: datetime | None = None, fee_rate: float | None = None, slippage_bps: float | None = None,
 ) -> dict[str, Any]:
-    """Check rounded prices, current execution depth and conservative net R/R."""
+    """Check a resting limit against current quotes and conservative net R/R."""
     limits = ENTRY_PREFLIGHT_LIMITS
     clock = (now or datetime.now(timezone.utc)).timestamp()
     instrument = str(request.get("instrumentID") or "")
@@ -77,8 +75,10 @@ def check_entry_preflight(
         if age > limits["max_quote_age_seconds"] or age < -limits["max_future_skew_seconds"]:
             _reject(name + " is stale or from the future")
     side = request.get("side")
-    if side not in {"buy", "sell"} or request.get("orderType") not in {"market", "limit"}:
-        _reject("entry side or order type is invalid")
+    if side not in {"buy", "sell"}:
+        _reject("entry side is invalid")
+    if request.get("orderType") != "limit":
+        _reject("AI entries must use a resting limit order")
     buy, direction = side == "buy", 1 if side == "buy" else -1
     bids, asks = _levels(book.get("bids"), buy=False), _levels(book.get("asks"), buy=True)
     bid, ask = bids[0][0], asks[0][0]
@@ -87,7 +87,6 @@ def check_entry_preflight(
     if spread < 0 or spread > limits["max_spread_bps"]:
         _reject("order book is crossed or spread exceeds 10 bps")
     last, mark_price = _positive(ticker.get("last"), "last price"), _positive(mark.get("markPx"), "mark price")
-    reference = _positive(request.get("_aiEntryReferencePrice"), "snapshot reference price")
     tick = request.get("_aiEntryTickSize", 0)
     if isinstance(tick, bool) or not isinstance(tick, (int, float)) or not math.isfinite(tick) or tick < 0:
         _reject("price tick is invalid")
@@ -114,62 +113,31 @@ def check_entry_preflight(
     else:
         targets = [aligned(request.get("takeProfitTriggerPrice"), "target price")]
     target = min(targets) if buy else max(targets)
-    limit = aligned(request.get("price"), "limit price") if request["orderType"] == "limit" else None
-    planned_entry = limit if limit is not None else _positive(request.get("_aiEntryPlannedEntryPrice", reference), "planned entry")
-    if direction * (planned_entry - stop) <= 0 or any(direction * (value - planned_entry) <= 0 for value in targets):
+    entry = aligned(request.get("price"), "limit price")
+    if direction * (entry - stop) <= 0 or any(direction * (value - entry) <= 0 for value in targets):
         _reject("rounded protection prices invalidate the planned entry")
     for value in (last, mark_price):
         if direction * (value - stop) <= 0 or direction * (target - value) <= 0:
             _reject("current price has already reached stop-loss or take-profit")
-    max_drift = min(reference * limits["max_price_drift_bps"] / 10000,
-                    abs(planned_entry - stop) * limits["max_stop_distance_fraction"])
-    if max(abs(value - reference) for value in (last, mark_price, midpoint)) > max_drift + reference * 1e-12:
-        _reject("market moved beyond the allowed snapshot price deviation")
     configured_fee, configured_slip = fee_rate if fee_rate is not None else 0, slippage_bps if slippage_bps is not None else 0
     if not math.isfinite(configured_fee) or configured_fee < 0 or not math.isfinite(configured_slip) or not 0 <= configured_slip < 10000:
         _reject("fee or slippage budget is invalid")
     fee = max(limits["fee_rate_per_side"], configured_fee)
     slip = max(limits["slippage_bps"], configured_slip)
-    opposite = asks if buy else bids
-    immediately_marketable = limit is None or direction * (limit - opposite[0][0]) >= 0
-    if immediately_marketable:
-        if request.get("quantity") is not None:
-            quantity = _positive(request["quantity"], "order quantity")
-        else:
-            contract_value = _positive(request.get("_aiEntryContractValue"), "contract value")
-            # Paper sizes after refreshing the quote. A sell's adverse
-            # slippage lowers its sizing price and increases the contract
-            # count. Use a lower bound on sizing price so this depth check
-            # covers at least the eventual size, including lot/margin caps.
-            sizing_price = opposite[0][0] * (1 - slip / 10000) if not buy else opposite[0][0]
-            quantity = _positive(
-                _positive(request.get("targetNotional"), "target notional") / (contract_value * sizing_price),
-                "estimated order quantity",
-            )
-        remaining, worst = quantity, opposite[0][0]
-        for price, size in opposite:
-            if limit is not None and direction * (price - limit) > 0:
-                break
-            remaining -= size
-            worst = price
-            if remaining <= quantity * 1e-12:
-                break
-        if remaining > quantity * 1e-12:
-            _reject("five-level execution depth is insufficient")
-        entry = worst * (1 + direction * slip / 10000)
-        if limit is not None:
-            entry = min(limit, entry) if buy else max(limit, entry)
-    else:
-        entry = limit
-    if direction * (entry - stop) <= 0 or any(direction * (value - entry) <= 0 for value in targets):
-        _reject("estimated execution price invalidates the protection plan")
+    # Check the rounded limit against both the executable level and the
+    # current prices. The limit itself is the worst allowed entry price;
+    # current execution depth cannot predict liquidity at a future fill.
+    if buy and entry >= min(ask, last, mark_price):
+        _reject("buy limit price must be below the current market")
+    if not buy and entry <= max(bid, last, mark_price):
+        _reject("sell limit price must be above the current market")
     stop_exit, target_exit = stop * (1 - direction * slip / 10000), target * (1 - direction * slip / 10000)
     risk = direction * (entry - stop_exit) + fee * (entry + stop_exit)
     reward = direction * (target_exit - entry) - fee * (entry + target_exit)
     if not math.isfinite(risk) or not math.isfinite(reward) or risk <= 0 or reward / risk + 1e-12 < limits["minimum_net_risk_reward_ratio"]:
-        _reject("net risk/reward after fees and slippage is below 2.0")
+        _reject(f"net risk/reward after fees and slippage is below {limits['minimum_net_risk_reward_ratio']}")
     return {
         "estimatedEntryPrice": entry, "netRiskRewardRatio": reward / risk,
-        "spreadBps": spread, "referencePrice": reference, "checkedAt": clock,
+        "spreadBps": spread, "checkedAt": clock,
         "quote": {**ticker, "last": last, "bidPx": bid, "askPx": ask},
     }

@@ -49,15 +49,15 @@ class AIGatewayTests(unittest.TestCase):
         return AISnapshot(snapshotId="snap-1", capturedAt=iso(datetime.now(timezone.utc)), instruments=[{"id": "BTC-USDT-SWAP"}], account={"availableEquityUSD": 1000, "todayLossCount": 0}, risk={})
 
     def decision(self, **overrides) -> dict:
-        value = {"schemaVersion": 1, "decisionId": "decision-1", "snapshotId": "snap-1", "action": "open", "instrumentID": "BTC-USDT-SWAP", "direction": "long", "orderType": "market", "riskBudgetPercent": 1, "stopLossPrice": 90, "winRate": .5, "riskRewardRatio": 2.0, "leverage": 1.0, "confidence": .9, "validUntil": iso(datetime.now(timezone.utc) + timedelta(minutes=1)), "reasonCode": "test", "reason": "test"}
+        value = {"schemaVersion": 1, "decisionId": "decision-1", "snapshotId": "snap-1", "action": "open", "instrumentID": "BTC-USDT-SWAP", "direction": "long", "orderType": "market", "riskBudgetPercent": 1, "stopLossPrice": 90, "winRate": .5, "riskRewardRatio": 2.2, "leverage": 1.0, "confidence": .9, "validUntil": iso(datetime.now(timezone.utc) + timedelta(minutes=1)), "reasonCode": "test", "reason": "test"}
         value.update(overrides)
         return value
 
     def assessment(self, instrument="BTC-USDT-SWAP", **overrides) -> dict:
         value = {
             "instrumentID": instrument, "direction": "long", "winRate": .5,
-            "riskRewardRatio": 2.0, "limitPrice": 100, "stopLossPrice": 90,
-            "takeProfitPrice": 120, "confidence": .9, "entryEligible": True,
+            "riskRewardRatio": 2.2, "limitPrice": 100, "stopLossPrice": 90,
+            "takeProfitPrice": 122, "confidence": .9, "entryEligible": True,
             "unmetConditions": [], "reason": "回踩支撑，等待限价成交。",
         }
         value.update(overrides)
@@ -65,7 +65,7 @@ class AIGatewayTests(unittest.TestCase):
 
     def assessed_decision(self, **overrides) -> AIDecision:
         return AIDecision.from_dict(self.decision(
-            orderType="limit", limitPrice=100, takeProfitPrice=120,
+            orderType="limit", limitPrice=100, takeProfitPrice=122,
             assessments=[self.assessment()], **overrides,
         ))
 
@@ -116,7 +116,7 @@ class AIGatewayTests(unittest.TestCase):
                         gateway.assert_not_awaited()
                         reports = json.loads(prompt.split("GROUP REPORTS:\n", 1)[1])
                         selected = reports[0]["assessments"][0]
-                        row = self.decision(snapshotId=snapshot.snapshotId, instrumentID=selected["instrumentID"], orderType="limit", limitPrice=100, takeProfitPrice=120)
+                        row = self.decision(snapshotId=snapshot.snapshotId, instrumentID=selected["instrumentID"], orderType="limit", limitPrice=100, takeProfitPrice=122)
                         return json.dumps(row).encode(), b""
                     group = restore_prompt_snapshot(json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1]))
                     snapshots.append(group)
@@ -126,7 +126,7 @@ class AIGatewayTests(unittest.TestCase):
                     active -= 1
                     completed += 1
                     rows = [self.assessment(item) for item in group["ai"]["selectedInstruments"]]
-                    row = self.decision(snapshotId=snapshot.snapshotId, instrumentID=rows[0]["instrumentID"], assessments=rows, orderType="limit", limitPrice=100, takeProfitPrice=120)
+                    row = self.decision(snapshotId=snapshot.snapshotId, instrumentID=rows[0]["instrumentID"], assessments=rows, orderType="limit", limitPrice=100, takeProfitPrice=122)
                     return json.dumps(row).encode(), b""
 
                 return SimpleNamespace(returncode=0, communicate=communicate)
@@ -159,7 +159,7 @@ class AIGatewayTests(unittest.TestCase):
             }
             self.assertEqual(set(group["candles"]), set(expected_candles))
             for key, rows in group["candles"].items():
-                primary = key.endswith("/4H")
+                primary = key.endswith("/15m")
                 self.assertEqual(len(rows), 60 if primary else 21)
                 self.assertEqual(rows[0], expected_candles[key][0 if primary else 39])
                 self.assertEqual(rows[-1], expected_candles[key][-1])
@@ -570,7 +570,7 @@ class AIGatewayTests(unittest.TestCase):
         self.assertIn("staged take-profit geometry", result.reason)
 
         levels = [{"price": 103, "quantityPercent": 50}, {"price": 160, "quantityPercent": 50}]
-        low_payload = self.decision(orderType="limit", limitPrice=100, takeProfitPrice=120, takeProfitLevels=levels)
+        low_payload = self.decision(orderType="limit", limitPrice=100, takeProfitPrice=122, takeProfitLevels=levels)
         low_payload["assessments"] = [self.assessment(takeProfitLevels=levels)]
         low_first_target = AIDecision.from_dict(low_payload)
         result = validate_decision(low_first_target, self.snapshot(), config)
@@ -593,7 +593,7 @@ class AIGatewayTests(unittest.TestCase):
             ai={"tradingAvailability": {instrument: {"available": True}}},
             tickers={instrument: {"last": 100}},
             candles={
-                f"{instrument}/{interval}": valid_primary_candles() if interval == "4H" else [{"confirmed": True, "close": 100}]
+                f"{instrument}/{interval}": valid_primary_candles() if interval == "15m" else [{"confirmed": True, "close": 100}]
                 for interval in ("5m", "15m", "1H", "4H")
             },
             dataFreshness={"maxAgeSeconds": 90, "availability": {}},
@@ -710,7 +710,7 @@ class AIGatewayTests(unittest.TestCase):
         result = validate_decision(value, self.snapshot(), config)
         self.assertFalse(result.accepted)
         self.assertIn("exceeds its proposed price setup", result.reason)
-        value["riskRewardRatio"] = value["assessments"][0]["riskRewardRatio"] = 2.02
+        value["riskRewardRatio"] = value["assessments"][0]["riskRewardRatio"] = 2.22
         self.assertTrue(validate_decision(value, self.snapshot(), config).accepted)
 
     def test_close_cancel_ignore_entry_quality_and_setup_price_semantics(self):
@@ -830,7 +830,7 @@ class AIGatewayTests(unittest.TestCase):
         prompt = CodexRunner._decision_prompt(self.snapshot(), config)
         self.assertIn('"minimumConfidence":0.81', prompt)
         self.assertIn('"minimumWinRate":0.5', prompt)
-        self.assertIn('"minimumRiskRewardRatio":2.0', prompt)
+        self.assertIn('"minimumRiskRewardRatio":2.2', prompt)
         self.assertIn('"allowOpen":false', prompt)
         self.assertIn('"requireStopLoss":true', prompt)
         self.assertIn('"todayLossCount":0', prompt)
@@ -1641,7 +1641,7 @@ class AIGatewayTests(unittest.TestCase):
         low_risk_reward = validate_decision(self.decision(riskRewardRatio=1.99), snapshot, config)
         self.assertFalse(low_risk_reward.accepted)
         self.assertIn("riskRewardRatio", low_risk_reward.reason)
-        boundary = validate_decision(self.decision(winRate=.5, riskRewardRatio=2.0), snapshot, config)
+        boundary = validate_decision(self.decision(winRate=.5, riskRewardRatio=2.2), snapshot, config)
         self.assertTrue(boundary.accepted)
 
     def test_policy_caps_ai_leverage_and_daily_losses(self):
@@ -1727,7 +1727,7 @@ class AIGatewayTests(unittest.TestCase):
         return AISnapshot(
             snapshotId="snap-1", capturedAt=iso(datetime.now(timezone.utc)),
             instruments=[{"id": instrument}],
-            candles={f"{instrument}/{interval}": valid_primary_candles() if interval == "4H" else [{"confirmed": True, "close": 100}]
+            candles={f"{instrument}/{interval}": valid_primary_candles() if interval == "15m" else [{"confirmed": True, "close": 100}]
                      for interval in ("5m", "15m", "1H", "4H")},
             tickers={instrument: {"last": 100}},
             account={

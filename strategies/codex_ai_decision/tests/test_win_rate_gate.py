@@ -2,7 +2,7 @@
 
 import unittest
 
-from test_four_hour_scan import BTC, assessment, decision, snapshot
+from strategies.codex_ai_decision.tests.test_holistic_scan import BTC, assessment, decision, snapshot
 from backend.ai_policy import validate_decision
 from backend.ai_schema import AIConfig
 

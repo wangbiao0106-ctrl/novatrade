@@ -38,8 +38,9 @@ DEFAULT_RECENT_STOP_LOSS_LIMIT = 2
 # part of that period rather than extending it.
 DEFAULT_DECISION_INTERVAL_SECONDS = 600.0
 LEGACY_DEFAULT_DECISION_INTERVAL_SECONDS = 30.0
-PRIMARY_ENTRY_INTERVAL = "4H"
-MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES = 20
+PRIMARY_ENTRY_INTERVAL = "15m"
+# Minimal data integrity only; indicator window sizes are not entry gates.
+MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES = 1
 # Fixed account-level daily-loss circuit breaker as a percentage of the UTC
 # day-start equity. This is a safety boundary, not a per-strategy parameter:
 # the research allocation ceilings are derived from the same 5% (see
@@ -401,6 +402,8 @@ class AISnapshot:
     tickers: dict[str, dict[str, Any]] = field(default_factory=dict)
     orderBook: dict[str, Any] = field(default_factory=dict)
     fundingRates: dict[str, Any] = field(default_factory=dict)
+    derivatives: dict[str, Any] = field(default_factory=dict)
+    marketContext: dict[str, Any] = field(default_factory=dict)
     account: dict[str, Any] = field(default_factory=dict)
     risk: dict[str, Any] = field(default_factory=dict)
     ai: dict[str, Any] = field(default_factory=dict)
@@ -408,7 +411,7 @@ class AISnapshot:
 
     _FIELDS: ClassVar[set[str]] = {
         "snapshotId", "capturedAt", "instruments", "candles", "tickers", "orderBook", "fundingRates",
-        "account", "risk", "ai", "dataFreshness",
+        "account", "risk", "ai", "dataFreshness", "derivatives", "marketContext",
     }
 
     @classmethod
@@ -428,6 +431,8 @@ class AISnapshot:
             instruments=[dict(item) for item in instruments], candles={str(k): [dict(item) for item in v] for k, v in candles.items()},
             tickers=_object(row.get("tickers", {}), "snapshot.tickers"), orderBook=_object(row.get("orderBook", {}), "snapshot.orderBook"),
             fundingRates=_object(row.get("fundingRates", {}), "snapshot.fundingRates"), account=_object(row.get("account", {}), "snapshot.account"),
+            derivatives=_object(row.get("derivatives", {}), "snapshot.derivatives"),
+            marketContext=_object(row.get("marketContext", {}), "snapshot.marketContext"),
             risk=_object(row.get("risk", {}), "snapshot.risk"), ai=_object(row.get("ai", {}), "snapshot.ai"),
             dataFreshness=_object(row.get("dataFreshness", {}), "snapshot.dataFreshness"),
         )

@@ -1,0 +1,50 @@
+{
+  "measuredAtAsiaShanghai": "2026-10-10T00:22:25+08:00",
+  "snapshotId": "d1fca2809893c121ce8198ad0961026a",
+  "model": "gpt-6-luna",
+  "reasoningEffort": "medium",
+  "workflow": "single",
+  "instrumentCount": 10,
+  "runtimeCandleSeriesCount": 40,
+  "promptCandleRowCounts": {
+    "15m": 600,
+    "1H": 210,
+    "4H": 210,
+    "5m": 210
+  },
+  "promptEncoding": "compact20",
+  "promptBytes": 239870,
+  "promptSHA256": "d26fc6f0b2b4645fdeb12023bd0acb0bf5559d58eed7c8e7e042a1efbc1699eb",
+  "snapshotComponentBytes": {
+    "snapshotId": 34,
+    "capturedAt": 22,
+    "instruments": 3248,
+    "candles": 121555,
+    "tickers": 3211,
+    "orderBook": 3411,
+    "fundingRates": 5036,
+    "derivatives": 16920,
+    "marketContext": 4004,
+    "account": 1387,
+    "risk": 812,
+    "ai": 981,
+    "dataFreshness": 17249
+  },
+  "usageSource": "Codex CLI turn.completed.usage",
+  "usageEvents": [
+    {
+      "input_tokens": 119535,
+      "cached_input_tokens": 0,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 2505,
+      "reasoning_output_tokens": 644
+    }
+  ],
+  "inputTokens": 119535,
+  "cachedInputTokens": 0,
+  "outputTokens": 2505,
+  "assessmentCount": 10,
+  "analysisErrorClass": null,
+  "orderExecutionInvoked": false,
+  "tokenScope": "Provider-reported CLI turn input, including CLI context/schema; cached tokens are a subset of input tokens"
+}

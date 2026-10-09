@@ -19,22 +19,24 @@ sys.path.insert(0, str(ROOT))
 
 from backend import main
 from backend.ai_entry_preflight import ENTRY_PREFLIGHT_LIMITS, EntryPreflightRejected, check_entry_preflight
-from backend.ai_policy import PolicyResult
+from backend.ai_policy import PolicyResult, validate_decision
 from backend.ai_schema import AIDecision, AIConfig, AISnapshot
 from backend.ai_worker import AIWorker, CodexRunner
 from backend.order_gateway import InstrumentSpec, OrderGateway, OrderNotSubmittedError
 from backend.paper_trading import PaperTradingAccount
+from strategies.codex_ai_decision.tests.test_holistic_scan import decision as entry_decision, snapshot as entry_snapshot
 
 BTC = "BTC-USDT-SWAP"
 
 
 def request(side="buy", **changes):
+    limit_price = 99 if side == "buy" else 101
     value = {
-        "instrumentID": BTC, "source": "ai", "side": side, "orderType": "market", "quantity": 1,
+        "instrumentID": BTC, "source": "ai", "side": side, "orderType": "limit", "price": limit_price, "quantity": 1,
         "stopLossTriggerPrice": 90 if side == "buy" else 110,
         "takeProfitTriggerPrice": 130 if side == "buy" else 70,
         "leverage": 1, "clientOrderID": "aipreflight", "marginMode": "isolated",
-        "_aiEntryReferencePrice": 100, "_aiEntryPlannedEntryPrice": 100,
+        "_aiEntryReferencePrice": 100, "_aiEntryPlannedEntryPrice": limit_price,
         "_aiEntryContractValue": 1, "_aiEntryTickSize": 0.01,
         "_aiEntryDeadline": (datetime.now(timezone.utc) + timedelta(minutes=1)).timestamp(),
     }
@@ -63,9 +65,13 @@ class MarketPreflightTests(unittest.TestCase):
         config = json.loads((ROOT / "strategies/codex_ai_decision/config/strategy.json").read_text())
         self.assertEqual(config["entry_preflight"], ENTRY_PREFLIGHT_LIMITS)
         snapshot = AISnapshot("preflight", self.now.isoformat(), instruments=[{"id": BTC}])
-        self.assertEqual(CodexRunner._entry_gates(snapshot, AIConfig())["finalEntryPreflight"], ENTRY_PREFLIGHT_LIMITS)
+        gates = CodexRunner._entry_gates(snapshot, AIConfig())
+        self.assertEqual(gates["finalEntryPreflight"], ENTRY_PREFLIGHT_LIMITS)
+        self.assertEqual(config["entry_execution"], {
+            "order_type": gates["entryOrderType"], "exchange_order_type": gates["exchangeEntryOrderType"],
+        })
 
-    def test_good_long_and_short_depth_remain_tradable(self):
+    def test_good_long_and_short_limits_remain_tradable(self):
         for side in ("buy", "sell"):
             with self.subTest(side=side):
                 result = self.check(request(side))
@@ -94,12 +100,61 @@ class MarketPreflightTests(unittest.TestCase):
             with self.subTest(bids=bids, asks=asks), self.assertRaises(EntryPreflightRejected):
                 self.check(data=data)
 
-    def test_price_jump_and_small_stop_risk_both_bound_deviation(self):
-        with self.assertRaisesRegex(EntryPreflightRejected, "deviation"):
-            self.check(data=market(self.now, 100.6))
-        # A 0.06% move fits the 0.5% cap but consumes over 25% of a 0.2 stop.
-        with self.assertRaisesRegex(EntryPreflightRejected, "deviation"):
-            self.check(request(stopLossTriggerPrice=99.8, takeProfitTriggerPrice=100.8), market(self.now, 100.06))
+    def test_net_ratio_22_boundary_includes_fees_and_slippage_for_both_sides(self):
+        fee, slip = .0005, .0002
+        for side, direction in (("buy", 1), ("sell", -1)):
+            value = request(side, _aiEntryTickSize=1e-9)
+            entry, stop = value["price"], value["stopLossTriggerPrice"]
+            stop_exit = stop * (1 - direction * slip)
+            risk = direction * (entry - stop_exit) + fee * (entry + stop_exit)
+            target = (2.2 * risk + entry * (direction + fee)) / ((direction - fee) * (1 - direction * slip))
+            with self.subTest(side=side):
+                passed = self.check(dict(value, takeProfitTriggerPrice=target + direction * .001))
+                self.assertGreater(passed["netRiskRewardRatio"], 2.2)
+                with self.assertRaisesRegex(EntryPreflightRejected, "below 2.2"):
+                    self.check(dict(value, takeProfitTriggerPrice=target - direction * .001))
+                # A gross 2.2 plan falls below 2.2 after real cost budgets.
+                with self.assertRaisesRegex(EntryPreflightRejected, "below 2.2"):
+                    self.check(dict(value, takeProfitTriggerPrice=entry + direction * 2.2 * abs(entry - stop)))
+
+    def test_limit_orders_survive_snapshot_price_changes(self):
+        for side, price, expected in (("buy", 105, 99), ("sell", 95, 101)):
+            with self.subTest(side=side):
+                value = request(side)
+                result = self.check(value, market(self.now, price))
+                self.assertEqual(result["estimatedEntryPrice"], expected)
+                self.assertEqual(value["price"], expected)
+
+    def test_limits_do_not_depend_on_snapshot_reference(self):
+        for reference in (None, 1, 1000):
+            with self.subTest(reference=reference):
+                self.assertEqual(self.check(request(_aiEntryReferencePrice=reference))["estimatedEntryPrice"], 99)
+
+    def test_limit_orders_must_rest_below_or_above_current_market(self):
+        for side, price, message in (("buy", 100, "below"), ("buy", 101, "below"),
+                                     ("sell", 100, "above"), ("sell", 99, "above")):
+            with self.subTest(side=side), self.assertRaisesRegex(EntryPreflightRejected, message):
+                self.check(request(side, price=price), market(self.now, 100))
+        with self.assertRaisesRegex(EntryPreflightRejected, "resting limit"):
+            self.check(request(orderType="market", price=None))
+
+    def test_limits_cannot_cross_the_book_when_last_and_mark_lag(self):
+        for side, price, book_price, message in (("buy", 99, 98.9, "below"), ("sell", 101, 101.1, "above")):
+            data = list(self.data)
+            data[1] = market(self.now, book_price)[1]
+            with self.subTest(side=side), self.assertRaisesRegex(EntryPreflightRejected, message):
+                self.check(request(side, price=price), data)
+
+    def test_runtime_policy_rejects_market_open_and_prompt_requires_limits(self):
+        source = entry_snapshot()
+        config = AIConfig(enabled=True, mode="shadow", allowedInstruments=(BTC,))
+        value = entry_decision(source)
+        self.assertTrue(validate_decision(value, source, config).accepted)
+        value["orderType"] = "market"
+        rejected = validate_decision(value, source, config)
+        self.assertFalse(rejected.accepted)
+        self.assertIn("resting limit", rejected.reason)
+        self.assertIn("use orderType=limit", CodexRunner._decision_prompt(source, config))
 
     def test_mark_or_last_already_at_protection_refuses_entry(self):
         for index, key, price in ((0, "last", 90), (2, "markPx", 90), (2, "markPx", 130)):
@@ -108,19 +163,21 @@ class MarketPreflightTests(unittest.TestCase):
             with self.subTest(index=index, price=price), self.assertRaisesRegex(EntryPreflightRejected, "already reached"):
                 self.check(data=data)
 
-    def test_depth_fees_and_nearest_tranche_cannot_be_hidden_by_a_far_target(self):
-        with self.assertRaisesRegex(EntryPreflightRejected, "depth"):
-            self.check(request(quantity=20001))
+    def test_resting_limits_do_not_require_execution_depth(self):
+        result = self.check(request(quantity=20001))
+        self.assertEqual(result["estimatedEntryPrice"], 99)
+
+    def test_fees_and_nearest_tranche_cannot_be_hidden_by_a_far_target(self):
         with self.assertRaisesRegex(EntryPreflightRejected, "net risk/reward"):
-            self.check(request(takeProfitTriggerPrice=120))
+            self.check(request(takeProfitTriggerPrice=110))
         with self.assertRaisesRegex(EntryPreflightRejected, "net risk/reward"):
-            self.check(request(takeProfitLevels=[{"price": 120, "quantityPercent": 10}, {"price": 150, "quantityPercent": 90}]))
+            self.check(request(takeProfitLevels=[{"price": 110, "quantityPercent": 10}, {"price": 150, "quantityPercent": 90}]))
         with self.assertRaisesRegex(EntryPreflightRejected, "net risk/reward"):
-            self.check(request(takeProfitTriggerPrice=120, takeProfitLevels=[{"price": 150, "quantityPercent": 100}]))
+            self.check(request(takeProfitTriggerPrice=110, takeProfitLevels=[{"price": 150, "quantityPercent": 100}]))
         with self.assertRaisesRegex(EntryPreflightRejected, "net risk/reward"):
             self.check(fee_rate=0.03)
 
-    def test_resting_limit_keeps_its_price_and_compares_snapshot_market_reference(self):
+    def test_resting_limit_keeps_its_price(self):
         value = request(orderType="limit", price=90, stopLossTriggerPrice=80, takeProfitTriggerPrice=120)
         result = self.check(value)
         self.assertEqual(result["estimatedEntryPrice"], 90)
@@ -132,21 +189,8 @@ class MarketPreflightTests(unittest.TestCase):
         result = self.check(value, market(self.now, 101))
         self.assertEqual(result["estimatedEntryPrice"], 100.1)
 
-    def test_depth_covers_short_size_after_adverse_slippage(self):
-        data = deepcopy(self.data)
-        data[1]["bids"][0][1] = "1.0002"
-        # Sizing at bid alone understates the final short contract count.
-        with self.assertRaisesRegex(EntryPreflightRejected, "depth"):
-            self.check(request("sell", quantity=None, targetNotional=100), data)
-
-    def test_execution_price_must_still_fit_protection_levels(self):
-        for side, stop, target in (("buy", 99.9, 100.025), ("sell", 100.1, 99.975)):
-            with self.subTest(side=side), self.assertRaisesRegex(EntryPreflightRejected, "execution price"):
-                self.check(request(side, stopLossTriggerPrice=stop, takeProfitTriggerPrice=target, _aiEntryTickSize=.001))
-
-    def test_spec_rounding_and_unknown_reference_are_not_bypassed(self):
-        for changes in ({"_aiEntryReferencePrice": None},
-                        {"_aiEntryTickSize": 10, "orderType": "limit", "price": 100.03, "stopLossTriggerPrice": 100.01},
+    def test_spec_rounding_and_protection_are_not_bypassed(self):
+        for changes in ({"_aiEntryTickSize": 10, "orderType": "limit", "price": 100.03, "stopLossTriggerPrice": 100.01},
                         {"stopLossTriggerPrice": None}, {"takeProfitTriggerPrice": None}):
             with self.subTest(changes=changes), self.assertRaises(EntryPreflightRejected):
                 self.check(request(**changes))
@@ -195,8 +239,8 @@ class SubmissionPreflightTests(unittest.IsolatedAsyncioTestCase):
              patch.object(main, "okx_private_request", new=AsyncMock(side_effect=private)), \
              patch.object(main, "okx_get", new=AsyncMock(side_effect=public)):
             gateway = OrderGateway(Path(directory) / "orders.json", submit=main._gateway_submit)
-            with self.assertRaisesRegex(EntryPreflightRejected, "deviation"):
-                await gateway.submit_intent(request(), demo=True, instrument=InstrumentSpec(BTC, 1), price=100)
+            with self.assertRaisesRegex(EntryPreflightRejected, "below"):
+                await gateway.submit_intent(request(price=101), demo=True, instrument=InstrumentSpec(BTC, 1), price=100)
             self.assertEqual(order_posts, [])
             self.assertEqual(gateway.reservations, {})
             self.assertEqual(gateway.daily_order_count(), 0)
@@ -219,6 +263,9 @@ class SubmissionPreflightTests(unittest.IsolatedAsyncioTestCase):
             result = await gateway.submit_intent(request(), demo=True, instrument=InstrumentSpec(BTC, 1), price=100)
             self.assertEqual(result["orderID"], "accepted")
             self.assertEqual(len(posted), 1)
+            self.assertEqual(posted[0]["ordType"], "post_only")
+            self.assertEqual(posted[0]["px"], 99)
+            self.assertEqual(result["orderType"], "limit")
             self.assertEqual(posted[0]["attachAlgoOrds"][0]["slTriggerPx"], 90)
             self.assertEqual(gateway.daily_order_count(), 1)
 
@@ -229,30 +276,48 @@ class SubmissionPreflightTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(broker._lock.locked())
                 return check_entry_preflight(value, *market(price=101))
             with self.assertRaises(EntryPreflightRejected):
-                await broker.submit_intent(request(), instrument=InstrumentSpec(BTC, 1), price=100, entry_preflight=preflight)
+                await broker.submit_intent(request(price=101), instrument=InstrumentSpec(BTC, 1), price=100, entry_preflight=preflight)
             self.assertEqual(broker.all_orders(), [])
             self.assertEqual(broker.daily_order_count(), 0)
 
-    async def test_paper_fills_use_refreshed_quote_and_close_skips_preflight(self):
+    async def test_exchange_manual_orders_and_ai_closes_keep_market_execution(self):
+        for source, reduce_only in (("manual", False), ("ai", True)):
+            value = request(source=source, reduceOnly=reduce_only, orderType="market", price=None)
+            value.pop("leverage")
+            private = AsyncMock(return_value={"data": [{"ordId": "market-order"}]})
+            public = AsyncMock(side_effect=AssertionError("Entry checks must not block these orders"))
+            with self.subTest(source=source), patch.object(main, "TRADING_MODE", "exchange"), \
+                 patch.object(main, "OKX_DEMO", True), patch.object(main, "private_ready", return_value=True), \
+                 patch.object(main, "okx_private_request", new=private), patch.object(main, "okx_get", new=public):
+                await main.submit_order(value, demo=True)
+                self.assertEqual(private.await_args.kwargs["body"]["ordType"], "market")
+                public.assert_not_awaited()
+
+    async def test_paper_entries_keep_resting_limit_and_close_skips_preflight(self):
         with tempfile.TemporaryDirectory() as directory:
             broker = PaperTradingAccount(Path(directory) / "paper.json")
             async def preflight(value):
                 self.assertTrue(broker._lock.locked())
                 return check_entry_preflight(value, *market(price=100.1))
             result = await broker.submit_intent(request(), instrument=InstrumentSpec(BTC, 1), price=99, entry_preflight=preflight)
-            self.assertGreater(broker.all_orders()[0]["fillPrice"], 100.1)
+            self.assertEqual(result["status"], "live")
+            self.assertIsNone(broker.all_orders()[0]["fillPrice"])
+            self.assertEqual(broker.positions(), [])
+            await broker.mark(BTC, 98, bid=97.99, ask=98.01)
+            self.assertEqual(len(broker.positions()), 1)
+            self.assertLessEqual(broker.all_orders()[0]["fillPrice"], 99)
             guard = AsyncMock(side_effect=AssertionError("Close must remain available"))
-            await broker.submit_intent(request("sell", reduceOnly=True, clientOrderID="close"),
-                                       instrument=InstrumentSpec(BTC, 1), price=100, entry_preflight=guard)
+            await broker.submit_intent(request("sell", reduceOnly=True, clientOrderID="close", orderType="market"),
+                                       instrument=InstrumentSpec(BTC, 1), price=98, entry_preflight=guard)
             guard.assert_not_awaited()
             self.assertEqual(broker.positions(), [])
 
-    async def test_market_rejections_keep_assessments_without_failure_halt(self):
+    async def test_limit_rejections_keep_assessments_without_failure_halt(self):
         now = datetime.now(timezone.utc)
         snapshot = AISnapshot("worker-preflight", now.isoformat(), instruments=[{"id": BTC}], dataFreshness={"maxAgeSeconds": 90})
         decision = AIDecision.from_dict({
             "schemaVersion": 1, "decisionId": "entry", "snapshotId": snapshot.snapshotId, "action": "open",
-            "instrumentID": BTC, "direction": "long", "orderType": "market", "stopLossPrice": 90,
+            "instrumentID": BTC, "direction": "long", "orderType": "limit", "limitPrice": 100, "stopLossPrice": 90,
             "takeProfitPrice": 130, "leverage": 1, "winRate": .7, "riskRewardRatio": 3, "confidence": .9,
             "validUntil": (now + timedelta(minutes=1)).isoformat(), "reasonCode": "TEST", "reason": "测试有证据支持的入场方案",
             "assessments": [{"instrumentID": BTC, "direction": "long", "limitPrice": 100, "stopLossPrice": 90,

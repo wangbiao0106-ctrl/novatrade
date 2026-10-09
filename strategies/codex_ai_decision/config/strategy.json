@@ -1,6 +1,6 @@
 {
   "strategy_id": "codex_ai_decision",
-  "version": "1.3",
+  "version": "1.5",
   "source_of_truth": "strategies/codex_ai_decision/STRATEGY.md",
   "display_name": "Codex AI 决策策略",
   "name_en": "Codex AI Decision",
@@ -12,7 +12,7 @@
     "decision_endpoint": "/api/v1/ai/strategies/codex",
     "workflow": "single",
     "event_prefilter_default": "off",
-    "event_fingerprint": "market-facts-v1",
+    "event_fingerprint": "market-facts-v2",
     "enabled_by_default": false,
     "live_gate": "manual_enable_and_live_trading_switch"
   },
@@ -37,25 +37,35 @@
     "recent_stop_loss_limit": 2
   },
   "entry_analysis": {
-    "primary_interval": "4H",
-    "minimum_confirmed_candles": 20,
-    "directions": ["long", "short"],
-    "auxiliary_intervals": ["5m", "15m", "1H"],
-    "forming_candle_role": "context_only"
+    "primary_interval": "15m",
+    "minimum_confirmed_candles": 1,
+    "directions": [
+      "long",
+      "short"
+    ],
+    "auxiliary_intervals": [
+      "5m",
+      "1H",
+      "4H"
+    ],
+    "forming_candle_role": "context_only",
+    "direction_policy": "ai_holistic_no_4h_gate"
   },
   "entry_quality": {
     "minimum_win_rate": 0.5,
-    "minimum_risk_reward_ratio": 2.0
+    "minimum_risk_reward_ratio": 2.2
+  },
+  "entry_execution": {
+    "order_type": "limit",
+    "exchange_order_type": "post_only"
   },
   "entry_preflight": {
     "max_quote_age_seconds": 5,
     "max_future_skew_seconds": 1,
     "max_spread_bps": 10,
-    "max_price_drift_bps": 50,
-    "max_stop_distance_fraction": 0.25,
     "fee_rate_per_side": 0.0005,
     "slippage_bps": 2,
-    "minimum_net_risk_reward_ratio": 2.0
+    "minimum_net_risk_reward_ratio": 2.2
   },
   "risk_policy": {
     "allow_open": true,
@@ -65,5 +75,15 @@
     "account_daily_loss_percent": 5.0,
     "account_data_unknown": "fail_closed",
     "order_gateway": "shared_durable_ledger"
+  },
+  "market_context": {
+    "optional": true,
+    "derivatives_scope": "OKX contract OI; currency-wide Rubik 5m ratios and flow",
+    "sentiment_source": "https://api.alternative.me/fng/?limit=1",
+    "fed_source": "https://www.federalreserve.gov/feeds/press_monetary.xml",
+    "global_cache_seconds": 600,
+    "sentiment_max_age_seconds": 172800,
+    "derivatives_max_age_seconds": 1800,
+    "collection_timeout_seconds": 18
   }
 }

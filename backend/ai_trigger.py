@@ -22,7 +22,7 @@ except ImportError:  # bundled backend modules are launched as scripts
     from ai_schema import AIConfig, AISnapshot
 
 
-FINGERPRINT_VERSION = 1
+FINGERPRINT_VERSION = 2
 
 
 def _confirmed_structure_hash(rows: Any) -> str:
@@ -87,7 +87,7 @@ def _stable(value: Any) -> Any:
         for key in sorted(value):
             name = str(key)
             lowered = name.lower()
-            if lowered in {"updatedat", "receivedat", "sourcetimestampunixmilliseconds"}:
+            if lowered in {"updatedat", "receivedat", "sourcetimestampunixmilliseconds", "ageseconds", "publicationageseconds", "cached"}:
                 continue
             result[name] = _stable(value[key])
         return result
@@ -293,6 +293,8 @@ def decision_fingerprint(snapshot: AISnapshot, config: AIConfig) -> str:
         "version": FINGERPRINT_VERSION,
         "observedInstruments": snapshot.observed_instruments(),
         "facts": _facts_view(snapshot),
+        "derivatives": _stable(snapshot.derivatives),
+        "marketContext": _stable(snapshot.marketContext),
         "account": _account_view(snapshot.account if isinstance(snapshot.account, Mapping) else {}),
         "risk": _stable(snapshot.risk),
         "availability": _stable(ai.get("tradingAvailability")),
@@ -321,7 +323,7 @@ def decision_fingerprint(snapshot: AISnapshot, config: AIConfig) -> str:
         },
         "route": route,
         "structure": {
-            "version": ai.get("structureVersion") or "market-facts-v1",
+            "version": ai.get("structureVersion") or "market-facts-v2",
             "rulesHash": ai.get("structureRulesHash") or structure_hash,
         },
     }
@@ -335,7 +337,7 @@ def structure_identity(snapshot: AISnapshot) -> dict[str, str]:
     methodology = market_facts(snapshot).get("methodology")
     rules_hash = sha256(json.dumps(methodology, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return {
-        "version": str(ai.get("structureVersion") or "market-facts-v1"),
+        "version": str(ai.get("structureVersion") or "market-facts-v2"),
         "rulesHash": str(ai.get("structureRulesHash") or rules_hash),
     }
 

@@ -6,8 +6,9 @@ API 凭据或原始行情；新增夹具必须脱敏，并验证完整 assessmen
 fail-closed 和共享订单网关幂等性。
 
 v1.1 的脱敏回放使用 `test_scan_schedule.py` 验证 10 分钟开始间隔、跳过超时轮次、
-配置迁移和停止行为；`test_four_hour_scan.py` 验证 4H 多空主周期、完整趋势历史、
-数据不足时拒绝开仓以及持仓管理仍可用。
+配置迁移和停止行为；`test_holistic_scan.py` 验证 15m 优先、4H 限制移除、
+盈亏比 2.2 边界和缺少基础数据时持仓管理仍可用。`test_market_context.py` 验证
+OKX v5 衍生品源、情绪/美联储消息、指标、来源时效和事件指纹。
 
 ```bash
 python3 -m unittest discover -s strategies/codex_ai_decision/tests -p 'test_*.py'

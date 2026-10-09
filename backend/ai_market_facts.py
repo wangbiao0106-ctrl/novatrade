@@ -16,17 +16,20 @@ except ImportError:  # bundled backend modules are launched as scripts
     from ai_schema import AISnapshot, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PRIMARY_ENTRY_INTERVAL
 
 
-_INTERVALS = ("5m", "15m", "1H", "4H")
+_INTERVALS = ("15m", "5m", "1H", "4H")
 _METHODOLOGY = {
     "primaryEntryInterval": PRIMARY_ENTRY_INTERVAL,
     "primaryEntryMinimumConfirmedCandles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
-    "entryAnalysis": "Use confirmed 4H trend, structure, support/resistance and conditional long/short entry plans. Shorter intervals, tickers, books and funding are execution/risk context; forming 4H candles cannot confirm an entry.",
+    "entryAnalysis": "Prioritize 15m OHLCV and judge direction holistically with derivatives, liquidity, sentiment and policy context. Other intervals are optional; no 4H direction gate.",
     "candleScope": "Only confirmed=true candles, in supplied oldest-to-newest order. Invalid OHLC breaks the usable trailing segment; forming candles are excluded.",
     "returnsPercent": "(latest close / close N confirmed bars earlier - 1) * 100; N+1 usable bars required.",
     "sma": "Simple arithmetic mean of the last N usable confirmed closes; N bars required.",
     "recent20HighLow": "Maximum high and minimum low of the last 20 usable confirmed candles; 20 bars required.",
     "meanTrueRange14": "Simple mean of 14 true ranges max(high-low, abs(high-previousClose), abs(low-previousClose)); 15 usable bars required. No Wilder smoothing or seed.",
     "volumeRatioToPrevious20": "Latest confirmed volume / simple mean of the preceding 20 volumes; 21 usable bars required. Missing/invalid volume or zero preceding mean yields null.",
+    "rsi14Simple": "100 * mean gains / (mean gains + mean losses), using 14 close changes and 15 bars. Simple averages, not Wilder RSI; flat window = 50.",
+    "rollingTypicalPriceVWAP20": "Volume-weighted (high+low+close)/3 over 20 confirmed bars, using supplied candle volume. Rolling candle proxy, not session or trade-level VWAP.",
+    "trueRangePercent": "meanTrueRange14 / latest confirmed close * 100; a volatility measure, not an entry gate.",
     "spreadBasisPoints": "(ask-bid) / ((ask+bid)/2) * 10000; both positive and ask>=bid required.",
     "top5SizeImbalance": "(bid size - ask size) / (bid size + ask size), using the first up to 5 supplied levels per side. Sizes retain exchange contract units; malformed levels yield null side totals.",
     "fundingRate": "Native exchange funding ratio, not percent.",
@@ -200,6 +203,27 @@ def _candles(value: Any) -> dict[str, Any]:
             if previous_mean is not None and previous_mean > 0:
                 volume_ratio = _finite(volumes[-1] / previous_mean)
     result["volumeRatioToPrevious20"] = volume_ratio
+    rsi = None
+    if count >= 15:
+        changes = [current - previous for previous, current in zip(closes[-15:-1], closes[-14:])]
+        gains = _mean([max(change, 0) for change in changes])
+        losses = _mean([max(-change, 0) for change in changes])
+        if gains is not None and losses is not None:
+            scale = max(gains, losses)
+            rsi = 50.0 if scale == 0 else 100 * (gains / scale) / (gains / scale + losses / scale)
+    result["rsi14Simple"] = rsi
+    vwap = None
+    if count >= 20:
+        window = usable[-20:]
+        volumes = [row["volume"] for row in window]
+        if all(volume is not None for volume in volumes) and max(volumes) > 0:
+            weights = [volume / max(volumes) for volume in volumes]
+            total = math.fsum(weights)
+            vwap = _sum([(row["high"] / 3 + row["low"] / 3 + row["close"] / 3) * (weight / total)
+                         for row, weight in zip(window, weights)])
+    result["rollingTypicalPriceVWAP20"] = vwap
+    atr = result["meanTrueRange14"]
+    result["trueRangePercent"] = _finite(atr / closes[-1] * 100) if atr is not None and closes else None
     return result
 
 
@@ -219,7 +243,7 @@ def _primary_entry_quality(facts: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def primary_entry_quality(snapshot: AISnapshot, instrument_id: str) -> dict[str, Any]:
-    """Share the measured primary-history gate between prompts and policy.
+    """Share minimal 15m data integrity between prompts and policy.
 
     Confirmation and OHLC validity use the same trailing-segment arithmetic as
     the market summaries. This gate never chooses a direction or restricts
@@ -244,5 +268,6 @@ def market_facts(snapshot: AISnapshot) -> dict[str, Any]:
             },
             "timeframes": timeframes,
             "primaryEntryQuality": _primary_entry_quality(timeframes[PRIMARY_ENTRY_INTERVAL]),
+            "derivatives": snapshot.derivatives.get(instrument, {}),
         }
     return {"methodology": dict(_METHODOLOGY), "instruments": instruments}

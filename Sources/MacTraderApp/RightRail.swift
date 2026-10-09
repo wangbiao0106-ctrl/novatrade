@@ -415,7 +415,7 @@ struct AIControlModule: View {
                 }
             }
             .font(.caption2)
-            Text("4H 多空趋势 · 每 \(scanIntervalLabel)扫描")
+            Text("15m 优先 · AI 综合判断 · 每 \(scanIntervalLabel)扫描")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             if config.mode == .paperActive {
@@ -652,7 +652,7 @@ struct AISettingsSheet: View {
                             .frame(width: 72)
                             .multilineTextAlignment(.trailing)
                     }
-                    Text("默认每 10 分钟扫描；以已收盘 4H K 线判断多空趋势，较短周期仅用于执行和风险参考。")
+                    Text("默认每 10 分钟扫描；优先分析 15 分钟 K 线，结合资金费、多空比、成交量、市场情绪和美联储消息综合判断，其他周期作为参考。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack {

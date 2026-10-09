@@ -20,13 +20,13 @@ class PolicyError(ValueError):
 
 
 MIN_OPEN_WIN_RATE = 0.50
-MIN_OPEN_RISK_REWARD_RATIO = 2.0
+MIN_OPEN_RISK_REWARD_RATIO = 2.2
 # Both the model prompt and the execution layer must quote these numbers, so
 # they are public and imported instead of re-typed. MIN_EXIT_REASON_LENGTH is
 # shared by the policy check, the order-execution recheck and the prompt.
 MIN_EXIT_REASON_LENGTH = 8
 MIN_PROTECTION_REPLACEMENT_CONFIDENCE = 0.80
-_OPEN_CANDLE_INTERVALS = ("5m", "15m", "1H", "4H")
+
 _ACTIVE_PENDING_ORDER_STATES = {"live", "partially_filled", "waiting", "pending", "open", "queued"}
 _TERMINAL_ORDER_STATES = {"filled", "canceled", "cancelled", "rejected", "failed", "expired", "mmp_canceled"}
 _EXIT_REASON_CODES = {"THESIS_INVALIDATED", "ORDER_MISTAKE"}
@@ -285,12 +285,6 @@ def _open_snapshot_gate(snapshot: AISnapshot, instrument_id: str) -> str | None:
     primary_quality = primary_entry_quality(snapshot, instrument_id)
     if not primary_quality["canOpen"]:
         return f"{instrument_id} {primary_quality['error']}"
-    for interval in _OPEN_CANDLE_INTERVALS:
-        rows = snapshot.candles.get(f"{instrument_id}/{interval}") if isinstance(snapshot.candles, dict) else None
-        if not isinstance(rows, list) or not rows:
-            return f"{instrument_id} {interval} candle data is unavailable"
-        if not any(isinstance(row, dict) and row.get("confirmed") is True for row in rows):
-            return f"{instrument_id} {interval} confirmed candle data is unavailable"
     return None
 
 
@@ -628,7 +622,7 @@ def validate_decision(
                 if item.winRate is None or item.winRate < MIN_OPEN_WIN_RATE:
                     return reject(f"assessment winRate must be >= {MIN_OPEN_WIN_RATE:.2f}: {item.instrumentID}", parsed_snapshot.snapshotId)
                 if item.riskRewardRatio is None or item.riskRewardRatio < MIN_OPEN_RISK_REWARD_RATIO:
-                    return reject(f"assessment riskRewardRatio must be >= 2.0: {item.instrumentID}", parsed_snapshot.snapshotId)
+                    return reject(f"assessment riskRewardRatio must be >= {MIN_OPEN_RISK_REWARD_RATIO}: {item.instrumentID}", parsed_snapshot.snapshotId)
                 if parsed_config.requireStopLoss and item.stopLossPrice is None:
                     return reject(f"eligible assessment requires a stop loss: {item.instrumentID}", parsed_snapshot.snapshotId)
             target_prices = _take_profit_targets(item)
@@ -764,7 +758,7 @@ def validate_decision(
         if parsed_decision.winRate is None or parsed_decision.winRate < MIN_OPEN_WIN_RATE:
             return reject(f"winRate must be >= {MIN_OPEN_WIN_RATE:.2f} for open actions", parsed_snapshot.snapshotId)
         if parsed_decision.riskRewardRatio is None or parsed_decision.riskRewardRatio < MIN_OPEN_RISK_REWARD_RATIO:
-            return reject("riskRewardRatio must be >= 2.0 for open actions", parsed_snapshot.snapshotId)
+            return reject(f"riskRewardRatio must be >= {MIN_OPEN_RISK_REWARD_RATIO} for open actions", parsed_snapshot.snapshotId)
         if parsed_decision.leverage is None or parsed_decision.leverage < 1 or parsed_decision.leverage > parsed_config.maxLeverage:
             return reject(f"leverage must be between 1 and maxLeverage ({parsed_config.maxLeverage:g}) for open actions", parsed_snapshot.snapshotId)
         # The account snapshot carries today's realized losing-trade count
@@ -838,6 +832,8 @@ def validate_decision(
         # remain compatible because they do not carry execution metadata.
         if _is_current_snapshot(parsed_snapshot) and not parsed_decision.assessments:
             return reject("current entry requires complete per-contract assessments", parsed_snapshot.snapshotId)
+        if _is_current_snapshot(parsed_snapshot) and parsed_decision.orderType != "limit":
+            return reject("AI open requires a resting limit order", parsed_snapshot.snapshotId)
     return PolicyResult(True, parsed_decision, "accepted")
 
 

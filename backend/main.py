@@ -30,6 +30,7 @@ import uvicorn
 import websockets
 
 try:
+    from .ai_market_context import collect_market_context
     from .ai_entry_preflight import EntryPreflightRejected, check_entry_preflight
     from .ai_policy import (
         ACCOUNT_DAILY_LOSS_PERCENT,
@@ -43,6 +44,7 @@ try:
     from .order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError
     from .paper_trading import PaperTradingAccount
 except ImportError:  # bundled backend/main.py is launched as a script
+    from ai_market_context import collect_market_context
     from ai_entry_preflight import EntryPreflightRejected, check_entry_preflight
     from ai_policy import (
         ACCOUNT_DAILY_LOSS_PERCENT,
@@ -290,7 +292,7 @@ AI_STRATEGY_CATALOG: dict[str, dict[str, Any]] = {
         "runtime": {
             "handler": "backend.ai_worker.CodexRunner",
             "decisionEndpoint": "/api/v1/ai/strategies/codex",
-            "eventFingerprint": "market-facts-v1",
+            "eventFingerprint": "market-facts-v2",
         },
         "liveGate": {
             "requiresManualEnable": True,
@@ -1705,6 +1707,9 @@ async def submit_order(request: dict[str, Any], *, demo: bool) -> dict[str, Any]
     if request.get("source") == "ai" and not request.get("reduceOnly"):
         await _ai_entry_preflight(request)
         _assert_ai_entry_current(request)
+        # Protect the quote-to-POST race: OKX cancels a post-only order if it
+        # would take liquidity on arrival. Keep the domain type as "limit".
+        body["ordType"] = "post_only"
     result = await okx_private_request("POST", "/trade/order", body=body)
     row = (result.get("data") or [{}])[0]
     order_id = row.get("ordId")
@@ -2026,7 +2031,7 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
             instrument_quality[resource] = metadata
             return row
 
-        intervals = ("5m", "15m", "1H", "4H")
+        intervals = ("15m", "5m", "1H", "4H")
         candle_rows, ticker, funding_row, book = await asyncio.gather(
             asyncio.gather(*(get_candles(interval) for interval in intervals)),
             get_public_row("/market/ticker", "ticker"),
@@ -2036,7 +2041,10 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
         availability["instruments"][instrument] = instrument_quality
         return instrument, dict(zip(intervals, candle_rows)), ticker, funding_row, book
 
-    collected = await asyncio.gather(*(collect_instrument(instrument) for instrument in selected))
+    collected, (derivatives, market_context) = await asyncio.gather(
+        asyncio.gather(*(collect_instrument(instrument) for instrument in selected)),
+        collect_market_context(selected, okx_get),
+    )
     for instrument, rows_by_interval, ticker, funding_row, book in collected:
         for interval, rows in rows_by_interval.items():
             candles[f"{instrument}/{interval}"] = rows
@@ -2087,7 +2095,7 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
     # Include collection latency in freshness: stamping only the end makes
     # earlier ticker/book data appear new after a slow request or retry.
     captured = collection_started
-    raw = {"capturedAt": captured, "instruments": [available[item] for item in candidates], "candles": candles, "tickers": tickers, "orderBook": books, "fundingRates": funding, "account": account_snapshot, "risk": risk_snapshot}
+    raw = {"capturedAt": captured, "instruments": [available[item] for item in candidates], "candles": candles, "tickers": tickers, "orderBook": books, "fundingRates": funding, "derivatives": derivatives, "marketContext": market_context, "account": account_snapshot, "risk": risk_snapshot}
     snapshot_id = __import__("hashlib").sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:32]
     return AISnapshot(
         snapshotId=snapshot_id,
@@ -2097,6 +2105,8 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
         tickers=tickers,
         orderBook=books,
         fundingRates=funding,
+        derivatives=derivatives,
+        marketContext=market_context,
         account=account_snapshot,
         risk=risk_snapshot,
         ai={
@@ -2399,13 +2409,7 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
         request["leverage"] = leverage
         request["marginUSD"] = config.marginPerOrderUSD
         request["_aiEntryDeadline"] = entry_deadline
-        reference = snapshot.tickers.get(decision.instrumentID, {})
-        request["_aiEntryReferencePrice"] = reference.get("last") if isinstance(reference, dict) else None
-        request["_aiEntryPlannedEntryPrice"] = (
-            decision.limitPrice if decision.orderType == "limit" else request["_aiEntryReferencePrice"]
-        )
         request["_aiEntryTickSize"] = spec.tickSize
-        request["_aiEntryContractValue"] = spec.ctVal * spec.ctMult
     elif position_quantity > 0:
         request["quantity"] = position_quantity
         if position_side in {"long", "short"}:
