@@ -302,11 +302,9 @@ def decision_fingerprint(snapshot: AISnapshot, config: AIConfig) -> str:
             "mode": config.mode,
             "allowedInstruments": list(config.allowedInstruments),
             "minimumConfidence": config.minimumConfidence,
-            # decisionIntervalSeconds is the fallback snapshot age limit for
-            # providers without explicit freshness metadata, and
-            # snapshotMaxAgeSeconds is the real admission window: a change to
-            # either one changes entry admissibility and must move the
-            # fingerprint.
+            # Scan cadence changes must force a new evaluation, while snapshot
+            # age is an independent admission window (also used when freshness
+            # metadata is absent). Both belong to the configuration fingerprint.
             "decisionIntervalSeconds": config.decisionIntervalSeconds,
             "snapshotMaxAgeSeconds": config.snapshotMaxAgeSeconds,
             "allowOpen": config.allowOpen,

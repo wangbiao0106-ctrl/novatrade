@@ -8,8 +8,10 @@ import math
 from typing import Any, Iterable
 
 try:
+    from .ai_market_facts import primary_entry_quality
     from .ai_schema import ACCOUNT_DAILY_LOSS_PERCENT, AIDecision, AIConfig, AISnapshot, SchemaError
 except ImportError:  # bundled backend modules are launched as scripts
+    from ai_market_facts import primary_entry_quality
     from ai_schema import ACCOUNT_DAILY_LOSS_PERCENT, AIDecision, AIConfig, AISnapshot, SchemaError
 
 
@@ -280,6 +282,9 @@ def _open_snapshot_gate(snapshot: AISnapshot, instrument_id: str) -> str | None:
     ticker = snapshot.tickers.get(instrument_id) if isinstance(snapshot.tickers, dict) else None
     if not isinstance(ticker, dict) or not _finite_positive(ticker.get("last")):
         return f"{instrument_id} ticker data is unavailable"
+    primary_quality = primary_entry_quality(snapshot, instrument_id)
+    if not primary_quality["canOpen"]:
+        return f"{instrument_id} {primary_quality['error']}"
     for interval in _OPEN_CANDLE_INTERVALS:
         rows = snapshot.candles.get(f"{instrument_id}/{interval}") if isinstance(snapshot.candles, dict) else None
         if not isinstance(rows, list) or not rows:
@@ -489,8 +494,8 @@ def snapshot_freshness(
 ) -> dict[str, Any]:
     """Measure age with the server clock; model time guesses are not inputs.
 
-    Older snapshot providers omit the metadata, so their polling interval is
-    the age limit. Malformed explicit metadata must not silently use that
+    Older snapshot providers omit the metadata, so the independently configured
+    snapshot window is the age limit. Malformed explicit metadata must not use that
     fallback, since it may otherwise admit an entry with untrusted timing.
     """
     clock = now or utc_now()
@@ -516,7 +521,7 @@ def snapshot_freshness(
         metadata = snapshot.dataFreshness
         if not isinstance(metadata, dict):
             raise ValueError("snapshot freshness metadata is invalid")
-        max_age = metadata.get("maxAgeSeconds", config.decisionIntervalSeconds)
+        max_age = metadata.get("maxAgeSeconds", config.snapshotMaxAgeSeconds)
         if isinstance(max_age, bool) or not isinstance(max_age, (int, float)):
             raise ValueError("snapshot maxAgeSeconds must be a positive finite number")
         if not math.isfinite(max_age) or max_age <= 0:

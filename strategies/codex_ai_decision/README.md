@@ -13,7 +13,10 @@
 - 配置中心 ID：`codex`
 - 实验室包 ID：`codex_ai_decision`
 - provider：`codex`，固定 `gpt-6-luna / medium`
-- 默认轮询：30 秒；事件预筛默认关闭，开启前需完成回放验收
+- 规则版本：1.1；默认每 10 分钟开始一次扫描，采集和推理耗时计入周期；事件预筛
+  默认关闭，开启前需完成回放验收
+- 已收盘 4H K 线是多空入场的主依据，至少保留 20 根有效历史；其他周期、盘口和
+  实时价格辅助执行与风控。历史不足时拒绝新开仓，已有持仓和挂单仍可管理
 - 默认账户环境为本地纸面交易，启用后使用 `paper-active`；真实公共行情与本地撮合
   的执行边界见公共规则中的“账户模式与执行边界”，初始资金为 5000 USDT
 - AI 入场默认使用止损后的 4 小时同品种冷却，并在 60 分钟内累计 2 次止损后暂停
@@ -31,6 +34,9 @@ Swift 客户端通过 API 对齐配置与审计契约：参数设置可保存快
 退役配置键只兼容读取，不再写出。客户端契约验证位于
 `Tests/OKXGatewayTests/AIRiskContractTests.swift` 和
 `Tests/OKXGatewayTests/RiskDataQualityTests.swift`，不在运行时读取本目录。
+扫描节奏与主周期的回归回放分别位于 `tests/test_scan_schedule.py` 和
+`tests/test_four_hour_scan.py`；默认值及 4H 主周期参数由 `tests/test_contract.py`
+与服务端常量逐项对齐。快照有效期独立保持默认 90 秒。
 
 验证 AI worker 契约：
 

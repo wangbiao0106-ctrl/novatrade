@@ -27,7 +27,8 @@ func aiRiskLegacyConfigurationRetiredFields() throws {
     let config = try riskContractDecode(AIConfig.self, """
     {"strategyID":"codex", "provider":"codex", "enabled":true,
      "mode":"paper-active", "allowedInstruments":["SATS-USDT-SWAP"],
-     "minimumConfidence":0.83, "maxDailyLosses":3, "marginPerOrderUSD":250,
+     "minimumConfidence":0.83, "decisionIntervalSeconds":45.5,
+     "maxDailyLosses":3, "marginPerOrderUSD":250,
      "cooldownSeconds":60, "escalationModel":"gpt-6.1-sol",
      "escalationReasoningEffort":"high"}
     """)
@@ -35,6 +36,7 @@ func aiRiskLegacyConfigurationRetiredFields() throws {
     #expect(config.mode == .paperActive)
     #expect(config.allowedInstruments == ["SATS-USDT-SWAP"])
     #expect(config.minimumConfidence == 0.83)
+    #expect(config.decisionIntervalSeconds == 45.5)
     #expect(config.maxDailyLosses == 3)
     #expect(config.marginPerOrderUSD == 250)
     let encoded = try riskContractObject(config)
@@ -48,6 +50,7 @@ func aiRiskLegacyConfigurationRetiredFields() throws {
 @Test("AI configuration defaults match the server risk contract and encode the current field set")
 func aiRiskConfigurationDefaults() throws {
     let config = try riskContractDecode(AIConfig.self, "{\"strategyID\":\"codex\",\"provider\":\"codex\"}")
+    #expect(config.decisionIntervalSeconds == 600)
     #expect(config.snapshotMaxAgeSeconds == 90)
     #expect(config.stopLossCooldownSeconds == 14_400)
     #expect(config.recentStopLossWindowSeconds == 3_600)
@@ -57,7 +60,7 @@ func aiRiskConfigurationDefaults() throws {
     let expected = try riskContractObject("""
     {"strategyID":"codex", "provider":"codex", "enabled":false,
      "mode":"disabled", "allowedInstruments":[], "minimumConfidence":0.65,
-     "decisionIntervalSeconds":30, "cliTimeoutSeconds":90,
+     "decisionIntervalSeconds":600, "cliTimeoutSeconds":90,
      "snapshotMaxAgeSeconds":90, "maxOutputBytes":1000000,
      "maxConsecutiveFailures":3, "allowOpen":true, "allowClose":true,
      "allowCancel":true, "requireStopLoss":true, "maxDailyOrders":20,
@@ -69,18 +72,21 @@ func aiRiskConfigurationDefaults() throws {
     #expect(try riskContractDecode(AIConfig.self, String(decoding: riskContractEncode(config), as: UTF8.self)) == config)
 }
 
-@Test("Custom snapshot and stop-loss controls survive configuration round trips")
+@Test("Custom scan interval, snapshot and stop-loss controls survive configuration round trips")
 func aiRiskConfigurationCustomControls() throws {
     let config = try riskContractDecode(AIConfig.self, """
-    {"snapshotMaxAgeSeconds":180.5, "stopLossCooldownSeconds":7200.25,
+    {"decisionIntervalSeconds":900.25, "snapshotMaxAgeSeconds":180.5,
+     "stopLossCooldownSeconds":7200.25,
      "recentStopLossWindowSeconds":1200.5, "recentStopLossLimit":4,
      "requireStopLoss":true}
     """)
+    #expect(config.decisionIntervalSeconds == 900.25)
     #expect(config.snapshotMaxAgeSeconds == 180.5)
     #expect(config.stopLossCooldownSeconds == 7_200.25)
     #expect(config.recentStopLossWindowSeconds == 1_200.5)
     #expect(config.recentStopLossLimit == 4)
     let encoded = try riskContractObject(config)
+    #expect(encoded["decisionIntervalSeconds"] as? Double == 900.25)
     #expect(encoded["snapshotMaxAgeSeconds"] as? Double == 180.5)
     #expect(encoded["stopLossCooldownSeconds"] as? Double == 7_200.25)
     #expect(encoded["recentStopLossWindowSeconds"] as? Double == 1_200.5)

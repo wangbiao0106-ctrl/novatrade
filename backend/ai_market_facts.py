@@ -11,13 +11,16 @@ import math
 from typing import Any, Mapping
 
 try:
-    from .ai_schema import AISnapshot
+    from .ai_schema import AISnapshot, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PRIMARY_ENTRY_INTERVAL
 except ImportError:  # bundled backend modules are launched as scripts
-    from ai_schema import AISnapshot
+    from ai_schema import AISnapshot, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PRIMARY_ENTRY_INTERVAL
 
 
 _INTERVALS = ("5m", "15m", "1H", "4H")
 _METHODOLOGY = {
+    "primaryEntryInterval": PRIMARY_ENTRY_INTERVAL,
+    "primaryEntryMinimumConfirmedCandles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
+    "entryAnalysis": "Use confirmed 4H trend, structure, support/resistance and conditional long/short entry plans. Shorter intervals, tickers, books and funding are execution/risk context; forming 4H candles cannot confirm an entry.",
     "candleScope": "Only confirmed=true candles, in supplied oldest-to-newest order. Invalid OHLC breaks the usable trailing segment; forming candles are excluded.",
     "returnsPercent": "(latest close / close N confirmed bars earlier - 1) * 100; N+1 usable bars required.",
     "sma": "Simple arithmetic mean of the last N usable confirmed closes; N bars required.",
@@ -200,11 +203,38 @@ def _candles(value: Any) -> dict[str, Any]:
     return result
 
 
+def _primary_entry_quality(facts: Mapping[str, Any]) -> dict[str, Any]:
+    count = facts["usableTrailingConfirmedRowCount"]
+    can_open = count >= MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES
+    return {
+        "interval": PRIMARY_ENTRY_INTERVAL,
+        "minimumConfirmedCandles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
+        "usableTrailingConfirmedRowCount": count,
+        "canOpen": can_open,
+        "error": None if can_open else (
+            f"{PRIMARY_ENTRY_INTERVAL} requires at least {MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES} valid confirmed OHLC candles; "
+            f"usable trailing history is {count}"
+        ),
+    }
+
+
+def primary_entry_quality(snapshot: AISnapshot, instrument_id: str) -> dict[str, Any]:
+    """Share the measured primary-history gate between prompts and policy.
+
+    Confirmation and OHLC validity use the same trailing-segment arithmetic as
+    the market summaries. This gate never chooses a direction or restricts
+    existing position/order management.
+    """
+    rows = snapshot.candles.get(f"{instrument_id}/{PRIMARY_ENTRY_INTERVAL}") if isinstance(snapshot.candles, Mapping) else None
+    return _primary_entry_quality(_candles(rows))
+
+
 def market_facts(snapshot: AISnapshot) -> dict[str, Any]:
     """Summarize each observed contract, including rows with missing resources."""
     instruments: dict[str, Any] = {}
     for instrument in snapshot.observed_instruments():
         funding = _row(snapshot.fundingRates.get(instrument))
+        timeframes = {interval: _candles(snapshot.candles.get(f"{instrument}/{interval}")) for interval in _INTERVALS}
         instruments[instrument] = {
             "ticker": _ticker(snapshot.tickers.get(instrument)),
             "orderBook": _book(snapshot.orderBook.get(instrument)),
@@ -212,6 +242,7 @@ def market_facts(snapshot: AISnapshot) -> dict[str, Any]:
                 "rate": _number(funding.get("fundingRate")),
                 "nextFundingTimeUnixMilliseconds": _millis(funding.get("nextFundingTime")),
             },
-            "timeframes": {interval: _candles(snapshot.candles.get(f"{instrument}/{interval}")) for interval in _INTERVALS},
+            "timeframes": timeframes,
+            "primaryEntryQuality": _primary_entry_quality(timeframes[PRIMARY_ENTRY_INTERVAL]),
         }
     return {"methodology": dict(_METHODOLOGY), "instruments": instruments}

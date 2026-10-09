@@ -342,6 +342,13 @@ struct AIControlModule: View {
     private var config: AIConfig { model.aiConfig }
     private var halted: Bool { status.state == "halted" || status.mode == .halted }
     private var active: Bool { status.enabled && status.mode != .disabled && !halted }
+    private var scanIntervalLabel: String {
+        let seconds = config.decisionIntervalSeconds
+        if seconds >= 60, seconds.truncatingRemainder(dividingBy: 60) == 0 {
+            return "\((seconds / 60).formatted()) 分钟"
+        }
+        return "\(seconds.formatted()) 秒"
+    }
     private var statusDotColor: Color {
         if halted { return .red }
         if status.lastError != nil { return .red }
@@ -408,6 +415,9 @@ struct AIControlModule: View {
                 }
             }
             .font(.caption2)
+            Text("4H 多空趋势 · 每 \(scanIntervalLabel)扫描")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             if config.mode == .paperActive {
                 Text("纸面交易 · 本地撮合")
                     .font(.caption2)
@@ -638,10 +648,13 @@ struct AISettingsSheet: View {
                     HStack {
                         Text("决策间隔（秒）").frame(width: 120, alignment: .leading)
                         Spacer()
-                        TextField("30", value: $config.decisionIntervalSeconds, format: .number.precision(.fractionLength(1)))
+                        TextField("600", value: $config.decisionIntervalSeconds, format: .number.precision(.fractionLength(1)))
                             .frame(width: 72)
                             .multilineTextAlignment(.trailing)
                     }
+                    Text("默认每 10 分钟扫描；以已收盘 4H K 线判断多空趋势，较短周期仅用于执行和风险参考。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     HStack {
                         Text("决策超时（秒）").frame(width: 120, alignment: .leading)
                         Spacer()

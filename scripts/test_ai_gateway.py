@@ -28,6 +28,11 @@ def iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def valid_primary_candles() -> list[dict]:
+    """Complete closed primary history for entry-focused runtime fixtures."""
+    return [{"open": 99, "high": 102, "low": 98, "close": 100, "confirmed": True} for _ in range(20)]
+
+
 def restore_prompt_snapshot(value: dict) -> dict:
     """Decode the column-table representation documented in the prompt."""
     result = dict(value)
@@ -154,8 +159,9 @@ class AIGatewayTests(unittest.TestCase):
             }
             self.assertEqual(set(group["candles"]), set(expected_candles))
             for key, rows in group["candles"].items():
-                self.assertEqual(len(rows), 21)
-                self.assertEqual(rows[0], expected_candles[key][39])
+                primary = key.endswith("/4H")
+                self.assertEqual(len(rows), 60 if primary else 21)
+                self.assertEqual(rows[0], expected_candles[key][0 if primary else 39])
                 self.assertEqual(rows[-1], expected_candles[key][-1])
         self.assertEqual(union, ids)
         self.assertEqual(snapshot.to_dict(), original)
@@ -587,7 +593,7 @@ class AIGatewayTests(unittest.TestCase):
             ai={"tradingAvailability": {instrument: {"available": True}}},
             tickers={instrument: {"last": 100}},
             candles={
-                f"{instrument}/{interval}": [{"confirmed": True, "close": 100}]
+                f"{instrument}/{interval}": valid_primary_candles() if interval == "4H" else [{"confirmed": True, "close": 100}]
                 for interval in ("5m", "15m", "1H", "4H")
             },
             dataFreshness={"maxAgeSeconds": 90, "availability": {}},
@@ -890,7 +896,8 @@ class AIGatewayTests(unittest.TestCase):
         self.assertIn("server market facts", normalized)
         self.assertIn("measured summaries", normalized)
         self.assertIn("raw candles", normalized)
-        self.assertIn("resolve ambiguity", normalized)
+        self.assertIn("inspect the complete raw confirmed 4h ohlc history", normalized)
+        self.assertIn("execution/risk ambiguity", normalized)
         self.assertIn("do not recompute their arithmetic", normalized)
 
     def test_prompt_candle_compaction_is_lossless_for_complete_16_contract_pool(self):
@@ -1093,9 +1100,8 @@ class AIGatewayTests(unittest.TestCase):
         self.assertAlmostEqual(_grouped_pipeline_budget_seconds(snapshot_with(90), config), 90, delta=5)
         # A longer window still honours the 2 x CLI ceiling.
         self.assertAlmostEqual(_grouped_pipeline_budget_seconds(snapshot_with(600), config), 180, delta=1)
-        # Absent metadata keeps the documented polling-interval fallback (the
-        # floor applies because 30 s is below half the CLI ceiling).
-        self.assertAlmostEqual(_grouped_pipeline_budget_seconds(snapshot_with(None), config), 45, delta=1)
+        # Absent metadata still uses the independent 90-second snapshot window.
+        self.assertAlmostEqual(_grouped_pipeline_budget_seconds(snapshot_with(None), config), 90, delta=2)
         # Unusable metadata (explicitly zero) cannot admit an entry at all, so
         # only the CLI ceiling remains.
         self.assertAlmostEqual(
@@ -1467,10 +1473,10 @@ class AIGatewayTests(unittest.TestCase):
                     self.assertEqual(result.decision.action, "hold")
                     self.assertIn("snapshot has expired", result.reason)
 
-    def test_freshness_legacy_metadata_uses_polling_interval(self):
+    def test_freshness_legacy_metadata_uses_independent_snapshot_window(self):
         captured = datetime(2026, 10, 5, 16, 28, 30, tzinfo=timezone.utc)
         snapshot = AISnapshot(snapshotId="snap-1", capturedAt=iso(captured))
-        config = AIConfig(decisionIntervalSeconds=90)
+        config = AIConfig(decisionIntervalSeconds=600, snapshotMaxAgeSeconds=90)
         for age, is_stale in ((19, False), (91, True)):
             with self.subTest(age=age):
                 freshness = snapshot_freshness(snapshot, config, now=captured + timedelta(seconds=age))
@@ -1719,7 +1725,7 @@ class AIGatewayTests(unittest.TestCase):
         return AISnapshot(
             snapshotId="snap-1", capturedAt=iso(datetime.now(timezone.utc)),
             instruments=[{"id": instrument}],
-            candles={f"{instrument}/{interval}": [{"confirmed": True, "close": 100}]
+            candles={f"{instrument}/{interval}": valid_primary_candles() if interval == "4H" else [{"confirmed": True, "close": 100}]
                      for interval in ("5m", "15m", "1H", "4H")},
             tickers={instrument: {"last": 100}},
             account={

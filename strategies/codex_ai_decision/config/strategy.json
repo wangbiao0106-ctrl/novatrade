@@ -1,6 +1,6 @@
 {
   "strategy_id": "codex_ai_decision",
-  "version": "1.0",
+  "version": "1.1",
   "source_of_truth": "strategies/codex_ai_decision/STRATEGY.md",
   "display_name": "Codex AI 决策策略",
   "name_en": "Codex AI Decision",
@@ -23,7 +23,7 @@
   },
   "signal_parameters": {
     "minimum_confidence": 0.65,
-    "decision_interval_seconds": 30,
+    "decision_interval_seconds": 600,
     "cli_timeout_seconds": 90,
     "snapshot_max_age_seconds": 90,
     "max_output_bytes": 1000000,
@@ -35,6 +35,13 @@
     "stop_loss_cooldown_seconds": 14400,
     "recent_stop_loss_window_seconds": 3600,
     "recent_stop_loss_limit": 2
+  },
+  "entry_analysis": {
+    "primary_interval": "4H",
+    "minimum_confirmed_candles": 20,
+    "directions": ["long", "short"],
+    "auxiliary_intervals": ["5m", "15m", "1H"],
+    "forming_candle_role": "context_only"
   },
   "risk_policy": {
     "allow_open": true,

@@ -34,6 +34,12 @@ FIXED_AI_REASONING_EFFORT = "medium"
 DEFAULT_STOP_LOSS_COOLDOWN_SECONDS = float(4 * 60 * 60)
 DEFAULT_RECENT_STOP_LOSS_WINDOW_SECONDS = float(60 * 60)
 DEFAULT_RECENT_STOP_LOSS_LIMIT = 2
+# Scan starts follow a ten-minute cadence; collection and inference consume
+# part of that period rather than extending it.
+DEFAULT_DECISION_INTERVAL_SECONDS = 600.0
+LEGACY_DEFAULT_DECISION_INTERVAL_SECONDS = 30.0
+PRIMARY_ENTRY_INTERVAL = "4H"
+MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES = 20
 # Fixed account-level daily-loss circuit breaker as a percentage of the UTC
 # day-start equity. This is a safety boundary, not a per-strategy parameter:
 # the research allocation ceilings are derived from the same 5% (see
@@ -484,7 +490,7 @@ class AIConfig:
     mode: RunMode = "disabled"
     allowedInstruments: tuple[str, ...] = ()
     minimumConfidence: float = 0.65
-    decisionIntervalSeconds: float = 30.0
+    decisionIntervalSeconds: float = DEFAULT_DECISION_INTERVAL_SECONDS
     cliTimeoutSeconds: float = DEFAULT_CLI_TIMEOUT_SECONDS
     snapshotMaxAgeSeconds: float = DEFAULT_SNAPSHOT_MAX_AGE_SECONDS
     maxOutputBytes: int = 1_000_000
@@ -561,7 +567,9 @@ class AIConfig:
         return cls(
             provider=provider, enabled=bools["enabled"], mode=mode, allowedInstruments=tuple(instruments),
             minimumConfidence=_number(row.get("minimumConfidence", .65), "config.minimumConfidence"),
-            decisionIntervalSeconds=_number(row.get("decisionIntervalSeconds", 30), "config.decisionIntervalSeconds"),
+            decisionIntervalSeconds=_number(
+                row.get("decisionIntervalSeconds", DEFAULT_DECISION_INTERVAL_SECONDS), "config.decisionIntervalSeconds",
+            ),
             cliTimeoutSeconds=_number(row.get("cliTimeoutSeconds", DEFAULT_CLI_TIMEOUT_SECONDS), "config.cliTimeoutSeconds"),
             snapshotMaxAgeSeconds=_number(
                 row.get("snapshotMaxAgeSeconds", DEFAULT_SNAPSHOT_MAX_AGE_SECONDS), "config.snapshotMaxAgeSeconds",

@@ -31,7 +31,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.9
 from typing import Any, Protocol
 
 try:
-    from .ai_market_facts import market_facts
+    from .ai_market_facts import market_facts, primary_entry_quality
     from .ai_trigger import decision_fingerprint, managed_state, structure_identity, trigger_reason
     from .ai_policy import (
         MIN_EXIT_REASON_LENGTH,
@@ -43,12 +43,14 @@ try:
     from .ai_schema import (
         AIDecision, AIChatResponse, AIConfig, AISnapshot, AIStatus, SchemaError,
         DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
+        DEFAULT_DECISION_INTERVAL_SECONDS, LEGACY_DEFAULT_DECISION_INTERVAL_SECONDS,
         FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT,
+        PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
         ai_chat_json_schema, decision_json_schema, dumps, normalize_ai_chat_patch,
         normalize_contract_ids,
     )
 except ImportError:  # launched from bundled backend/main.py as a script
-    from ai_market_facts import market_facts
+    from ai_market_facts import market_facts, primary_entry_quality
     from ai_trigger import decision_fingerprint, managed_state, structure_identity, trigger_reason
     from ai_policy import (
         MIN_EXIT_REASON_LENGTH,
@@ -60,7 +62,9 @@ except ImportError:  # launched from bundled backend/main.py as a script
     from ai_schema import (
         AIDecision, AIChatResponse, AIConfig, AISnapshot, AIStatus, SchemaError,
         DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
+        DEFAULT_DECISION_INTERVAL_SECONDS, LEGACY_DEFAULT_DECISION_INTERVAL_SECONDS,
         FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT,
+        PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
         ai_chat_json_schema, decision_json_schema, dumps, normalize_ai_chat_patch,
         normalize_contract_ids,
     )
@@ -100,11 +104,19 @@ _SHARED_POLICY_RULES = (
     "DECISION POLICY (follow these four groups in order):\n"
     "1. DATA CONTRACT AND QUALITY: Preserve the fixed observed contract pool and maintain exactly one assessment per contract. "
     "Assess contracts independently; a missing resource for one contract does not erase complete data for another. "
-    "Use SERVER MARKET FACTS as measured summaries and do not recompute their arithmetic; use raw candles only to resolve ambiguity. "
+    "Use SERVER MARKET FACTS as measured summaries and do not recompute their arithmetic. "
+    "Inspect the complete raw confirmed 4H OHLC history for trend, candle bodies/wicks and price structure; auxiliary raw candles may resolve execution/risk ambiguity. "
     "Calculate riskRewardRatio from the same proposed entry, stop and target, and never fabricate prices or source facts. "
     "For a long plan use stopLossPrice < entry < takeProfitPrice; for a short plan use takeProfitPrice < entry < stopLossPrice. "
     "winRate is a subjective estimate for this conditional plan, not a verified historical success rate; confidence is confidence in the returned action. "
     "Use confirmed=true candles for closed-candle signals; a forming candle is context, not a closed-candle confirmation. "
+    f"PRIMARY ENTRY ANALYSIS: {PRIMARY_ENTRY_INTERVAL} is the primary entry timeframe for BOTH long and short plans. "
+    "Read its closed-candle trend, higher/lower highs and lows, support/resistance, and pullback/rebound or breakout structure. "
+    "Find conditional buy points for long plans and sell points for short plans; do not assume a trade must exist or treat a fixed indicator as an automatic signal. "
+    f"An open needs at least {MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES} valid confirmed OHLC {PRIMARY_ENTRY_INTERVAL} candles, as measured by primaryEntryQuality. "
+    "5m, 15m, 1H, current price, order book and funding are auxiliary execution/risk context; they cannot replace or independently override the 4H entry thesis. "
+    "Forming 4H candles are context only. In each assessment reason explain the 4H trend or structure, the proposed entry conditions, and the invalidation level. "
+    "If entry conditions are unmet, use hold and list the waiting conditions. Insufficient primary history blocks only open, never close/cancel/protection management. "
     "Keep a conditional technical plan and numerical estimates even when execution is blocked, unless the relevant data is genuinely unavailable. "
     "PER-CONTRACT ANALYSIS FIRST, EXECUTION ELIGIBILITY SECOND.\n"
     "2. ENTRY GATES: action=open is allowed only when the selected assessment is entryEligible, all SERVER ENTRY GATES pass, "
@@ -188,8 +200,9 @@ def _prompt_snapshot(snapshot: AISnapshot, *, encoding: str | None = None) -> di
 
     The runtime/audit snapshot is unchanged. Repeated candle field names are
     removed only from the model prompt in compact modes; all fields and all row
-    values remain present in the runtime snapshot. Windowed modes retain the
-    latest forming row. Heterogeneous objects stay objects to preserve
+    values remain present in the runtime snapshot. Windowed modes preserve
+    all collected primary-interval rows and the latest auxiliary forming row.
+    Heterogeneous objects stay objects to preserve
     absent-vs-null.
     """
     selected_encoding = (encoding or "compact60").strip().lower()
@@ -197,7 +210,8 @@ def _prompt_snapshot(snapshot: AISnapshot, *, encoding: str | None = None) -> di
     for key, rows in result["candles"].items():
         if not rows:
             continue
-        if selected_encoding in {"compact20", "compact10"}:
+        primary_interval = key.endswith("/" + PRIMARY_ENTRY_INTERVAL) or key.endswith(":" + PRIMARY_ENTRY_INTERVAL)
+        if selected_encoding in {"compact20", "compact10"} and not primary_interval:
             limit = 20 if selected_encoding == "compact20" else 10
             confirmed = [row for row in rows if row.get("confirmed") is True]
             forming = next((row for row in reversed(rows) if row.get("confirmed") is False), None)
@@ -730,6 +744,12 @@ class CodexRunner:
     @staticmethod
     def _entry_gates(snapshot: AISnapshot, config: AIConfig) -> dict[str, Any]:
         return {
+            "primaryEntryInterval": PRIMARY_ENTRY_INTERVAL,
+            "minimumPrimaryConfirmedCandles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
+            "primaryEntryQuality": {
+                instrument: primary_entry_quality(snapshot, instrument)
+                for instrument in snapshot.observed_instruments()
+            },
             "minimumConfidence": config.minimumConfidence,
             "minimumWinRate": MIN_OPEN_WIN_RATE,
             "minimumRiskRewardRatio": MIN_OPEN_RISK_REWARD_RATIO,
@@ -762,7 +782,8 @@ class CodexRunner:
         if selected_encoding in {"compact20", "compact10"}:
             limit = 20 if selected_encoding == "compact20" else 10
             candle_encoding_note = (
-                f"SNAPSHOT candle series contain the latest {limit} confirmed rows plus the latest forming row when present; "
+                f"SNAPSHOT preserves all collected {PRIMARY_ENTRY_INTERVAL} rows (up to 60), including forming context. "
+                f"Auxiliary candle series contain the latest {limit} confirmed rows plus the latest forming row when present; "
                 "the local SERVER MARKET FACTS still use the complete collected history. "
             )
         else:
@@ -907,6 +928,7 @@ class AIWorker:
         self.status = AIStatus(mode=self.config.mode, enabled=self.config.enabled, updatedAt=_now_iso())
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
+        self._schedule_changed = asyncio.Event()
         self._load_persisted()
 
     def _path(self, name: str) -> Path:
@@ -920,6 +942,15 @@ class AIWorker:
         try:
             raw = json.loads(self._path("ai-config.json").read_text(encoding="utf-8"))
             normalized = dict(raw) if isinstance(raw, Mapping) else {}
+            # Only the previous default scan interval is migrated. Customized
+            # intervals remain intact, as do enablement and the failure latch
+            # restored below before writing the normalized configuration.
+            if (
+                isinstance(normalized.get("decisionIntervalSeconds"), (int, float))
+                and not isinstance(normalized.get("decisionIntervalSeconds"), bool)
+                and float(normalized["decisionIntervalSeconds"]) == LEGACY_DEFAULT_DECISION_INTERVAL_SECONDS
+            ):
+                normalized["decisionIntervalSeconds"] = DEFAULT_DECISION_INTERVAL_SECONDS
             # maxDailyLosses=0 used to mean "no losing trade is acceptable",
             # which closed every entry from the first round (0 >= 0). allowOpen
             # already expresses "never open", so lift a persisted zero to the
@@ -1370,9 +1401,12 @@ class AIWorker:
         disabling and re-enabling a halted worker cannot silently clear the
         latch without a review.
         """
+        previous_interval = self.config.decisionIntervalSeconds
         merged = self.config.to_dict()
         merged.update(dict(values))
         self.config = AIConfig.from_dict(merged)
+        if self.config.decisionIntervalSeconds != previous_interval:
+            self._schedule_changed.set()
         if any(key in values for key in ("allowedInstruments", "universeMode", "candidateLimit", "selectionLimit")):
             # The previous snapshot no longer describes the requested
             # universe. Clear it until the next cycle resolves fresh symbols.
@@ -1613,14 +1647,29 @@ class AIWorker:
             self._audit({"type": "analysis-workflow", "snapshotId": snapshot.snapshotId, "workflow": compact})
 
     async def _loop(self) -> None:
+        clock = asyncio.get_running_loop()
         while not self._stop.is_set():
+            cycle_started = clock.time()
             await self.run_once()
             if self.status.state == "halted":
                 break
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.config.decisionIntervalSeconds)
-            except asyncio.TimeoutError:
-                continue
+            while not self._stop.is_set():
+                self._schedule_changed.clear()
+                interval = self.config.decisionIntervalSeconds
+                elapsed = max(0.0, clock.time() - cycle_started)
+                # Scan slots are measured from the previous start. Skip any
+                # slots consumed by an overrun rather than immediately
+                # launching catch-up calls against the model.
+                next_slot = max(1, math.ceil(elapsed / interval))
+                remaining = max(0.0, cycle_started + next_slot * interval - clock.time())
+                if remaining == 0:
+                    break
+                try:
+                    await asyncio.wait_for(self._schedule_changed.wait(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    break
+                # A changed interval recalculates the deadline from the same
+                # start; it does not cause an extra immediate scan.
 
     async def start(self) -> None:
         if self.status.state == "halted":
@@ -1649,6 +1698,7 @@ class AIWorker:
 
     async def stop(self) -> None:
         self._stop.set()
+        self._schedule_changed.set()
         task = self._task
         if task is None:
             return

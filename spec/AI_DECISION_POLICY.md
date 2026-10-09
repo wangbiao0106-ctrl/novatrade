@@ -17,6 +17,12 @@ backend 的 schema、policy 和订单网关为最终授权边界，运行时不�
   不能混用不同方案或虚构价格。
 - `confirmed=true` 才能作为收盘 K 线信号。`confirmed=false` 的 forming K 线只能
   作为当前环境，不能当作已收盘确认，也不会使已有确认历史整体失效。
+- Codex v1.1 默认每 10 分钟开始一轮扫描，以已收盘 4H K 线走势和价格结构判断
+  多空入场；至少需要 20 根有效已确认 4H 历史，短周期不能替代主周期。其他周期、
+  实时价格、盘口和资金费率辅助执行与风控。具体扫描和分析边界见
+  [`strategies/codex_ai_decision/STRATEGY.md`](../strategies/codex_ai_decision/STRATEGY.md)。
+- 扫描间隔不扩大快照有效期：即使缺少快照时效元数据，也按配置的
+  `snapshotMaxAgeSeconds`（默认 90 秒）核验，不能回退到 600 秒扫描间隔。
 - 服务器负责快照时效、账户认证、风险状态、挂单和持仓状态。任何必需状态未知
   都不能按零、无风险或可交易处理；服务端 policy 的结果高于模型自报判断。
 

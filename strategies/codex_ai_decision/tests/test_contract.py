@@ -15,7 +15,7 @@ STRATEGY = ROOT / "strategies" / "codex_ai_decision"
 sys.path.insert(0, str(ROOT / "backend"))
 
 from ai_policy import ACCOUNT_DAILY_LOSS_PERCENT  # noqa: E402
-from ai_schema import AIConfig  # noqa: E402
+from ai_schema import AIConfig, PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES  # noqa: E402
 
 
 # Every machine parameter the package publishes must map onto exactly one
@@ -72,6 +72,19 @@ class CodexAIStrategyContractTests(unittest.TestCase):
         self.assertEqual(config["model_route"], {
             "provider": "codex", "model": "gpt-6-luna", "reasoning_effort": "medium",
         })
+
+    def test_four_hour_entry_profile_matches_runtime(self) -> None:
+        config = strategy_config()
+        self.assertEqual(config["version"], "1.1")
+        self.assertEqual(config["entry_analysis"], {
+            "primary_interval": PRIMARY_ENTRY_INTERVAL,
+            "minimum_confirmed_candles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
+            "directions": ["long", "short"],
+            "auxiliary_intervals": ["5m", "15m", "1H"],
+            "forming_candle_role": "context_only",
+        })
+        self.assertEqual(AIConfig().decisionIntervalSeconds, 600)
+        self.assertEqual(AIConfig().snapshotMaxAgeSeconds, 90)
 
     def test_published_parameters_match_the_runtime_defaults(self) -> None:
         """The package's machine parameters must equal AIConfig defaults.
