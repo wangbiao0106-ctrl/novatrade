@@ -93,6 +93,11 @@ public enum KlineInterval: String, Codable, CaseIterable, Sendable {
         self == .oneDay ? "1Dutc" : rawValue
     }
 
+    /// Wire identifier used by the operator-facing chart. OKX's mobile daily
+    /// candle uses the UTC-aligned series, even though labels are shown in the
+    /// operator's local timezone.
+    public var chartExchangeBar: String { exchangeBar }
+
     /// Decodes an OKX bar identifier while accepting the legacy `1D` alias.
     /// This is useful for callers that address the local service directly.
     public init?(exchangeBar: String) {

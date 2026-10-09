@@ -10,7 +10,7 @@
     "strategy_id": "codex",
     "runtime_handler": "backend.ai_worker.CodexRunner",
     "decision_endpoint": "/api/v1/ai/strategies/codex",
-    "workflow": "grouped",
+    "workflow": "single",
     "event_prefilter_default": "off",
     "event_fingerprint": "market-facts-v1",
     "enabled_by_default": false,

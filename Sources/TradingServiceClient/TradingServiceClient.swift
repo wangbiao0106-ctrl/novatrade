@@ -47,7 +47,7 @@ public actor TradingServiceClient {
     public func privatePositions() async throws -> [PositionSnapshot] { try await get(path: "/api/v1/positions") }
     public func privateOrders() async throws -> [OrderSnapshot] { try await get(path: "/api/v1/orders") }
     public func market(instrumentID: String, interval: KlineInterval) async throws -> MarketSnapshot {
-        try await get(path: "/api/v1/market/candles", query: ["instId": instrumentID, "bar": interval.exchangeBar])
+        try await get(path: "/api/v1/market/candles", query: ["instId": instrumentID, "bar": interval.chartExchangeBar])
     }
     public func placePaperOrder(_ order: PaperOrderRequest) async throws -> PaperOrder { try await post("/api/v1/paper/orders", body: order) }
     public func paperOrders() async throws -> [PaperOrder] { try await get(path: "/api/v1/paper/orders") }

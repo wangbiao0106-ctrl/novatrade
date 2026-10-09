@@ -571,11 +571,9 @@ async def contracts(fresh: bool = False) -> list[dict[str, Any]]:
 
 @app.get("/api/v1/market/candles")
 async def market_candles(instId: str, bar: str = "5m") -> dict[str, Any]:
-    # The current-candles endpoint is served from OKX's low-latency market
-    # feed and returns the same wire rows as history-candles for the latest
-    # window. Use UTC-aligned daily bars while preserving the client-facing
-    # `1D` interval in the response.
-    client_bar = "1D" if bar == "1Dutc" else bar
+    # The chart follows OKX's mobile daily series. Its daily candle is aligned
+    # to UTC; labels are converted to the operator's local timezone in Swift.
+    client_bar = "1D" if bar in {"1D", "1Dutc"} else bar
     exchange_bar = "1Dutc" if client_bar == "1D" else client_bar
     payload = await okx_get("/market/candles", {"instId": instId, "bar": exchange_bar, "limit": str(MAX_CANDLES)})
     candles = []
@@ -2123,7 +2121,7 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
             # controls. A slower decision interval must not make a snapshot
             # stale while its model call is still being evaluated. The window
             # is configured (snapshotMaxAgeSeconds) because it must track the
-            # provider's real latency, and it also bounds the grouped pipeline.
+            # provider's real latency, and it bounds the single model call.
             "capturedAt": captured, "maxAgeSeconds": config.snapshotMaxAgeSeconds,
             "collectionStartedAt": collection_started, "collectionCompletedAt": collection_completed,
             "collectionDurationSeconds": round(asyncio.get_running_loop().time() - collection_clock, 3),
@@ -3191,7 +3189,11 @@ async def stream(websocket: WebSocket) -> None:
         # versions auto-discover HTTP(S)_PROXY, whose local proxy can reject
         # the TLS upgrade; keep this upstream independent of that setting.
         upstream = await websockets.connect(OKX_WS, proxy=None, open_timeout=10)
-        await upstream.send(json.dumps({"op": "subscribe", "args": [{"channel": "candle" + interval, "instId": instrument}]}))
+        # Keep the live stream on the same exchange bar as the REST history.
+        # The client keeps `1D` as its persisted display value, while OKX has
+        # separate UTC+8 (`1D`) and UTC (`1Dutc`) daily series.
+        exchange_interval = "1Dutc" if interval == "1D" else interval
+        await upstream.send(json.dumps({"op": "subscribe", "args": [{"channel": "candle" + exchange_interval, "instId": instrument}]}))
         await websocket.send_json({"type": "connection", "timestamp": now_iso(), "instrumentID": instrument, "payload": "okx_wss_subscribed"})
         async for raw in upstream:
             message = json.loads(raw)

@@ -91,10 +91,6 @@ _AUTOMATIC_REASONING = frozenset({FIXED_AI_REASONING_EFFORT})
 # truncates the provider's stdout/stderr, while this bounds the request we are
 # willing to send. Raising the output cap must not raise the prompt budget.
 _MAX_DECISION_PROMPT_BYTES = 1_000_000
-# A grouped cycle runs an analysis phase and a coordinator phase. The analysis
-# phase keeps this share of the remaining budget so a slow analysis can never
-# starve the coordinator that actually produces the decision.
-_GROUPED_ANALYSIS_BUDGET_SHARE = 0.6
 # A phase needs a usable slice of time even when the snapshot has already
 # expired: management actions (close/cancel/protection) do not require a fresh
 # snapshot, and a zero-length phase would turn a stale snapshot into a
@@ -697,42 +693,28 @@ class CodexRunner:
     async def run(self, snapshot: AISnapshot, config: AIConfig) -> AIDecision:
         clock = asyncio.get_running_loop()
         started = clock.time()
-        grouped = len(snapshot.observed_instruments()) > 4
-        pipeline_budget = (
-            _grouped_pipeline_budget_seconds(snapshot, config) if grouped
-            else _freshness_bounded_budget(snapshot, config, config.cliTimeoutSeconds)
-        )
+        # Send the complete observation pool in one prompt. A single bounded
+        # call keeps all contracts in the same reasoning context and avoids a
+        # partial multi-group cycle timing out before a coordinator can run.
+        pipeline_budget = _freshness_bounded_budget(snapshot, config, config.cliTimeoutSeconds)
         self.last_run_metadata = {
-            "workflow": "grouped" if grouped else "single", "stage": "starting",
+            "workflow": "single", "stage": "starting",
             "observedCount": len(snapshot.observed_instruments()), "groupCount": 0,
             "completedGroups": 0, "assessmentCount": 0,
             # Configured per-CLI ceilings.
             "analysisTimeoutSeconds": config.cliTimeoutSeconds,
-            "coordinatorTimeoutSeconds": config.cliTimeoutSeconds if grouped else 0,
-            # The budget actually available to the whole grouped pipeline after
-            # the snapshot admission window is taken into account.
+            "coordinatorTimeoutSeconds": 0,
+            # The budget available to this single model call after the snapshot
+            # admission window is taken into account.
             "pipelineBudgetSeconds": round(pipeline_budget, 3),
         }
         try:
-            # Preserve the whole-pool budget guard before ANY CLI starts.
-            # Grouped analysis already divides the observation pool into
-            # several model calls. Keep those calls small enough to finish
-            # within the shared phase deadline; SERVER MARKET FACTS still use
-            # the complete collected candle history.
-            prompt = self._decision_prompt(snapshot, config, encoding="compact20" if grouped else "compact60")
+            # Preserve the whole-pool budget guard before the CLI starts.
+            prompt = self._decision_prompt(snapshot, config, encoding="compact20")
             self._check_prompt_budget(prompt)
-            if not grouped:
-                self.last_run_metadata.update(stage="analysis", groupCount=1)
-                decision = await self._run_single(snapshot, config, prompt=prompt, deadline=started + pipeline_budget)
-                self.last_run_metadata.update(completedGroups=1, assessmentCount=len(decision.assessments), analysisDurationSeconds=round(clock.time() - started, 3))
-            else:
-                # cliTimeoutSeconds remains a per-CLI ceiling. The two phases
-                # share pipelineBudgetSeconds, which never exceeds the snapshot
-                # admission window: a decision produced after that window could
-                # not authorize an entry, so spending longer than the window
-                # would only consume provider budget. Order and snapshot
-                # freshness are never extended by this budget.
-                decision = await self._run_grouped(snapshot, config, deadline=started + pipeline_budget)
+            self.last_run_metadata.update(stage="analysis", groupCount=1)
+            decision = await self._run_single(snapshot, config, prompt=prompt, deadline=started + pipeline_budget)
+            self.last_run_metadata.update(completedGroups=1, assessmentCount=len(decision.assessments), analysisDurationSeconds=round(clock.time() - started, 3))
             self.last_run_metadata["stage"] = "complete"
             return decision
         except asyncio.CancelledError:
@@ -964,7 +946,7 @@ class AIWorker:
                 normalized["maxDailyLosses"] = 1
             # The original default was 45 seconds and was never exposed as a
             # user setting. Treat that persisted value as the old default so
-            # existing installations receive the larger grouped-analysis budget
+            # existing installations receive the current CLI timeout default
             # without requiring a manual reset.
             if (
                 isinstance(normalized.get("cliTimeoutSeconds"), (int, float))

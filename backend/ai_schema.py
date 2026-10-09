@@ -51,7 +51,7 @@ ACCOUNT_DAILY_LOSS_PERCENT = 5.0
 DEFAULT_CLI_TIMEOUT_SECONDS = 90.0
 LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS = 45.0
 # How old a snapshot's market data may be when an entry is admitted. This is
-# also the ceiling for the whole grouped model pipeline: a decision produced
+# also the ceiling for the whole model call: a decision produced
 # after the window could not authorize an entry anyway. It is configurable
 # because it must track the provider's real latency, but it is a protective
 # control, so it is not part of the conversational patch surface.

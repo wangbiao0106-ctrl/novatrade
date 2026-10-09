@@ -116,6 +116,7 @@ struct NativeCandleChart: View {
 
     private var candles: [Candle] { snapshot?.candles ?? [] }
     private var identity: String { "\(snapshot?.instrumentID ?? ""):\(snapshot?.interval.rawValue ?? "")" }
+    private var defaultVisibleCount: CGFloat { snapshot?.interval == .oneDay ? 30 : 90 }
 
     var body: some View {
         GeometryReader { geometry in
@@ -178,7 +179,7 @@ struct NativeCandleChart: View {
                 })
                 .simultaneousGesture(MagnifyGesture().onChanged { value in
                     if zoomOrigin == nil { zoomOrigin = visibleCount }
-                    visibleCount = min(200, max(24, (zoomOrigin ?? 90) / value.magnification))
+                    visibleCount = min(200, max(24, (zoomOrigin ?? defaultVisibleCount) / value.magnification))
                     barOffset = min(viewport.maximumOffset, barOffset)
                     pointer = nil
                 }.onEnded { _ in zoomOrigin = nil })
@@ -195,7 +196,7 @@ struct NativeCandleChart: View {
     }
 
     private func resetViewport() {
-        visibleCount = 90
+        visibleCount = defaultVisibleCount
         barOffset = 0
         dragOrigin = nil
         dragScale = nil
