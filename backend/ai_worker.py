@@ -96,6 +96,8 @@ _MAX_DECISION_PROMPT_BYTES = 1_000_000
 # snapshot, and a zero-length phase would turn a stale snapshot into a
 # consecutive-failure halt.
 _MIN_PIPELINE_BUDGET_SHARE = 0.5
+# Codex strategy v1.6; mirrored by the lab config, never loaded from it.
+PRICE_PLAN_POLICY = "market_structure_before_entry_gates"
 
 # The analysis and coordinator prompts share one policy contract.
 _SHARED_POLICY_RULES = (
@@ -104,7 +106,16 @@ _SHARED_POLICY_RULES = (
     "Assess contracts independently; a missing resource for one contract does not erase complete data for another. "
     "Use SERVER MARKET FACTS as measured summaries and do not recompute their arithmetic. "
     "Prioritize complete raw 15m OHLCV for current structure, candle bodies/wicks and volume; other intervals are optional context. "
-    "Calculate riskRewardRatio from the same proposed entry, stop and target, and never fabricate prices or source facts. "
+    "PRICE PLANNING BEFORE ELIGIBILITY: First independently choose each contract's defensible entry, structural invalidation stop "
+    "and realistic take-profit from observed support/resistance, swing levels, liquidity or other concrete market evidence. "
+    "Explain the evidence for entry, stop and target in the assessment reason. Only after fixing these prices calculate "
+    "riskRewardRatio as abs(nearest take-profit - entry) / abs(entry - stop), using the nearest target for staged exits. "
+    "Then apply the entry gates. Quality thresholds are execution filters only, not target multiples or price-generation instructions. "
+    "Never back-solve a take-profit from the minimum risk/reward or a fixed multiple just above it; never stretch the target, "
+    "tighten the stop or shift the entry merely to pass a gate. Do not impose a common risk/reward multiple across contracts. "
+    "Keep the original prices and calculated ratio even below the minimum: set entryEligible=false and explain the shortfall "
+    "in unmetConditions. If no defensible price level exists, use null and explain the missing basis rather than invent a target. "
+    "Never fabricate prices or source facts. "
     "For a long plan use stopLossPrice < entry < takeProfitPrice; for a short plan use takeProfitPrice < entry < stopLossPrice. "
     "winRate is a subjective estimate for this conditional plan, not a verified historical success rate; confidence is confidence in the returned action. "
     "Use confirmed=true candles for closed-candle signals; a forming candle is context, not a closed-candle confirmation. "
@@ -130,8 +141,9 @@ _SHARED_POLICY_RULES = (
     "Select at most one contract and one action per round. Copy the selected assessment's direction, quality values, protection "
     "levels, and limitPrice exactly into an open decision. Every AI open must be a resting limit order: use orderType=limit, "
     "set limitPrice below the current market for longs or above it for shorts, and never use a market order. The finalEntryPreflight "
-    "checks fresh ticker, order book and mark price immediately before submission; plan net reward/risk after its fee and "
-    "slippage budget. A changed market does not change the submitted limit price.\n"
+    "checks fresh ticker, order book and mark price immediately before submission; evaluate net reward/risk of the fixed plan "
+    "after its fee and slippage budget. If net reward/risk is insufficient, block entry without changing the planned prices. "
+    "A changed market does not change the submitted limit price.\n"
     "3. POSITION AND ORDER MANAGEMENT: Every round first considers current positions and pending orders. "
     "A position or pending order blocks replacement open for that contract; it does not block protection review or a justified exit. "
     "Close only for materially invalidated market evidence or ORDER_MISTAKE, using the actual position direction. "
@@ -748,6 +760,7 @@ class CodexRunner:
             "minimumConfidence": config.minimumConfidence,
             "minimumWinRate": MIN_OPEN_WIN_RATE,
             "minimumRiskRewardRatio": MIN_OPEN_RISK_REWARD_RATIO,
+            "pricePlanPolicy": PRICE_PLAN_POLICY,
             "entryOrderType": "limit",
             "exchangeEntryOrderType": "post_only",
             "finalEntryPreflight": dict(ENTRY_PREFLIGHT_LIMITS),

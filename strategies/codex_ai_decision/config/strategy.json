@@ -1,6 +1,6 @@
 {
   "strategy_id": "codex_ai_decision",
-  "version": "1.5",
+  "version": "1.6",
   "source_of_truth": "strategies/codex_ai_decision/STRATEGY.md",
   "display_name": "Codex AI 决策策略",
   "name_en": "Codex AI Decision",
@@ -49,7 +49,8 @@
       "4H"
     ],
     "forming_candle_role": "context_only",
-    "direction_policy": "ai_holistic_no_4h_gate"
+    "direction_policy": "ai_holistic_no_4h_gate",
+    "price_plan_policy": "market_structure_before_entry_gates"
   },
   "entry_quality": {
     "minimum_win_rate": 0.5,

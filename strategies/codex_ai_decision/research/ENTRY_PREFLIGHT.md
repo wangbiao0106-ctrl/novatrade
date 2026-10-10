@@ -97,3 +97,38 @@ git diff --check
 打包后的八个相关 backend 源文件与当前源码 SHA-256 一致，包内优先周期为
 15m、最少有效收盘数据为 1 根，模型及净盈亏比下限均为 2.2；应用 bundle 的
 `codesign --verify --deep --strict` 通过。
+
+## v1.6 行情价格先于盈亏比筛选
+
+2026-10-10（北京时间）：逐币评估曾全部返回 2.25；运行时和界面没有该固定值，
+示例 ZK 的目标 0.0144375 恰好等于 0.01365 + (0.01365 - 0.01330) × 2.25。
+旧提示要求按方案价格计算比值，但没有明确禁止按门槛反推价格，且要求模型预算
+净盈亏比，可能诱导模型为筛选门槛设计目标。该现象不足以证明所有目标均无行情依据。
+
+新提示明确先按每币行情确定入场、失效止损和合理目标，再计算最近目标的盈亏比，
+最后应用下单门槛；三个价格都需解释行情依据。禁止反推倍数或为门槛调整价格。
+净盈亏比不足时拒绝入场并保留原价，不制造新的止盈距离。
+
+`tests/test_holistic_scan.py` 通过 mock provider 回放多空、单档和分批方案：
+1.4、1.95、2.25、3.6 的比值及对应价格通过 runner 与 policy 后保持原值；
+低于门槛但错误声称可入场的方案被拒绝，原评估仍保留。既有开仓边界和净费用
+复核测试保持通过；自然同为 2.25 的方案不会仅因倍数相同被拒绝。
+
+本次策略目录 73 项、行情/执行/撮合/FastAPI 回归 146 项和 Swift 191 项测试通过；
+`python3 scripts/validate_strategy_sync.py` 与 `git diff --check` 通过。执行命令沿用
+上方验收入口。这是提示契约和执行边界的确定性验证，没有调用真实模型验证
+生成目标的行情合理性，也不代表收益改善。
+
+补充运行 `scripts.test_ai_gateway.AIGatewayTests` 的六项相关回归：
+`test_prompt_exposes_quality_gates_and_independent_per_contract_setups`、
+`test_hold_and_account_blocks_preserve_conditional_analysis_in_prompt`、
+`test_open_ratio_cannot_exceed_its_proposed_price_setup`、
+`test_eligible_assessment_must_meet_existing_quality_gates`、
+`test_rejected_open_preserves_id_assessments_and_raw_audit`、
+`test_policy_requires_open_win_rate_and_risk_reward_ratio`，全部通过。
+
+已执行 `./scripts/build_and_run.sh package` 和 `./scripts/build_and_run.sh --verify`。
+应用和后台 PID 已更换，认证 `/health` 返回 `ok / paper`；AI 配置仍为
+`enabled=true / paper-active`。包内 `ai_worker.py` 与源码 SHA-256 一致，
+包含禁止反推止盈的提示，应用 `codesign --verify --deep --strict` 通过。
+旧评估保留历史原值；后续扫描才使用新提示。

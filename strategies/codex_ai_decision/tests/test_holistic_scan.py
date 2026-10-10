@@ -1,4 +1,4 @@
-"""Verify v1.5 holistic analysis without exchange or model calls."""
+"""Verify holistic analysis and v1.6 price planning without exchange/model calls."""
 
 from __future__ import annotations
 
@@ -145,6 +145,12 @@ class HolisticScanTests(unittest.TestCase):
             self.assertIn('"primaryEntryInterval":"15m"', prompt)
             self.assertIn('"minimumWinRate":0.5', prompt)
             self.assertIn('"minimumRiskRewardRatio":2.2', prompt)
+            self.assertIn('"pricePlanPolicy":"market_structure_before_entry_gates"', prompt)
+            self.assertIn("execution filters only, not target multiples", prompt)
+            self.assertIn("Never back-solve a take-profit", prompt)
+            self.assertIn("Keep the original prices and calculated ratio", prompt)
+            self.assertIn("nearest take-profit", prompt)
+            self.assertIn("evidence for entry, stop and target", prompt)
         gates = CodexRunner._entry_gates(source, config)
         self.assertEqual(set(gates["primaryEntryQuality"]), set(ids))
         self.assertTrue(all(item["canOpen"] for item in gates["primaryEntryQuality"].values()))
@@ -204,6 +210,50 @@ class HolisticScanTests(unittest.TestCase):
                     payload["assessments"] = [plan]
                     result = validate_decision(payload, source, config)
                     self.assertEqual(result.accepted, ratio >= 2.2, result.reason)
+
+    def test_hold_preserves_market_plans_instead_of_fitting_the_entry_threshold(self):
+        ids = [f"COIN{index}-USDT-SWAP" for index in range(4)]
+        source = snapshot(ids)
+        config = AIConfig(enabled=True, mode="shadow", allowedInstruments=tuple(ids))
+        for direction in ("long", "short"):
+            for staged in (False, True):
+                with self.subTest(direction=direction, staged=staged):
+                    plans = []
+                    sign = 1 if direction == "long" else -1
+                    # Include a coincidental 2.25: valid market geometry is not
+                    # rejected just because two independently chosen ratios match.
+                    for instrument, ratio in zip(ids, (1.4, 1.95, 2.25, 3.6)):
+                        plan = assessment(instrument, direction)
+                        plan.update(takeProfitPrice=100 + sign * 10 * ratio,
+                                    riskRewardRatio=ratio, entryEligible=False,
+                                    unmetConditions=["盈亏比不足2.2" if ratio < 2.2 else "等待结构确认"])
+                        if staged:
+                            near_target = plan["takeProfitPrice"]
+                            plan["takeProfitPrice"] = 100 + sign * 50
+                            plan["takeProfitLevels"] = [
+                                {"price": near_target, "quantityPercent": 60},
+                                {"price": plan["takeProfitPrice"], "quantityPercent": 40},
+                            ]
+                        plans.append(plan)
+                    payload = decision(source, action="hold")
+                    payload["assessments"] = plans
+                    runner = CodexRunner("unused-codex")
+                    with patch.object(runner, "_run_prompt", new=AsyncMock(return_value=payload)):
+                        proposed = asyncio.run(runner.run(source, config))
+                    result = validate_decision(proposed, source, config)
+                    self.assertTrue(result.accepted, result.reason)
+                    self.assertEqual(result.decision.action, "hold")
+                    self.assertEqual(result.decision.to_dict()["assessments"],
+                                     AIDecision.from_dict(payload).to_dict()["assessments"])
+                    self.assertEqual([item.riskRewardRatio for item in result.decision.assessments],
+                                     [1.4, 1.95, 2.25, 3.6])
+                    # Claiming eligibility must fail without stretching targets.
+                    rejected = deepcopy(payload)
+                    rejected["assessments"][0].update(entryEligible=True, unmetConditions=[])
+                    blocked = validate_decision(rejected, source, config)
+                    self.assertFalse(blocked.accepted)
+                    self.assertIn("riskRewardRatio", blocked.reason)
+                    self.assertEqual(blocked.decision.assessments, AIDecision.from_dict(rejected).assessments)
 
     def test_missing_primary_history_preserves_hold_close_and_cancel(self):
         base = snapshot()

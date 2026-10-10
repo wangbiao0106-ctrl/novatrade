@@ -13,7 +13,7 @@
 - 配置中心 ID：`codex`
 - 实验室包 ID：`codex_ai_decision`
 - provider：`codex`，固定 `gpt-6-luna / medium`
-- 规则版本：1.5；默认每 10 分钟开始一次扫描，采集和推理耗时计入周期；事件预筛
+- 规则版本：1.6；默认每 10 分钟开始一次扫描，采集和推理耗时计入周期；事件预筛
   默认关闭，开启前需完成回放验收
 - 15m 原始 OHLCV 优先；取消 4H 趋势和 20 根历史硬门槛，由 AI 综合多空判断。
   行情、资金费、持仓量、多空账户比和主动买卖量优先使用 OKX v5 API；补充盘口、
@@ -33,6 +33,10 @@
   发布于 `config/strategy.json` 的 `entry_quality`，由 `tests/test_contract.py` 对齐
   服务端常量。置信度按当前配置筛选，净盈亏比下限为 2.2
   50% 边界、低胜率观望和退出动作回归位于 `tests/test_win_rate_gate.py`
+- v1.6 明确按行情先定三个价格、再算盈亏比、最后筛选下单；禁止按 2.2 或略高
+  固定倍数反推止盈。低盈亏比方案保留原值并标为不可入场，提示与多空/分批方案
+  保留回归位于 `tests/test_holistic_scan.py`，验收说明见
+  [`research/ENTRY_PREFLIGHT.md`](research/ENTRY_PREFLIGHT.md)。
 
 Swift 客户端通过 API 对齐配置与审计契约：参数设置可保存快照时效和三个止损闸门，
 决策及逐币评估保留每档止盈的 `price` / `quantityPercent`，日志和明细表展示分批计划。
