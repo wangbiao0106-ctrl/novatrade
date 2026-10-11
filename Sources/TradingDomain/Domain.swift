@@ -628,7 +628,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
     /// Number of stop-loss exits in the rolling window that pauses AI entries.
     public var recentStopLossLimit: Int
 
-    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool = false, mode: AIRunMode = .disabled, allowedInstruments: [String] = [], minimumConfidence: Double = 0.65, decisionIntervalSeconds: Double = 300, cliTimeoutSeconds: Double = 90, snapshotMaxAgeSeconds: Double = 90, maxOutputBytes: Int = 1_000_000, maxConsecutiveFailures: Int = 3, allowOpen: Bool = true, allowClose: Bool = true, allowCancel: Bool = true, requireStopLoss: Bool = true, maxDailyOrders: Int = 20, maxDailyLosses: Int = 5, marginPerOrderUSD: Double = 500, maxLeverage: Double = 5, stopLossCooldownSeconds: Double = 14_400, recentStopLossWindowSeconds: Double = 3_600, recentStopLossLimit: Int = 2) {
+    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool = false, mode: AIRunMode = .disabled, allowedInstruments: [String] = [], minimumConfidence: Double = 0.65, decisionIntervalSeconds: Double = 300, cliTimeoutSeconds: Double = 180, snapshotMaxAgeSeconds: Double = 90, maxOutputBytes: Int = 1_000_000, maxConsecutiveFailures: Int = 3, allowOpen: Bool = true, allowClose: Bool = true, allowCancel: Bool = true, requireStopLoss: Bool = true, maxDailyOrders: Int = 20, maxDailyLosses: Int = 5, marginPerOrderUSD: Double = 500, maxLeverage: Double = 5, stopLossCooldownSeconds: Double = 14_400, recentStopLossWindowSeconds: Double = 3_600, recentStopLossLimit: Int = 2) {
         self.strategyID = strategyID; self.provider = provider
         self.enabled = enabled; self.mode = mode; self.allowedInstruments = allowedInstruments
         self.minimumConfidence = minimumConfidence; self.decisionIntervalSeconds = decisionIntervalSeconds
@@ -663,7 +663,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
             allowedInstruments: try container.decodeIfPresent([String].self, forKey: .allowedInstruments) ?? [],
             minimumConfidence: try container.decodeIfPresent(Double.self, forKey: .minimumConfidence) ?? 0.65,
             decisionIntervalSeconds: try container.decodeIfPresent(Double.self, forKey: .decisionIntervalSeconds) ?? 300,
-            cliTimeoutSeconds: try container.decodeIfPresent(Double.self, forKey: .cliTimeoutSeconds) ?? 90,
+            cliTimeoutSeconds: try container.decodeIfPresent(Double.self, forKey: .cliTimeoutSeconds) ?? 180,
             snapshotMaxAgeSeconds: try container.decodeIfPresent(Double.self, forKey: .snapshotMaxAgeSeconds) ?? 90,
             maxOutputBytes: try container.decodeIfPresent(Int.self, forKey: .maxOutputBytes) ?? 1_000_000,
             maxConsecutiveFailures: try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveFailures) ?? 3,

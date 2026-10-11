@@ -658,7 +658,7 @@ struct AISettingsSheet: View {
                     HStack {
                         Text("决策超时（秒）").frame(width: 120, alignment: .leading)
                         Spacer()
-                        TextField("90", value: $config.cliTimeoutSeconds, format: .number.precision(.fractionLength(1)))
+                        TextField("180", value: $config.cliTimeoutSeconds, format: .number.precision(.fractionLength(1)))
                             .frame(width: 72)
                             .multilineTextAlignment(.trailing)
                     }

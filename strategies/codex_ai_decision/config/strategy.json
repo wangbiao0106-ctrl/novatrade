@@ -24,7 +24,7 @@
   "signal_parameters": {
     "minimum_confidence": 0.65,
     "decision_interval_seconds": 300,
-    "cli_timeout_seconds": 90,
+    "cli_timeout_seconds": 180,
     "snapshot_max_age_seconds": 90,
     "max_output_bytes": 1000000,
     "max_consecutive_failures": 3,

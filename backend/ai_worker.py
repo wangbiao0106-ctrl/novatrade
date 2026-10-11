@@ -44,6 +44,7 @@ try:
     from .ai_schema import (
         AIDecision, AIChatResponse, AIConfig, AISnapshot, AIStatus, SchemaError,
         DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
+        PREVIOUS_DEFAULT_CLI_TIMEOUT_SECONDS,
         DEFAULT_DECISION_INTERVAL_SECONDS, LEGACY_DEFAULT_DECISION_INTERVALS,
         FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT,
         PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PROTECTION_ANALYSIS_INTERVALS,
@@ -64,6 +65,7 @@ except ImportError:  # launched from bundled backend/main.py as a script
     from ai_schema import (
         AIDecision, AIChatResponse, AIConfig, AISnapshot, AIStatus, SchemaError,
         DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
+        PREVIOUS_DEFAULT_CLI_TIMEOUT_SECONDS,
         DEFAULT_DECISION_INTERVAL_SECONDS, LEGACY_DEFAULT_DECISION_INTERVALS,
         FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT,
         PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PROTECTION_ANALYSIS_INTERVALS,
@@ -105,7 +107,8 @@ _SHARED_POLICY_RULES = (
     "1. DATA CONTRACT AND QUALITY: Preserve the fixed observed contract pool and maintain exactly one assessment per contract. "
     "Assess contracts independently; a missing resource for one contract does not erase complete data for another. "
     "Use SERVER MARKET FACTS as measured summaries and do not recompute their arithmetic. "
-    "Prioritize complete raw 15m OHLCV for entry timing, candle bodies/wicks and volume; preserve complete 1H/4H history for protection planning. "
+    "Prioritize complete raw candles from 15m OHLCV for entry timing, candle bodies/wicks and volume; preserve complete 1H/4H history for protection planning. "
+    "Inspect the complete raw confirmed 4H OHLC history when it is supplied; do not replace it with a short-term proxy or hide execution/risk ambiguity. "
     "PRICE PLANNING BEFORE ELIGIBILITY: First independently choose each contract's defensible entry, structural invalidation stop "
     "and realistic take-profit from observed support/resistance, swing levels, liquidity or other concrete market evidence. "
     "Explain the evidence for entry, stop and target in the assessment reason. Only after fixing these prices calculate "
@@ -638,7 +641,7 @@ class CodexRunner:
         semaphore = asyncio.Semaphore(4)
         clock = asyncio.get_running_loop()
         analysis_started = clock.time()
-        analysis_budget = min(config.cliTimeoutSeconds, max(0.0, deadline - analysis_started) * _GROUPED_ANALYSIS_BUDGET_SHARE)
+        analysis_budget = min(config.cliTimeoutSeconds, max(0.0, deadline - analysis_started))
         analysis_deadline = analysis_started + analysis_budget
         self.last_run_metadata.update(
             stage="analysis", groupCount=len(groups), completedGroups=0,
@@ -984,14 +987,18 @@ class AIWorker:
             # usable minimum instead of discarding the rest of the settings.
             if normalized.get("maxDailyLosses") == 0 and not isinstance(normalized.get("maxDailyLosses"), bool):
                 normalized["maxDailyLosses"] = 1
-            # The original default was 45 seconds and was never exposed as a
-            # user setting. Treat that persisted value as the old default so
-            # existing installations receive the current CLI timeout default
-            # without requiring a manual reset.
+            # Previous releases used 45 seconds and then 90 seconds as the
+            # default. Treat either persisted value as a default so existing
+            # installations receive the longer CLI timeout without requiring
+            # a manual reset. Values outside those prior defaults remain
+            # unchanged.
             if (
                 isinstance(normalized.get("cliTimeoutSeconds"), (int, float))
                 and not isinstance(normalized.get("cliTimeoutSeconds"), bool)
-                and float(normalized["cliTimeoutSeconds"]) == LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS
+                and float(normalized["cliTimeoutSeconds"]) in {
+                    LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
+                    PREVIOUS_DEFAULT_CLI_TIMEOUT_SECONDS,
+                }
             ):
                 normalized["cliTimeoutSeconds"] = DEFAULT_CLI_TIMEOUT_SECONDS
             self.config = AIConfig.from_dict(normalized)

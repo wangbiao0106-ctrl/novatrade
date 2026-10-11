@@ -48,10 +48,13 @@ MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES = 1
 # scripts/validate_strategy_sync.py and Sources/TradingDomain/Domain.swift).
 # Every layer that gates entries imports this one constant.
 ACCOUNT_DAILY_LOSS_PERCENT = 5.0
-# Four parallel analysis groups can each carry tens of thousands of tokens.
-# Keep enough wall-clock budget for provider queueing and model processing.
-DEFAULT_CLI_TIMEOUT_SECONDS = 90.0
+# The complete observation pool is sent in one request. Keep enough wall-clock
+# budget for provider queueing and model processing across all contracts.
+DEFAULT_CLI_TIMEOUT_SECONDS = 180.0
 LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS = 45.0
+# 90 seconds was the immediately previous default. It is migrated alongside
+# the older 45-second value so existing installations receive the new budget.
+PREVIOUS_DEFAULT_CLI_TIMEOUT_SECONDS = 90.0
 # How old a snapshot's market data may be when an entry is admitted. This is
 # also the ceiling for the whole model call: a decision produced
 # after the window could not authorize an entry anyway. It is configurable

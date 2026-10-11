@@ -51,6 +51,7 @@ func aiRiskLegacyConfigurationRetiredFields() throws {
 func aiRiskConfigurationDefaults() throws {
     let config = try riskContractDecode(AIConfig.self, "{\"strategyID\":\"codex\",\"provider\":\"codex\"}")
     #expect(config.decisionIntervalSeconds == 300)
+    #expect(config.cliTimeoutSeconds == 180)
     #expect(config.snapshotMaxAgeSeconds == 90)
     #expect(config.stopLossCooldownSeconds == 14_400)
     #expect(config.recentStopLossWindowSeconds == 3_600)
@@ -60,7 +61,7 @@ func aiRiskConfigurationDefaults() throws {
     let expected = try riskContractObject("""
     {"strategyID":"codex", "provider":"codex", "enabled":false,
      "mode":"disabled", "allowedInstruments":[], "minimumConfidence":0.65,
-     "decisionIntervalSeconds":300, "cliTimeoutSeconds":90,
+     "decisionIntervalSeconds":300, "cliTimeoutSeconds":180,
      "snapshotMaxAgeSeconds":90, "maxOutputBytes":1000000,
      "maxConsecutiveFailures":3, "allowOpen":true, "allowClose":true,
      "allowCancel":true, "requireStopLoss":true, "maxDailyOrders":20,

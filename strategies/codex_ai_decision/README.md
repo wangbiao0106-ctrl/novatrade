@@ -38,7 +38,7 @@
   固定倍数反推止盈。低盈亏比方案保留原值并标为不可入场，提示与多空/分批方案
   保留回归位于 `tests/test_holistic_scan.py`，验收说明见
   [`research/ENTRY_PREFLIGHT.md`](research/ENTRY_PREFLIGHT.md)。
-- v1.8 以小时级结构维持保护，避免仅凭短周期噪声平仓换向；旧默认 30/600/900 秒
+- v1.8 以小时级结构维持保护，避免仅凭短周期噪声平仓换向；整池使用一次 Codex 调用，默认决策超时为 180 秒；旧默认 30/600/900 秒
   配置迁移为 300 秒，保留其他自定义值及启停/故障闩锁。`tests/test_scan_schedule.py`
   验证节奏与迁移，`tests/test_holistic_scan.py` 验证高周期数据及提示传递。
 

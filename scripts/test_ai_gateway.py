@@ -87,20 +87,15 @@ class AIGatewayTests(unittest.TestCase):
             risk={"blocked": False}, dataFreshness={"maxAgeSeconds": 90},
         )
 
-    def test_grouped_workflow_preserves_complete_data_and_submits_only_final_intent(self):
+    def test_single_workflow_preserves_complete_data_and_submits_intent(self):
         snapshot = self.grouped_snapshot()
         original = snapshot.to_dict()
         ids = snapshot.observed_instruments()
 
         async def run():
             calls, snapshots, schemas = [], [], []
-            active = 0
-            max_active = 0
-            completed = 0
-            gateway = AsyncMock()
 
             async def launch(*command, **kwargs):
-                nonlocal active, max_active, completed
                 self.assertEqual(command[command.index("-m") + 1], "gpt-6-luna")
                 self.assertIn("model_reasoning_effort=medium", command)
                 self.assertTrue(kwargs["start_new_session"])
@@ -108,117 +103,64 @@ class AIGatewayTests(unittest.TestCase):
                 schemas.append(schema)
 
                 async def communicate(prompt_bytes):
-                    nonlocal active, max_active, completed
                     prompt = prompt_bytes.decode()
                     calls.append(prompt)
-                    if "GROUP REPORTS:\n" in prompt:
-                        self.assertEqual(completed, 4)
-                        gateway.assert_not_awaited()
-                        reports = json.loads(prompt.split("GROUP REPORTS:\n", 1)[1])
-                        selected = reports[0]["assessments"][0]
-                        row = self.decision(snapshotId=snapshot.snapshotId, instrumentID=selected["instrumentID"], orderType="limit", limitPrice=100, takeProfitPrice=122)
-                        return json.dumps(row).encode(), b""
-                    group = restore_prompt_snapshot(json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1]))
-                    snapshots.append(group)
-                    active += 1
-                    max_active = max(max_active, active)
-                    await asyncio.sleep(.01)
-                    active -= 1
-                    completed += 1
-                    rows = [self.assessment(item) for item in group["ai"]["selectedInstruments"]]
-                    row = self.decision(snapshotId=snapshot.snapshotId, instrumentID=rows[0]["instrumentID"], assessments=rows, orderType="limit", limitPrice=100, takeProfitPrice=122)
+                    self.assertNotIn("GROUP REPORTS:\n", prompt)
+                    payload = restore_prompt_snapshot(json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1]))
+                    snapshots.append(payload)
+                    self.assertEqual(payload["ai"]["selectedInstruments"], ids)
+                    rows = [self.assessment(item) for item in ids]
+                    row = self.decision(snapshotId=snapshot.snapshotId, instrumentID=ids[0], assessments=rows, orderType="limit", limitPrice=100, takeProfitPrice=122)
                     return json.dumps(row).encode(), b""
 
                 return SimpleNamespace(returncode=0, communicate=communicate)
 
-            with tempfile.TemporaryDirectory() as directory, patch("backend.ai_worker.asyncio.create_subprocess_exec", side_effect=launch):
-                worker = AIWorker(config=AIConfig(enabled=True, mode="demo-active", allowedInstruments=tuple(ids)), runner=CodexRunner("stub"), order_gateway=gateway, state_dir=Path(directory))
-                result = await worker.run_once(snapshot)
-                gateway.assert_awaited_once()
-                self.assertEqual(gateway.await_args.args[0], result.decision)
-                return result, calls, snapshots, schemas, max_active
+            with patch("backend.ai_worker.asyncio.create_subprocess_exec", side_effect=launch):
+                runner = CodexRunner("stub")
+                decision = await runner.run(snapshot, AIConfig(enabled=True, mode="shadow", allowedInstruments=tuple(ids)))
+                return decision, calls, snapshots, schemas, runner.last_run_metadata
 
-        result, calls, groups, schemas, max_active = asyncio.run(run())
-        self.assertTrue(result.accepted)
-        self.assertEqual(result.decision.action, "open")
-        self.assertEqual([item.instrumentID for item in result.decision.assessments], ids)
-        self.assertEqual(len(calls), 5)
-        self.assertEqual(max_active, 4)
-        union = []
-        for group in groups:
-            selected = group["ai"]["selectedInstruments"]
-            union.extend(selected)
-            self.assertEqual(len(selected), 4)
-            for field in ("snapshotId", "capturedAt", "account", "risk", "dataFreshness"):
-                self.assertEqual(group[field], original[field])
-            for field in ("tickers", "orderBook", "fundingRates"):
-                self.assertEqual(group[field], {item: original[field][item] for item in selected})
-            expected_candles = {
-                key: value for key, value in original["candles"].items()
-                if any(key.startswith(item + "/") for item in selected)
-            }
-            self.assertEqual(set(group["candles"]), set(expected_candles))
-            for key, rows in group["candles"].items():
-                full_history = key.endswith(("/15m", "/1H", "/4H"))
-                self.assertEqual(len(rows), 60 if full_history else 21)
-                self.assertEqual(rows[0], expected_candles[key][0 if full_history else 39])
-                self.assertEqual(rows[-1], expected_candles[key][-1])
-        self.assertEqual(union, ids)
+        result, calls, snapshots, schemas, metadata = asyncio.run(run())
+        self.assertEqual(result.action, "open")
+        self.assertEqual([item.instrumentID for item in result.assessments], ids)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual(snapshots[0]["snapshotId"], original["snapshotId"])
+        self.assertEqual(snapshots[0]["instruments"], original["instruments"])
+        self.assertEqual(snapshots[0]["tickers"], original["tickers"])
+        self.assertEqual(snapshots[0]["orderBook"], original["orderBook"])
+        self.assertEqual(snapshots[0]["fundingRates"], original["fundingRates"])
+        self.assertEqual(set(snapshots[0]["candles"]), set(original["candles"]))
+        for key, rows in snapshots[0]["candles"].items():
+            full_history = key.endswith(("/15m", "/1H", "/4H"))
+            self.assertEqual(len(rows), 60 if full_history else 21)
+            expected = original["candles"][key]
+            self.assertEqual(rows[0], expected[0 if full_history else 39])
+            self.assertEqual(rows[-1], expected[-1])
         self.assertEqual(snapshot.to_dict(), original)
-        self.assertNotIn("assessments", schemas[-1]["properties"])
-        self.assertNotIn("assessments", schemas[-1]["required"])
-        self.assertTrue(all(row["properties"]["snapshotId"]["enum"] == [snapshot.snapshotId] for row in schemas))
+        self.assertIn("assessments", schemas[0]["required"])
+        self.assertEqual(metadata["workflow"], "single")
+        self.assertEqual(metadata["groupCount"], 1)
+        self.assertEqual(metadata["completedGroups"], 1)
 
-    def test_group_coordinator_can_hold_close_or_cancel_without_entry_candidate(self):
+    def test_single_workflow_can_hold_close_or_cancel_without_entry_candidate(self):
         snapshot = self.grouped_snapshot(5)
         ids = snapshot.observed_instruments()
 
         async def run(action):
             async def invoke(prompt, schema, config, **kwargs):
-                if "GROUP REPORTS:\n" in prompt:
-                    self.assertIn('"allowClose":true', prompt)
-                    self.assertIn('"allowCancel":true', prompt)
-                    self.assertIn('"pendingOrders"', prompt)
-                    return self.decision(snapshotId=snapshot.snapshotId, action=action, instrumentID=None if action == "hold" else ids[0], orderID="order-1", winRate=None, riskRewardRatio=None)
                 group = json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1])
-                return self.decision(snapshotId=snapshot.snapshotId, action="hold", instrumentID=None, assessments=[self.assessment(item, entryEligible=False, unmetConditions=["尚未确认"]) for item in group["ai"]["selectedInstruments"]])
+                return self.decision(snapshotId=snapshot.snapshotId, action=action, instrumentID=None if action == "hold" else ids[0], orderID="order-1", winRate=None, riskRewardRatio=None, assessments=[self.assessment(item, entryEligible=False, unmetConditions=["尚未确认"]) for item in group["ai"]["selectedInstruments"]])
 
             runner = CodexRunner("unused")
             with patch.object(runner, "_run_prompt", side_effect=invoke):
                 decision = await runner.run(snapshot, AIConfig(enabled=True, mode="shadow", allowedInstruments=tuple(ids)))
-                result = validate_decision(decision, snapshot, AIConfig(enabled=True, mode="shadow", allowedInstruments=tuple(ids)))
-                self.assertTrue(result.accepted)
                 self.assertEqual(decision.action, action)
                 self.assertEqual(len(decision.assessments), 5)
 
         for action in ("hold", "close", "cancel"):
             with self.subTest(action=action):
                 asyncio.run(run(action))
-
-    def test_group_failure_cancels_siblings_without_coordinator(self):
-        snapshot = self.grouped_snapshot()
-
-        async def run():
-            cancelled = []
-            runner = CodexRunner("unused")
-
-            async def invoke(prompt, schema, config, **kwargs):
-                self.assertNotIn("GROUP REPORTS:\n", prompt)
-                group = json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1])["ai"]["selectedInstruments"]
-                if group[0] == "COIN0-USDT-SWAP":
-                    await asyncio.sleep(.01)
-                    return self.decision(snapshotId=snapshot.snapshotId, action="hold", instrumentID=None, assessments=[])
-                try:
-                    await asyncio.sleep(10)
-                except asyncio.CancelledError:
-                    cancelled.append(group[0])
-                    raise
-
-            with patch.object(runner, "_run_prompt", side_effect=invoke), self.assertRaises(CodexError):
-                await runner.run(snapshot, AIConfig())
-            self.assertEqual(len(cancelled), 3)
-
-        asyncio.run(run())
 
     def test_provider_failure_reports_the_real_reason_after_metadata_replacement(self):
         """A provider that swaps the telemetry dict must not mask its own error.
@@ -239,187 +181,61 @@ class AIGatewayTests(unittest.TestCase):
             with patch.object(runner, "_run_prompt", side_effect=invoke), self.assertRaises(CodexError) as caught:
                 await runner.run(snapshot, AIConfig(cliTimeoutSeconds=.5))
             message = str(caught.exception)
-            self.assertIn("analysis phase failed (0/4 groups complete)", message)
             self.assertIn("provider unavailable", message)
             self.assertNotIn("'stage'", message)
-            self.assertEqual(runner.last_run_metadata["failureStage"], "analysis")
+            self.assertEqual(runner.last_run_metadata["failureStage"], "starting")
             self.assertEqual(runner.last_run_metadata["stage"], "failed")
 
         asyncio.run(run())
 
-    def test_group_parallelism_remains_bounded_with_more_than_four_groups(self):
-        snapshot = self.grouped_snapshot(17)
-
-        async def run():
-            active = 0
-            maximum = 0
-            runner = CodexRunner("unused")
-
-            async def single(group, config, **kwargs):
-                nonlocal active, maximum
-                active += 1
-                maximum = max(active, maximum)
-                await asyncio.sleep(.01)
-                active -= 1
-                return AIDecision.from_dict(self.decision(snapshotId=snapshot.snapshotId, action="hold", instrumentID=None, assessments=[self.assessment(item) for item in group.observed_instruments()]))
-
-            with patch.object(runner, "_run_single", side_effect=single), patch.object(runner, "_run_prompt", AsyncMock(return_value=self.decision(snapshotId=snapshot.snapshotId, action="hold", instrumentID=None))):
-                result = await runner.run(snapshot, AIConfig())
-            self.assertEqual(maximum, 4)
-            self.assertEqual(len(result.assessments), 17)
-
-        asyncio.run(run())
-
-    def test_group_and_coordinator_have_separate_bounded_phase_timeouts(self):
+    def test_single_workflow_uses_one_bounded_cli_timeout(self):
         snapshot = self.grouped_snapshot()
 
         async def run():
             runner = CodexRunner("unused")
-            coordinator_started = False
-            coordinator_cancelled = False
 
             async def invoke(prompt, schema, config, **kwargs):
-                nonlocal coordinator_started, coordinator_cancelled
-                if "GROUP REPORTS:\n" in prompt:
-                    coordinator_started = True
-                    try:
-                        await asyncio.sleep(.15)
-                    except asyncio.CancelledError:
-                        coordinator_cancelled = True
-                        raise
-                    return self.decision(snapshotId=snapshot.snapshotId, action="hold", instrumentID=None)
-                group = json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1])["ai"]["selectedInstruments"]
                 await asyncio.sleep(.15)
-                return self.decision(snapshotId=snapshot.snapshotId, action="hold", instrumentID=None, assessments=[self.assessment(item) for item in group])
+                return self.decision(snapshotId=snapshot.snapshotId, action="hold", instrumentID=None, assessments=[self.assessment(item) for item in snapshot.observed_instruments()])
 
             clock = asyncio.get_running_loop()
             started = clock.time()
             config = AIConfig(cliTimeoutSeconds=.25)
             with patch.object(runner, "_run_prompt", side_effect=invoke):
                 decision = await runner.run(snapshot, config)
-            self.assertTrue(coordinator_started)
-            self.assertFalse(coordinator_cancelled)
             self.assertEqual(len(decision.assessments), 16)
-            self.assertGreater(clock.time() - started, .25)
-            self.assertLess(clock.time() - started, .5)
+            self.assertLess(clock.time() - started, .25)
             self.assertEqual(config.cliTimeoutSeconds, .25)
             self.assertEqual(runner.last_run_metadata["analysisTimeoutSeconds"], .25)
-            self.assertEqual(runner.last_run_metadata["coordinatorTimeoutSeconds"], .25)
+            self.assertEqual(runner.last_run_metadata["coordinatorTimeoutSeconds"], 0)
             self.assertEqual(runner.last_run_metadata["stage"], "complete")
 
         asyncio.run(run())
 
-    def test_coordinator_timeout_retains_complete_analysis_and_reports_failure_stage(self):
+    def test_single_timeout_reports_analysis_phase(self):
         snapshot = self.grouped_snapshot()
 
         async def run():
             runner = CodexRunner("unused")
 
             async def invoke(prompt, schema, config, **kwargs):
-                if "GROUP REPORTS:\n" in prompt:
-                    await asyncio.sleep(1)
-                    raise AssertionError("coordinator must time out")
-                group = json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1])["ai"]["selectedInstruments"]
-                return self.decision(snapshotId=snapshot.snapshotId, action="hold", instrumentID=None, assessments=[self.assessment(item) for item in group])
+                raise CodexError("Codex CLI timed out")
 
             with patch.object(runner, "_run_prompt", side_effect=invoke), self.assertRaises(CodexError) as caught:
                 await runner.run(snapshot, AIConfig(cliTimeoutSeconds=.1))
-            error = caught.exception
-            self.assertIn("coordinator phase failed (4/4 groups complete)", str(error))
-            self.assertEqual(error.safe_decision.action, "hold")
-            self.assertEqual(error.safe_decision.reasonCode, "COORDINATOR_FAILED")
-            self.assertEqual([item.instrumentID for item in error.safe_decision.assessments], snapshot.observed_instruments())
-            with self.assertRaises(AttributeError):
-                error.safe_decision = None
-            self.assertEqual(runner.last_run_metadata["failureStage"], "coordinator")
-            self.assertEqual(runner.last_run_metadata["completedGroups"], 4)
-            self.assertEqual(runner.last_run_metadata["assessmentCount"], 16)
+            return str(caught.exception), dict(runner.last_run_metadata)
 
-        asyncio.run(run())
-
-    def test_worker_keeps_failed_coordinator_rows_paired_and_halts_until_restart(self):
-        snapshot = self.grouped_snapshot()
-        config = AIConfig(enabled=True, mode="demo-active", allowedInstruments=tuple(snapshot.observed_instruments()), cliTimeoutSeconds=.2, maxConsecutiveFailures=3)
-        original_config = config.to_dict()
-
-        async def run():
-            runner = CodexRunner("unused")
-            failed = True
-            calls = 0
-
-            async def invoke(prompt, schema, config, **kwargs):
-                nonlocal calls
-                calls += 1
-                if "GROUP REPORTS:\n" in prompt:
-                    if failed:
-                        raise CodexError("coordinator unavailable")
-                    return self.decision(snapshotId=snapshot.snapshotId, action="hold", instrumentID=None)
-                group = json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1])["ai"]["selectedInstruments"]
-                return self.decision(snapshotId=snapshot.snapshotId, action="hold", instrumentID=None, assessments=[self.assessment(item) for item in group])
-
-            with tempfile.TemporaryDirectory() as directory, patch.object(runner, "_run_prompt", side_effect=invoke):
-                gateway = AsyncMock()
-                worker = AIWorker(config=config, runner=runner, order_gateway=gateway,
-                                  snapshot_provider=AsyncMock(return_value=snapshot), state_dir=Path(directory))
-                for _ in range(3):
-                    result = await worker.run_once(snapshot)
-                    self.assertFalse(result.accepted)
-                    self.assertEqual(result.decision.reasonCode, "COORDINATOR_FAILED")
-                    self.assertEqual(len(result.decision.assessments), 16)
-                status = worker.get_status()
-                self.assertEqual(status["state"], "halted")
-                self.assertEqual(status["consecutiveFailures"], 3)
-                self.assertEqual(status["lastDecision"]["snapshotId"], snapshot.snapshotId)
-                self.assertEqual(status["lastDecisionInstruments"], snapshot.observed_instruments())
-                self.assertEqual(status["lastDecisionFreshness"]["capturedAt"], snapshot.capturedAt)
-                self.assertIn("coordinator phase failed", status["lastError"])
-                records = [json.loads(line) for line in (Path(directory) / "ai-decisions.jsonl").read_text().splitlines()]
-                decisions = [row for row in records if row["type"] == "decision"]
-                workflows = [row for row in records if row["type"] == "analysis-workflow"]
-                self.assertEqual(len(decisions), 3)
-                self.assertTrue(all(row["rawDecision"] is None and row["accepted"] is False for row in decisions))
-                self.assertEqual(workflows[-1]["workflow"]["failureStage"], "coordinator")
-                self.assertEqual(workflows[-1]["workflow"]["completedGroups"], 4)
-                before = calls
-                await worker.run_once(snapshot)
-                self.assertEqual(calls, before)
-                self.assertEqual(worker.get_config(), original_config)
-                gateway.assert_not_awaited()
-                # A completed halted loop must not poll the runner again.
-                await worker._loop()
-                self.assertEqual(calls, before)
-                failed = False
-                # The failure halt is a durable safety latch: starting the
-                # worker again, or recreating it from the same state directory,
-                # must not resume trading on its own.
-                await worker.start()
-                self.assertEqual(worker.get_status()["state"], "halted")
-                self.assertEqual(worker.get_status()["consecutiveFailures"], 3)
-                self.assertEqual(calls, before)
-                restarted = AIWorker(state_dir=Path(directory))
-                self.assertEqual(restarted.get_status()["state"], "halted")
-                self.assertFalse(restarted.get_status()["enabled"])
-                # Only an explicit configuration update clears the latch, which
-                # is the operator's review step before trading resumes.
-                worker.update_config({})
-                self.assertEqual(worker.get_status()["consecutiveFailures"], 0)
-                await worker.start()
-                for _ in range(100):
-                    if worker.get_status()["lastError"] is None:
-                        break
-                    await asyncio.sleep(.005)
-                self.assertEqual(worker.get_status()["state"], "running")
-                self.assertEqual(worker.get_status()["consecutiveFailures"], 0)
-                self.assertGreater(calls, before)
-                self.assertEqual(worker.get_config(), original_config)
-                await worker.stop()
-
-        asyncio.run(run())
+        message, metadata = asyncio.run(run())
+        self.assertIn("timed out", message)
+        self.assertEqual(metadata["failureStage"], "analysis")
+        self.assertEqual(metadata["groupCount"], 1)
+        self.assertEqual(metadata["completedGroups"], 0)
+        self.assertEqual(metadata["stage"], "failed")
 
     def test_workflow_audit_whitelists_counts_and_durations(self):
         class Runner:
-            last_run_metadata = {"workflow": "grouped", "stage": "complete", "groupCount": 4,
-                                 "completedGroups": 4, "durationSeconds": 1.5,
+            last_run_metadata = {"workflow": "single", "stage": "complete", "groupCount": 1,
+                                 "completedGroups": 1, "durationSeconds": 1.5,
                                  "rawSnapshot": "must-not-leak", "apiKey": "must-not-leak",
                                  "analysisDurationSeconds": float("nan")}
 
@@ -434,79 +250,8 @@ class AIGatewayTests(unittest.TestCase):
                 return next(row for row in records if row["type"] == "analysis-workflow")
 
         record = asyncio.run(run())
-        self.assertEqual(record["workflow"], {"workflow": "grouped", "stage": "complete", "groupCount": 4, "completedGroups": 4, "durationSeconds": 1.5})
+        self.assertEqual(record["workflow"], {"workflow": "single", "stage": "complete", "groupCount": 1, "completedGroups": 1, "durationSeconds": 1.5})
         self.assertNotIn("must-not-leak", json.dumps(record))
-
-    def test_group_timeout_and_external_cancel_kill_every_active_child(self):
-        snapshot = self.grouped_snapshot()
-
-        async def run(external_cancel):
-            children, stopped = [], []
-
-            async def launch(*command, **kwargs):
-                process = SimpleNamespace(returncode=None, pid=10000 + len(children))
-                children.append(process)
-
-                async def communicate(prompt):
-                    await asyncio.sleep(10)
-
-                process.communicate = communicate
-                return process
-
-            async def stop(process):
-                stopped.append(process.pid)
-                process.returncode = -9
-
-            runner = CodexRunner("stub")
-            with patch("backend.ai_worker.asyncio.create_subprocess_exec", side_effect=launch), patch.object(runner, "_stop_timed_out_process", side_effect=stop):
-                task = asyncio.create_task(runner.run(snapshot, AIConfig(cliTimeoutSeconds=.15)))
-                if external_cancel:
-                    while len(children) < 4:
-                        await asyncio.sleep(.001)
-                    task.cancel()
-                    with self.assertRaises(asyncio.CancelledError):
-                        await task
-                else:
-                    with self.assertRaises(CodexError):
-                        await task
-            self.assertEqual(len(children), 4)
-            self.assertEqual(sorted(stopped), sorted(child.pid for child in children))
-
-        for external in (False, True):
-            with self.subTest(external=external):
-                asyncio.run(run(external))
-
-    def test_partial_analysis_timeout_reports_completed_group_count_and_audit_stage(self):
-        """A timed-out analysis phase keeps the useful completion count visible."""
-        snapshot = self.grouped_snapshot(12)
-
-        async def run():
-            runner = CodexRunner("unused")
-
-            async def analyze(group, config, **kwargs):
-                instruments = group.observed_instruments()
-                if instruments[0] == "COIN8-USDT-SWAP":
-                    # Leave the final group pending until the shared phase
-                    # deadline cancels it after the first two have returned.
-                    await asyncio.sleep(1)
-                return AIDecision.from_dict(self.decision(
-                    snapshotId=snapshot.snapshotId,
-                    action="hold",
-                    instrumentID=None,
-                    assessments=[self.assessment(item) for item in instruments],
-                ))
-
-            with patch.object(runner, "_run_single", side_effect=analyze), self.assertRaises(CodexError) as caught:
-                await runner.run(snapshot, AIConfig(cliTimeoutSeconds=.1))
-            return str(caught.exception), dict(runner.last_run_metadata)
-
-        message, metadata = asyncio.run(run())
-        self.assertIn("analysis phase failed (2/3 groups complete)", message)
-        self.assertIn("timed out", message)
-        self.assertEqual(metadata["failureStage"], "analysis")
-        self.assertEqual(metadata["completedGroups"], 2)
-        self.assertEqual(metadata["groupCount"], 3)
-        self.assertEqual(metadata["stage"], "failed")
 
     def test_timeout_kills_descendant_after_group_leader_has_exited(self):
         async def run():
@@ -1046,7 +791,7 @@ class AIGatewayTests(unittest.TestCase):
         self.assertEqual(defaults.stopLossCooldownSeconds, 14400)
         self.assertEqual(defaults.recentStopLossWindowSeconds, 3600)
         self.assertEqual(defaults.recentStopLossLimit, 2)
-        self.assertEqual(defaults.cliTimeoutSeconds, 90.0)
+        self.assertEqual(defaults.cliTimeoutSeconds, 180.0)
         self.assertEqual(AIConfig.from_dict({"cliTimeoutSeconds": 45}).cliTimeoutSeconds, 45.0)
         # Retired keys are accepted for migration and never emitted again, so a
         # stored cooldownSeconds cannot look like a live control.
@@ -1185,15 +930,16 @@ class AIGatewayTests(unittest.TestCase):
 
     def test_worker_migrates_legacy_cli_timeout_default(self):
         async def run():
-            with tempfile.TemporaryDirectory() as directory:
-                state_dir = Path(directory)
-                raw = AIConfig(enabled=True, mode="shadow").to_dict()
-                raw["cliTimeoutSeconds"] = 45
-                (state_dir / "ai-config.json").write_text(json.dumps(raw), encoding="utf-8")
-                worker = AIWorker(state_dir=state_dir)
-                self.assertEqual(worker.config.cliTimeoutSeconds, 90.0)
-                persisted = json.loads((state_dir / "ai-config.json").read_text(encoding="utf-8"))
-                self.assertEqual(persisted["cliTimeoutSeconds"], 90.0)
+            for previous in (45, 90):
+                with self.subTest(previous=previous), tempfile.TemporaryDirectory() as directory:
+                    state_dir = Path(directory)
+                    raw = AIConfig(enabled=True, mode="shadow").to_dict()
+                    raw["cliTimeoutSeconds"] = previous
+                    (state_dir / "ai-config.json").write_text(json.dumps(raw), encoding="utf-8")
+                    worker = AIWorker(state_dir=state_dir)
+                    self.assertEqual(worker.config.cliTimeoutSeconds, 180.0)
+                    persisted = json.loads((state_dir / "ai-config.json").read_text(encoding="utf-8"))
+                    self.assertEqual(persisted["cliTimeoutSeconds"], 180.0)
 
         asyncio.run(run())
 
