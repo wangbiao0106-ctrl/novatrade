@@ -36,8 +36,11 @@ struct MarketSidebar: View {
                     } else {
                         favoritesSection
                         categoryPicker
-                        ForEach(model.contracts(for: category).filter { !model.favoriteIDs.contains($0.id) }) { contract in
-                            contractRow(contract, isFavorite: false)
+                        // Category rankings must be computed over the complete
+                        // market. A favorite can also be a top gainer/loser;
+                        // filtering favorites here hid it from the ranking.
+                        ForEach(model.contracts(for: category)) { contract in
+                            contractRow(contract, isFavorite: model.favoriteIDs.contains(contract.id))
                                 .id("market-\(contract.id)")
                         }
                     }
