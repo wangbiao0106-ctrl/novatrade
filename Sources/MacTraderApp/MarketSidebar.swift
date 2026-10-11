@@ -37,7 +37,8 @@ struct MarketSidebar: View {
                         favoritesSection
                         categoryPicker
                         ForEach(model.contracts(for: category).filter { !model.favoriteIDs.contains($0.id) }) { contract in
-                            contractRow(contract)
+                            contractRow(contract, isFavorite: false)
+                                .id("market-\(contract.id)")
                         }
                     }
                 }
@@ -68,7 +69,8 @@ struct MarketSidebar: View {
         .padding(.horizontal, 10)
         .padding(.bottom, 5)
         ForEach(model.favoriteContracts) { contract in
-            contractRow(contract)
+            contractRow(contract, isFavorite: true)
+                .id("favorite-\(contract.id)")
         }
     }
 
@@ -100,13 +102,14 @@ struct MarketSidebar: View {
                 .frame(maxWidth: .infinity, minHeight: 44)
         } else {
             ForEach(results) { contract in
-                contractRow(contract)
+                contractRow(contract, isFavorite: model.favoriteIDs.contains(contract.id))
+                    .id("search-\(contract.id)")
             }
         }
     }
 
-    private func contractRow(_ contract: PerpetualContract) -> some View {
-        ContractRow(contract: contract, selected: model.selectedContract == contract.id, isFavorite: model.favoriteIDs.contains(contract.id)) {
+    private func contractRow(_ contract: PerpetualContract, isFavorite: Bool) -> some View {
+        ContractRow(contract: contract, selected: model.selectedContract == contract.id, isFavorite: isFavorite) {
             model.select(contract)
         } toggleFavorite: {
             model.toggleFavorite(contract)

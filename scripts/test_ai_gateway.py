@@ -159,9 +159,9 @@ class AIGatewayTests(unittest.TestCase):
             }
             self.assertEqual(set(group["candles"]), set(expected_candles))
             for key, rows in group["candles"].items():
-                primary = key.endswith("/15m")
-                self.assertEqual(len(rows), 60 if primary else 21)
-                self.assertEqual(rows[0], expected_candles[key][0 if primary else 39])
+                full_history = key.endswith(("/15m", "/1H", "/4H"))
+                self.assertEqual(len(rows), 60 if full_history else 21)
+                self.assertEqual(rows[0], expected_candles[key][0 if full_history else 39])
                 self.assertEqual(rows[-1], expected_candles[key][-1])
         self.assertEqual(union, ids)
         self.assertEqual(snapshot.to_dict(), original)
@@ -1125,6 +1125,25 @@ class AIGatewayTests(unittest.TestCase):
         self.assertAlmostEqual(
             _freshness_bounded_budget(snapshot_with(90), long_cli, long_cli.cliTimeoutSeconds), 150, delta=2,
         )
+
+    def test_single_call_allows_model_grace_after_snapshot_window(self) -> None:
+        async def run() -> dict:
+            runner = CodexRunner("unused")
+            decision = AIDecision.hold("snap-1", "late model response")
+            with patch.object(runner, "_run_single", AsyncMock(return_value=decision)):
+                await runner.run(
+                    AISnapshot(
+                        snapshotId="snap-1",
+                        capturedAt=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        instruments=[{"id": "BTC-USDT-SWAP"}],
+                        dataFreshness={"maxAgeSeconds": 90},
+                    ),
+                    AIConfig(cliTimeoutSeconds=90, snapshotMaxAgeSeconds=90),
+                )
+            return runner.last_run_metadata
+
+        metadata = asyncio.run(run())
+        self.assertEqual(metadata["pipelineBudgetSeconds"], 180.0)
 
     def test_paper_active_config_round_trip(self):
         config = AIConfig.from_dict({"enabled": True, "mode": "paper-active"})

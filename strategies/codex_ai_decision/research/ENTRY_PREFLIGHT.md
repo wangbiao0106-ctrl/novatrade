@@ -132,3 +132,32 @@ git diff --check
 `enabled=true / paper-active`。包内 `ai_worker.py` 与源码 SHA-256 一致，
 包含禁止反推止盈的提示，应用 `codesign --verify --deep --strict` 通过。
 旧评估保留历史原值；后续扫描才使用新提示。
+
+## v1.8 小时级保护与五分钟扫描
+
+2026-10-11（北京时间）：规则改为每 300 秒开始一次扫描，原 30/600/900 秒默认配置
+迁移至 300 秒；其他自定义值及停止/故障闩锁保留。扫描周期不扩大默认 90 秒
+快照有效期，不改变撮合器或交易所连续执行已有保护的机制。
+
+模型输入完整保留采集的 15m、1H、4H 原始行（每周期最多 60），只有 5m 可压缩
+窗口。提示要求新旧方案的止盈止损和分批目标结合 1H、4H 已确认结构与波动，
+解释两个周期的价格依据；低周期只细化入场，不凭短周期噪声反复调整保护或退出。
+缺少高周期依据时模型应标记新方案不可入场，保留已有有效保护，不能强造目标。
+不新增固定止损宽度、持仓时长或 4H 方向门槛。
+
+策略目录 75 项、行情/执行/撮合/FastAPI 回归 146 项、九项网关提示/价格/数据回归
+和 Swift 191 项通过；同步校验及 `git diff --check` 通过。命令沿用上方入口，
+网关追加 `test_prompt_candle_compaction_is_lossless_for_complete_16_contract_pool`、
+`test_experimental_prompt_encoding_keeps_facts_local_and_limits_rows` 与
+`test_codex_prompt_retains_full_candle_history`。虚拟时钟验证 300 秒起始间隔、
+采集/推理耗时计入周期、跨过周期跳过补跑、配置修改与中断等待；模型 mock 验证
+完整高周期历史、forming 标记、冒号键和缺失数据保留，以及提示中的小时级分析职责。
+
+此验收证明输入、提示和调度契约，不证明真实模型每次都使用合理的高周期目标，
+也不证明交易次数或亏损一定减少。没有放宽实际发单前的盈亏比、报价与风控门禁。
+
+已通过 `./scripts/build_and_run.sh package` 和 `./scripts/build_and_run.sh --verify`
+更新应用并重启。认证健康检查为 `ok / paper`，运行配置为
+`enabled=true / paper-active / decisionIntervalSeconds=300`，状态为
+`running / consecutiveFailures=0`。包内 `ai_schema.py`、`ai_worker.py`、
+`ai_market_facts.py` 与源码摘要一致，应用签名校验通过。既有界面格式调整也保留。

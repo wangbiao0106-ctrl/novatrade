@@ -25,16 +25,7 @@ private let smallPriceFormatter: NumberFormatter = {
     formatter.maximumSignificantDigits = 6
     return formatter
 }()
-private let usdFormatter: NumberFormatter = {
-    let formatter = NumberFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.numberStyle = .currency
-    formatter.currencyCode = "USD"
-    formatter.currencySymbol = "$"
-    formatter.minimumFractionDigits = 2
-    formatter.maximumFractionDigits = 2
-    return formatter
-}()
+private let usdFormatter = decimalFormatter(fractionDigits: 2)
 
 /// Sub-unit prices keep significant digits; larger prices use a fixed scale.
 func formatPrice(_ value: Double) -> String {
@@ -47,13 +38,13 @@ func formatPrice(_ value: Double) -> String {
 func formatPrice(_ value: Decimal) -> String { formatPrice(value.doubleValue) }
 
 func formatUSD(_ value: Decimal) -> String {
-    let number = value.doubleValue
-    return usdFormatter.string(from: NSNumber(value: number)) ?? String(format: "$%.2f", number)
+    let amount = usdFormatter.string(from: NSDecimalNumber(decimal: value))
+        ?? String(format: "%.2f", value.doubleValue)
+    return "\(amount) $"
 }
 
 func formatSignedUSD(_ value: Decimal) -> String {
-    let number = value.doubleValue
-    return String(format: "%@$%.2f", number >= 0 ? "+" : "-", abs(number))
+    "\(value >= 0 ? "+" : "")\(formatUSD(value))"
 }
 
 func formatCompact(_ value: Double) -> String {
@@ -84,15 +75,24 @@ func formatShortTimestamp(_ date: Date) -> String { shortTimestampFormatter.stri
 
 private let localTimeFormatter: DateFormatter = {
     let formatter = DateFormatter()
-    formatter.locale = .current
-    formatter.dateStyle = .none
-    formatter.timeStyle = .short
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "HH:mm"
     formatter.timeZone = .autoupdatingCurrent
     return formatter
 }()
 
-/// Localized clock time for fills and runtime log rows.
+/// 24-hour local time for fills, assessments and runtime log rows.
 func formatLocalTime(_ date: Date) -> String { localTimeFormatter.string(from: date) }
+
+private let runtimeTimestampFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "MM-dd HH:mm:ss"
+    formatter.timeZone = .autoupdatingCurrent
+    return formatter
+}()
+
+func formatRuntimeTimestamp(_ date: Date) -> String { runtimeTimestampFormatter.string(from: date) }
 
 private let localClockFormatter: DateFormatter = {
     let formatter = DateFormatter()

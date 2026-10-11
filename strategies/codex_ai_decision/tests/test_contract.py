@@ -15,7 +15,7 @@ STRATEGY = ROOT / "strategies" / "codex_ai_decision"
 sys.path.insert(0, str(ROOT / "backend"))
 
 from ai_policy import ACCOUNT_DAILY_LOSS_PERCENT, MIN_OPEN_WIN_RATE, MIN_OPEN_RISK_REWARD_RATIO  # noqa: E402
-from ai_schema import AIConfig, PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES  # noqa: E402
+from ai_schema import AIConfig, PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PROTECTION_ANALYSIS_INTERVALS  # noqa: E402
 from ai_worker import PRICE_PLAN_POLICY  # noqa: E402
 
 
@@ -76,7 +76,7 @@ class CodexAIStrategyContractTests(unittest.TestCase):
 
     def test_holistic_entry_profile_matches_runtime(self) -> None:
         config = strategy_config()
-        self.assertEqual(config["version"], "1.6")
+        self.assertEqual(config["version"], "1.8")
         self.assertEqual(config["entry_analysis"], {
             "primary_interval": PRIMARY_ENTRY_INTERVAL,
             "minimum_confirmed_candles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
@@ -87,8 +87,16 @@ class CodexAIStrategyContractTests(unittest.TestCase):
             "price_plan_policy": "market_structure_before_entry_gates",
         })
         self.assertEqual(PRICE_PLAN_POLICY, config["entry_analysis"]["price_plan_policy"])
-        self.assertEqual(AIConfig().decisionIntervalSeconds, 600)
+        self.assertEqual(AIConfig().decisionIntervalSeconds, 300)
         self.assertEqual(AIConfig().snapshotMaxAgeSeconds, 90)
+
+    def test_protection_analysis_uses_hourly_structure(self) -> None:
+        self.assertEqual(strategy_config()["protection_analysis"], {
+            "intervals": list(PROTECTION_ANALYSIS_INTERVALS),
+            "candle_scope": "complete_collected_history",
+            "price_basis": "confirmed_hourly_market_structure",
+            "short_term_role": "entry_timing_only",
+        })
 
     def test_entry_quality_matches_runtime(self) -> None:
         self.assertEqual(strategy_config()["entry_quality"], {

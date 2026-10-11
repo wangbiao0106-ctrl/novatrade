@@ -1,4 +1,4 @@
-"""Verify holistic analysis and v1.6 price planning without exchange/model calls."""
+"""Verify holistic entry and hourly protection without exchange/model calls."""
 
 from __future__ import annotations
 
@@ -108,7 +108,9 @@ class HolisticScanTests(unittest.TestCase):
             with self.subTest(encoding=encoding):
                 restored = restore_prompt_snapshot(_prompt_snapshot(source, encoding=encoding))
                 self.assertEqual(restored["candles"][f"{BTC}/15m"], original["candles"][f"{BTC}/15m"])
-                for interval in ("5m", "1H", "4H"):
+                for interval in ("1H", "4H"):
+                    self.assertEqual(restored["candles"][f"{BTC}/{interval}"], original["candles"][f"{BTC}/{interval}"])
+                for interval in ("5m",):
                     self.assertEqual(len(restored["candles"][f"{BTC}/{interval}"]), auxiliary_count)
                     self.assertIs(restored["candles"][f"{BTC}/{interval}"][-1]["confirmed"], False)
         self.assertEqual(source.to_dict(), original)
@@ -128,7 +130,8 @@ class HolisticScanTests(unittest.TestCase):
                 raw = restore_prompt_snapshot(json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1]))
                 payload["assessments"] = [assessment(instrument) for instrument in raw["ai"]["selectedInstruments"]]
                 for instrument in raw["ai"]["selectedInstruments"]:
-                    self.assertEqual(len(raw["candles"][f"{instrument}/15m"]), 60)
+                    for interval in ("15m", "1H", "4H"):
+                        self.assertEqual(len(raw["candles"][f"{instrument}/{interval}"]), 60)
             return payload
 
         runner = CodexRunner("unused-codex")
@@ -151,9 +154,23 @@ class HolisticScanTests(unittest.TestCase):
             self.assertIn("Keep the original prices and calculated ratio", prompt)
             self.assertIn("nearest take-profit", prompt)
             self.assertIn("evidence for entry, stop and target", prompt)
+            self.assertIn('"protectionAnalysisIntervals":["1H","4H"]', prompt)
+            self.assertIn("PROTECTION PRICE BASIS: use BOTH confirmed 1H and 4H", prompt)
+            self.assertIn("5m and 15m refine entry timing only", prompt)
+            self.assertIn("Short-term noise alone must not", prompt)
+            self.assertIn("keep existing valid protection", prompt)
         gates = CodexRunner._entry_gates(source, config)
         self.assertEqual(set(gates["primaryEntryQuality"]), set(ids))
         self.assertTrue(all(item["canOpen"] for item in gates["primaryEntryQuality"].values()))
+
+    def test_hourly_protection_history_is_preserved_with_colon_keys_and_missing_data(self):
+        source = snapshot()
+        source.candles[f"{BTC}:1H"] = source.candles.pop(f"{BTC}/1H")
+        source.candles[f"{BTC}/4H"] = []
+        for encoding in ("compact10", "compact20"):
+            restored = restore_prompt_snapshot(_prompt_snapshot(source, encoding=encoding))
+            self.assertEqual(restored["candles"][f"{BTC}:1H"], source.candles[f"{BTC}:1H"])
+            self.assertEqual(restored["candles"][f"{BTC}/4H"], [])
 
     def test_primary_quality_excludes_forming_bars_and_matches_measured_facts(self):
         source = snapshot()

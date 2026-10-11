@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify ten-minute scan cadence and migration without changing live state."""
+"""Verify five-minute scan cadence and migration without changing live state."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ class ScanScheduleTests(unittest.TestCase):
         return asyncio.run(load())
 
     def _scan_starts(
-        self, duration: float, *, interval: float = 600,
+        self, duration: float, *, interval: float = 300,
         updated_interval: float | None = None, update_at: float = 150,
     ) -> tuple[list[float], list[float]]:
         """Run two starts using a virtual clock, including a sleeping update."""
@@ -89,32 +89,32 @@ class ScanScheduleTests(unittest.TestCase):
 
     def test_collection_and_model_runtime_count_toward_the_scan_period(self) -> None:
         starts, waits = self._scan_starts(90)
-        self.assertEqual(starts, [0, 600])
-        self.assertEqual(waits, [510])
+        self.assertEqual(starts, [0, 300])
+        self.assertEqual(waits, [210])
 
     def test_overruns_skip_missed_scan_slots_without_catch_up_calls(self) -> None:
-        for duration, next_start, wait in ((650, 1200, 550), (1300, 1800, 500)):
+        for duration, next_start, wait in ((350, 600, 250), (700, 900, 200)):
             with self.subTest(duration=duration):
                 starts, waits = self._scan_starts(duration)
                 self.assertEqual(starts, [0, next_start])
                 self.assertEqual(waits, [wait])
 
     def test_finishing_exactly_on_a_slot_does_not_skip_that_slot(self) -> None:
-        starts, waits = self._scan_starts(600)
-        self.assertEqual(starts, [0, 600])
+        starts, waits = self._scan_starts(300)
+        self.assertEqual(starts, [0, 300])
         self.assertEqual(waits, [])
 
     def test_sleeping_interval_increase_recalculates_from_the_previous_start(self) -> None:
         starts, waits = self._scan_starts(90, updated_interval=1200)
         self.assertEqual(starts, [0, 1200])
-        self.assertEqual(waits, [510, 1050])
+        self.assertEqual(waits, [210, 1050])
 
     def test_sleeping_interval_decrease_recalculates_without_an_immediate_scan(self) -> None:
-        starts, waits = self._scan_starts(90, interval=1200, updated_interval=600)
-        self.assertEqual(starts, [0, 600])
-        self.assertEqual(waits, [1110, 450])
+        starts, waits = self._scan_starts(90, interval=1200, updated_interval=300)
+        self.assertEqual(starts, [0, 300])
+        self.assertEqual(waits, [1110, 150])
 
-    def test_stop_interrupts_a_ten_minute_sleep(self) -> None:
+    def test_stop_interrupts_a_five_minute_sleep(self) -> None:
         async def run() -> None:
             scanned = asyncio.Event()
             starts = 0
@@ -150,12 +150,12 @@ class ScanScheduleTests(unittest.TestCase):
 
         asyncio.run(run())
 
-    def test_new_and_missing_field_defaults_use_ten_minutes(self) -> None:
-        self.assertEqual(AIConfig().decisionIntervalSeconds, 600)
-        self.assertEqual(AIConfig.from_dict({}).decisionIntervalSeconds, 600)
+    def test_new_and_missing_field_defaults_use_five_minutes(self) -> None:
+        self.assertEqual(AIConfig().decisionIntervalSeconds, 300)
+        self.assertEqual(AIConfig.from_dict({}).decisionIntervalSeconds, 300)
 
     def test_old_default_migration_preserves_disabled_and_halted_state(self) -> None:
-        for interval in (30, 30.0):
+        for interval in (30, 30.0, 600, 600.0, 900, 900.0):
             for enabled, mode, state, failures in (
                 (False, "disabled", "stopped", 2),
                 (False, "halted", "halted", 3),
@@ -175,7 +175,7 @@ class ScanScheduleTests(unittest.TestCase):
                             "observedInstruments": ["ETH-USDT-SWAP"], "observationUpdatedAt": observed_at,
                         }), encoding="utf-8")
                         worker = self._load_worker(root)
-                        migrated = dict(config, decisionIntervalSeconds=600.0)
+                        migrated = dict(config, decisionIntervalSeconds=300.0)
                         self.assertEqual(worker.get_config(), migrated)
                         self.assertEqual(json.loads((root / "ai-config.json").read_text()), migrated)
                         self.assertEqual(worker.status.state, state)

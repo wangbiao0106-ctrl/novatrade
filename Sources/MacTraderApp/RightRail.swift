@@ -43,10 +43,10 @@ struct RightRail: View {
                 ordersModule
                 RailModule(title: "交易流水", icon: "arrow.left.arrow.right") {
                     if model.fills.isEmpty { RailEmpty("暂无\(accountLabel)成交记录") }
-                    ForEach(model.fills.prefix(8)) { fill in
+                    ForEach(model.fills.sorted { $0.timestamp > $1.timestamp }.prefix(8)) { fill in
                         RailRow {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(formatLocalTime(fill.timestamp)).foregroundStyle(.secondary)
+                                Text(formatShortTimestamp(fill.timestamp)).foregroundStyle(.secondary)
                                 HStack(spacing: 5) {
                                     Text(fillInstrumentLabel(fill))
                                         .font(.caption.weight(.semibold).monospaced())
@@ -648,11 +648,11 @@ struct AISettingsSheet: View {
                     HStack {
                         Text("决策间隔（秒）").frame(width: 120, alignment: .leading)
                         Spacer()
-                        TextField("600", value: $config.decisionIntervalSeconds, format: .number.precision(.fractionLength(1)))
+                        TextField("300", value: $config.decisionIntervalSeconds, format: .number.precision(.fractionLength(1)))
                             .frame(width: 72)
                             .multilineTextAlignment(.trailing)
                     }
-                    Text("默认每 10 分钟扫描；优先分析 15 分钟 K 线，结合资金费、多空比、成交量、市场情绪和美联储消息综合判断，其他周期作为参考。")
+                    Text("默认每 5 分钟扫描；15 分钟 K 线细化入场，止盈止损依据 1 小时和 4 小时行情结构，避免仅凭短周期波动频繁交易。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack {

@@ -34,11 +34,12 @@ FIXED_AI_REASONING_EFFORT = "medium"
 DEFAULT_STOP_LOSS_COOLDOWN_SECONDS = float(4 * 60 * 60)
 DEFAULT_RECENT_STOP_LOSS_WINDOW_SECONDS = float(60 * 60)
 DEFAULT_RECENT_STOP_LOSS_LIMIT = 2
-# Scan starts follow a ten-minute cadence; collection and inference consume
+# Scan starts follow a five-minute cadence; collection and inference consume
 # part of that period rather than extending it.
-DEFAULT_DECISION_INTERVAL_SECONDS = 600.0
-LEGACY_DEFAULT_DECISION_INTERVAL_SECONDS = 30.0
+DEFAULT_DECISION_INTERVAL_SECONDS = 300.0
+LEGACY_DEFAULT_DECISION_INTERVALS = (30.0, 600.0, 900.0)
 PRIMARY_ENTRY_INTERVAL = "15m"
+PROTECTION_ANALYSIS_INTERVALS = ("1H", "4H")
 # Minimal data integrity only; indicator window sizes are not entry gates.
 MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES = 1
 # Fixed account-level daily-loss circuit breaker as a percentage of the UTC

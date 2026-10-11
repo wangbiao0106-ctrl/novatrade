@@ -16,6 +16,9 @@ python3 scripts/test_ai_gateway.py
 
 下单前行情复核的确定性回放及验收入口见 [`ENTRY_PREFLIGHT.md`](ENTRY_PREFLIGHT.md)。
 
+v1.8 每 5 分钟扫描，`compact20` 保留完整采集的 15m、1H、4H 原始行，仅缩短
+5m；下方的输入用量报告属于旧版窗口策略的历史测量，不能代表新版本 token 用量。
+
 一次扫描的真实输入用量可用 [`measure_scan_input.py`](measure_scan_input.py) 核验。
 它通过已运行纸面后台的 GET 接口读取账户/风控，复用运行时公共行情采集器和
 单次整池 `compact20` 输入，执行一次 Codex 纯分析并读取 `turn.completed.usage`。

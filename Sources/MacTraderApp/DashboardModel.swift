@@ -138,6 +138,14 @@ final class DashboardModel: ObservableObject {
         UserDefaults.standard.set(restoredID, forKey: Self.selectedContractStorageKey)
     }
 
+    private func reconcileFavorites(with contracts: [PerpetualContract]) {
+        let availableIDs = Set(contracts.map(\.id))
+        let validIDs = favoriteIDs.intersection(availableIDs)
+        guard validIDs != favoriteIDs else { return }
+        favoriteIDs = validIDs
+        UserDefaults.standard.set(validIDs.sorted().joined(separator: ","), forKey: Self.favoriteStorageKey)
+    }
+
     private func requestMarket() {
         marketTask?.cancel()
         streamTask?.cancel()
@@ -273,7 +281,10 @@ final class DashboardModel: ObservableObject {
             requestMarket()
             let remoteContracts = try await client.contracts()
             guard isCurrent() else { return }
-            if !remoteContracts.isEmpty { contracts = remoteContracts.map(PerpetualContract.init(remote:)) }
+            if !remoteContracts.isEmpty {
+                contracts = remoteContracts.map(PerpetualContract.init(remote:))
+                reconcileFavorites(with: contracts)
+            }
             restoreSelectedContract()
             // A persisted contract may have expired. Re-request only when
             // restoring the list changed the selected instrument.
@@ -407,6 +418,7 @@ final class DashboardModel: ObservableObject {
                 if let remote = try? await client.contracts(forceRefresh: true), !remote.isEmpty,
                    generation == lifecycleGeneration {
                     contracts = remote.map(PerpetualContract.init(remote:))
+                    reconcileFavorites(with: contracts)
                 }
                 guard generation == lifecycleGeneration else { break }
                 await refreshTradingActivity()

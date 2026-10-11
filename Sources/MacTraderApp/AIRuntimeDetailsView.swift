@@ -242,5 +242,5 @@ private func nonemptyRuntimeText(_ value: String?) -> String? {
 }
 
 private func runtimeTime(_ date: Date) -> String {
-    date.formatted(.dateTime.month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted)).minute().second().locale(Locale(identifier: "zh_CN")))
+    formatRuntimeTimestamp(date)
 }

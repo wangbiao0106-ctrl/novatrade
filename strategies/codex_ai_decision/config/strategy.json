@@ -1,6 +1,6 @@
 {
   "strategy_id": "codex_ai_decision",
-  "version": "1.6",
+  "version": "1.8",
   "source_of_truth": "strategies/codex_ai_decision/STRATEGY.md",
   "display_name": "Codex AI 决策策略",
   "name_en": "Codex AI Decision",
@@ -23,7 +23,7 @@
   },
   "signal_parameters": {
     "minimum_confidence": 0.65,
-    "decision_interval_seconds": 600,
+    "decision_interval_seconds": 300,
     "cli_timeout_seconds": 90,
     "snapshot_max_age_seconds": 90,
     "max_output_bytes": 1000000,
@@ -55,6 +55,12 @@
   "entry_quality": {
     "minimum_win_rate": 0.5,
     "minimum_risk_reward_ratio": 2.2
+  },
+  "protection_analysis": {
+    "intervals": ["1H", "4H"],
+    "candle_scope": "complete_collected_history",
+    "price_basis": "confirmed_hourly_market_structure",
+    "short_term_role": "entry_timing_only"
   },
   "entry_execution": {
     "order_type": "limit",

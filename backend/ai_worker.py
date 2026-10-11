@@ -44,9 +44,9 @@ try:
     from .ai_schema import (
         AIDecision, AIChatResponse, AIConfig, AISnapshot, AIStatus, SchemaError,
         DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
-        DEFAULT_DECISION_INTERVAL_SECONDS, LEGACY_DEFAULT_DECISION_INTERVAL_SECONDS,
+        DEFAULT_DECISION_INTERVAL_SECONDS, LEGACY_DEFAULT_DECISION_INTERVALS,
         FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT,
-        PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
+        PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PROTECTION_ANALYSIS_INTERVALS,
         ai_chat_json_schema, decision_json_schema, dumps, normalize_ai_chat_patch,
         normalize_contract_ids,
     )
@@ -64,9 +64,9 @@ except ImportError:  # launched from bundled backend/main.py as a script
     from ai_schema import (
         AIDecision, AIChatResponse, AIConfig, AISnapshot, AIStatus, SchemaError,
         DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
-        DEFAULT_DECISION_INTERVAL_SECONDS, LEGACY_DEFAULT_DECISION_INTERVAL_SECONDS,
+        DEFAULT_DECISION_INTERVAL_SECONDS, LEGACY_DEFAULT_DECISION_INTERVALS,
         FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT,
-        PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
+        PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PROTECTION_ANALYSIS_INTERVALS,
         ai_chat_json_schema, decision_json_schema, dumps, normalize_ai_chat_patch,
         normalize_contract_ids,
     )
@@ -105,7 +105,7 @@ _SHARED_POLICY_RULES = (
     "1. DATA CONTRACT AND QUALITY: Preserve the fixed observed contract pool and maintain exactly one assessment per contract. "
     "Assess contracts independently; a missing resource for one contract does not erase complete data for another. "
     "Use SERVER MARKET FACTS as measured summaries and do not recompute their arithmetic. "
-    "Prioritize complete raw 15m OHLCV for current structure, candle bodies/wicks and volume; other intervals are optional context. "
+    "Prioritize complete raw 15m OHLCV for entry timing, candle bodies/wicks and volume; preserve complete 1H/4H history for protection planning. "
     "PRICE PLANNING BEFORE ELIGIBILITY: First independently choose each contract's defensible entry, structural invalidation stop "
     "and realistic take-profit from observed support/resistance, swing levels, liquidity or other concrete market evidence. "
     "Explain the evidence for entry, stop and target in the assessment reason. Only after fixing these prices calculate "
@@ -122,7 +122,13 @@ _SHARED_POLICY_RULES = (
     f"PRIMARY ENTRY ANALYSIS: prioritize {PRIMARY_ENTRY_INTERVAL} OHLCV for BOTH long and short plans. "
     "Choose direction holistically using price structure, volume, funding, long/short account ratio, open interest, "
     "taker flow, volatility, RSI, rolling VWAP, liquidity, BTC/ETH context, market sentiment and Federal Reserve policy news. "
-    "There is no 4H trend-direction gate or 20-bar history requirement; 5m, 1H and 4H are optional context and may disagree. "
+    "There is no 4H trend-direction gate or 20-bar history requirement; intervals may disagree without an automatic direction veto. "
+    "PROTECTION PRICE BASIS: use BOTH confirmed 1H and 4H market structure to assess stop-loss, take-profit and every staged target, "
+    "for new plans and existing positions. Explain each timeframe's support/resistance, swing levels, volatility, structural "
+    "invalidation and realistic profit objectives in reason. 5m and 15m refine entry timing only; they must not be the sole "
+    "basis for tight stops or nearby profit targets. If either hourly timeframe lacks defensible evidence, mark new plans "
+    "entryEligible=false, explain missing evidence and keep existing valid protection; never invent hourly structure or fall "
+    "back to a short-term-only protection plan. Do not impose a fixed stop width or holding period. "
     f"Only {MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES} valid confirmed {PRIMARY_ENTRY_INTERVAL} candle is required for data integrity; "
     "insufficient indicator windows yield null, not an automatic rejection. "
     "Find conditional buy/sell points; no indicator independently mandates a trade. "
@@ -148,6 +154,9 @@ _SHARED_POLICY_RULES = (
     "A position or pending order blocks replacement open for that contract; it does not block protection review or a justified exit. "
     "Close only for materially invalidated market evidence or ORDER_MISTAKE, using the actual position direction. "
     "Cancel only for materially changed setup or ORDER_MISTAKE, using the real current order ID. "
+    "Short-term noise alone must not trigger protection changes, close, cancel or an opposite replacement trade; "
+    "explain a material change in the 1H/4H thesis for thesis-based exits. Preserve reasonable existing protection and never "
+    "widen a stop to increase risk just to hold longer. Existing protective exits remain active continuously between scans. "
     f"For close/cancel use reasonCode=THESIS_INVALIDATED or ORDER_MISTAKE and at least {MIN_EXIT_REASON_LENGTH} characters of concrete evidence in reason. "
     "Do not use routine duplicate replacement as an exit reason.\n"
     "4. PROTECTION AND STAGED TAKE-PROFIT: For every current position compare the latest assessment with existing protection. "
@@ -221,7 +230,7 @@ def _prompt_snapshot(snapshot: AISnapshot, *, encoding: str | None = None) -> di
     The runtime/audit snapshot is unchanged. Repeated candle field names are
     removed only from the model prompt in compact modes; all fields and all row
     values remain present in the runtime snapshot. Windowed modes preserve
-    all collected primary-interval rows and the latest auxiliary forming row.
+    all collected entry/protection-interval rows and the latest auxiliary forming row.
     Heterogeneous objects stay objects to preserve
     absent-vs-null.
     """
@@ -231,8 +240,10 @@ def _prompt_snapshot(snapshot: AISnapshot, *, encoding: str | None = None) -> di
     for key, rows in result["candles"].items():
         if not rows:
             continue
-        primary_interval = key.endswith("/" + PRIMARY_ENTRY_INTERVAL) or key.endswith(":" + PRIMARY_ENTRY_INTERVAL)
-        if selected_encoding in {"compact20", "compact10"} and not primary_interval:
+        preserve_history = any(key.endswith(separator + interval)
+                               for interval in (PRIMARY_ENTRY_INTERVAL, *PROTECTION_ANALYSIS_INTERVALS)
+                               for separator in ("/", ":"))
+        if selected_encoding in {"compact20", "compact10"} and not preserve_history:
             limit = 20 if selected_encoding == "compact20" else 10
             confirmed = [row for row in rows if row.get("confirmed") is True]
             forming = next((row for row in reversed(rows) if row.get("confirmed") is False), None)
@@ -714,10 +725,14 @@ class CodexRunner:
     async def run(self, snapshot: AISnapshot, config: AIConfig) -> AIDecision:
         clock = asyncio.get_running_loop()
         started = clock.time()
-        # Send the complete observation pool in one prompt. A single bounded
-        # call keeps all contracts in the same reasoning context and avoids a
-        # partial multi-group cycle timing out before a coordinator can run.
-        pipeline_budget = _freshness_bounded_budget(snapshot, config, config.cliTimeoutSeconds)
+        # Send the complete observation pool in one prompt. The model call may
+        # outlive the snapshot admission window when the observation pool is
+        # large. That is safe: validate_decision() rejects stale ``open``
+        # intents, while a late hold can still record the worker's state and
+        # keep existing protection unchanged. Bounding the subprocess itself
+        # to snapshotMaxAgeSeconds turned large, valid scans into recurring
+        # timeout errors without changing the fail-closed execution gate.
+        pipeline_budget = config.cliTimeoutSeconds + config.snapshotMaxAgeSeconds
         self.last_run_metadata = {
             "workflow": "single", "stage": "starting",
             "observedCount": len(snapshot.observed_instruments()), "groupCount": 0,
@@ -761,6 +776,7 @@ class CodexRunner:
             "minimumWinRate": MIN_OPEN_WIN_RATE,
             "minimumRiskRewardRatio": MIN_OPEN_RISK_REWARD_RATIO,
             "pricePlanPolicy": PRICE_PLAN_POLICY,
+            "protectionAnalysisIntervals": list(PROTECTION_ANALYSIS_INTERVALS),
             "entryOrderType": "limit",
             "exchangeEntryOrderType": "post_only",
             "finalEntryPreflight": dict(ENTRY_PREFLIGHT_LIMITS),
@@ -793,8 +809,8 @@ class CodexRunner:
         if selected_encoding in {"compact20", "compact10"}:
             limit = 20 if selected_encoding == "compact20" else 10
             candle_encoding_note = (
-                f"SNAPSHOT preserves all collected {PRIMARY_ENTRY_INTERVAL} rows (up to 60), including forming context. "
-                f"Auxiliary candle series contain the latest {limit} confirmed rows plus the latest forming row when present; "
+                f"SNAPSHOT preserves all collected {PRIMARY_ENTRY_INTERVAL}, 1H and 4H rows (up to 60 per interval), including forming context. "
+                f"5m auxiliary candle series contain the latest {limit} confirmed rows plus the latest forming row when present; "
                 "the local SERVER MARKET FACTS still use the complete collected history. "
             )
         else:
@@ -953,13 +969,13 @@ class AIWorker:
         try:
             raw = json.loads(self._path("ai-config.json").read_text(encoding="utf-8"))
             normalized = dict(raw) if isinstance(raw, Mapping) else {}
-            # Only the previous default scan interval is migrated. Customized
+            # Only previous default scan intervals are migrated. Customized
             # intervals remain intact, as do enablement and the failure latch
             # restored below before writing the normalized configuration.
             if (
                 isinstance(normalized.get("decisionIntervalSeconds"), (int, float))
                 and not isinstance(normalized.get("decisionIntervalSeconds"), bool)
-                and float(normalized["decisionIntervalSeconds"]) == LEGACY_DEFAULT_DECISION_INTERVAL_SECONDS
+                and float(normalized["decisionIntervalSeconds"]) in LEGACY_DEFAULT_DECISION_INTERVALS
             ):
                 normalized["decisionIntervalSeconds"] = DEFAULT_DECISION_INTERVAL_SECONDS
             # maxDailyLosses=0 used to mean "no losing trade is acceptable",

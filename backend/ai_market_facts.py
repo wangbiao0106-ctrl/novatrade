@@ -11,16 +11,17 @@ import math
 from typing import Any, Mapping
 
 try:
-    from .ai_schema import AISnapshot, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PRIMARY_ENTRY_INTERVAL
+    from .ai_schema import AISnapshot, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PRIMARY_ENTRY_INTERVAL, PROTECTION_ANALYSIS_INTERVALS
 except ImportError:  # bundled backend modules are launched as scripts
-    from ai_schema import AISnapshot, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PRIMARY_ENTRY_INTERVAL
+    from ai_schema import AISnapshot, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PRIMARY_ENTRY_INTERVAL, PROTECTION_ANALYSIS_INTERVALS
 
 
 _INTERVALS = ("15m", "5m", "1H", "4H")
 _METHODOLOGY = {
     "primaryEntryInterval": PRIMARY_ENTRY_INTERVAL,
     "primaryEntryMinimumConfirmedCandles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
-    "entryAnalysis": "Prioritize 15m OHLCV and judge direction holistically with derivatives, liquidity, sentiment and policy context. Other intervals are optional; no 4H direction gate.",
+    "entryAnalysis": "Prioritize 15m OHLCV for entry timing and judge direction holistically; no 4H direction gate. Stop-loss and take-profit use both confirmed 1H and 4H structure, not short-term noise.",
+    "protectionAnalysisIntervals": list(PROTECTION_ANALYSIS_INTERVALS),
     "candleScope": "Only confirmed=true candles, in supplied oldest-to-newest order. Invalid OHLC breaks the usable trailing segment; forming candles are excluded.",
     "returnsPercent": "(latest close / close N confirmed bars earlier - 1) * 100; N+1 usable bars required.",
     "sma": "Simple arithmetic mean of the last N usable confirmed closes; N bars required.",

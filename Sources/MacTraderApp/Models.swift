@@ -32,6 +32,9 @@ struct PerpetualContract: Identifiable, Hashable {
         shortName = remote.baseCurrency
         quoteCurrency = remote.quoteCurrency
         price = remote.last.doubleValue
+        // Sidebar display and gain/loss ranking use the UTC-day move from
+        // the backend's sodUtc0 boundary. Keep the rolling 24-hour return
+        // separate for consumers that explicitly request it.
         change = remote.changePercent.doubleValue
         rollingChange = remote.rollingChangePercent.doubleValue
         volume24h = remote.volume24h.doubleValue
@@ -39,7 +42,8 @@ struct PerpetualContract: Identifiable, Hashable {
     }
 }
 
-/// Sidebar contract groupings, ranked from OKX's UTC-day figures (`sodUtc0`).
+/// Sidebar contract groupings, ranked by the backend's UTC-day return from
+/// the sodUtc0 boundary.
 enum MarketCategory: String, CaseIterable {
     case mainstream = "主流"
     case hot = "热门"
