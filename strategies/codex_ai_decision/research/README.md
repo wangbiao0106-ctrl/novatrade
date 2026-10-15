@@ -16,12 +16,15 @@ python3 scripts/test_ai_gateway.py
 
 下单前行情复核的确定性回放及验收入口见 [`ENTRY_PREFLIGHT.md`](ENTRY_PREFLIGHT.md)。
 
-v1.8 每 5 分钟扫描，`compact20` 保留完整采集的 15m、1H、4H 原始行，仅缩短
-5m；下方的输入用量报告属于旧版窗口策略的历史测量，不能代表新版本 token 用量。
+v1.9 默认每 5 分钟开始一次扫描，并按最多 4 个标的分组分析，再由 coordinator
+汇总为一项最终动作；`analysisWorkflow="single"` 只用于明确的运维覆盖。
+`compact20` 保留完整采集的 4H 主入场周期和 1H/4H 保护周期，仅缩短辅助周期到最近
+20 根已确认行及最新未收盘行。4H 必须有至少 20 根有效已确认 K 线，多空方向还要
+与 4H 趋势一致；15m 只负责细化入场时机。
 
 一次扫描的真实输入用量可用 [`measure_scan_input.py`](measure_scan_input.py) 核验。
 它通过已运行纸面后台的 GET 接口读取账户/风控，复用运行时公共行情采集器和
-单次整池 `compact20` 输入，执行一次 Codex 纯分析并读取 `turn.completed.usage`。
+当前配置的 workflow 输入，执行一次 Codex 纯分析并读取 `turn.completed.usage`。
 不实例化交易 worker 或订单网关、不写纸面账本、不保存原始 K 线及账户明细。
 输入 token 包括 CLI 附加上下文/schema，缓存 token 是输入的子集。
 
@@ -30,8 +33,9 @@ python3 strategies/codex_ai_decision/research/measure_scan_input.py \
   --output strategies/codex_ai_decision/results/scan_input_usage_2026-10-10.json
 ```
 
-2026-10-10 00:22:25（北京时间）采集的一轮纯分析实测：10 个标的，
-`gpt-6-luna / medium`，单次整池调用，全部 10 个 assessment 返回成功。
+以下报告来自 2026-10-10 00:22:25（北京时间）的历史 v1.8 测量：当时使用
+`gpt-6-luna / medium` 的单次整池调用，10 个 assessment 全部返回成功。它保留作
+输入规模基线，不能代表当前 v1.9 分组调用的 token 用量或交易表现。
 
 | 项目 | 实测值 |
 | --- | ---: |
@@ -46,7 +50,7 @@ python3 strategies/codex_ai_decision/research/measure_scan_input.py \
 
 用量来自 CLI 的 `turn.completed.usage`，包括 CLI 附加上下文和输出 schema，
 并非按字符数估算；提示正文的字节数只统计传入的交易提示。缓存是输入的子集，
-不能再次加到总输入上。4H 为可选参考，15m 原始数据完整保留；辅助周期为最近
-20 根已确认行加当前未收盘行。数据收集用时 7.777 秒。该次核验没有调用订单执行，
-没有改动运行中 worker 的配置或状态。结构化统计位于
+不能再次加到总输入上。该历史版本把 4H 当作可选参考；当前 v1.9 已恢复 4H/20 根
+方向门禁。数据收集用时 7.777 秒。该次核验没有调用订单执行，没有改动运行中 worker
+的配置或状态。结构化统计位于
 [`results/scan_input_usage_2026-10-10.json`](../results/scan_input_usage_2026-10-10.json)。

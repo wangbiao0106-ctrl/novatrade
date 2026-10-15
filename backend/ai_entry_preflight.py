@@ -64,6 +64,8 @@ def check_entry_preflight(
 ) -> dict[str, Any]:
     """Check a resting limit against current quotes and conservative net R/R."""
     limits = ENTRY_PREFLIGHT_LIMITS
+    if request.get("side") != "sell" or request.get("positionSide") not in (None, "net", "short"):
+        _reject("AI new entries are short-only; long opening is disabled")
     clock = (now or datetime.now(timezone.utc)).timestamp()
     instrument = str(request.get("instrumentID") or "")
     for name, row in (("ticker", ticker), ("order book", book), ("mark price", mark)):

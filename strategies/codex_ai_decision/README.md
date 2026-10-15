@@ -13,15 +13,22 @@
 - 配置中心 ID：`codex`
 - 实验室包 ID：`codex_ai_decision`
 - provider：`codex`，固定 `gpt-6-luna / medium`
-- 规则版本：1.8；默认每 5 分钟开始一次扫描，采集和推理耗时计入周期；事件预筛
+- 规则版本：1.10；新开仓仅允许做空，服务端 policy 和提交前校验拒绝开多；已有多仓
+  的保护与平仓仍可执行。默认每 5 分钟开始一次扫描，显式设置的 10 分钟间隔保留；采集和推理耗时计入周期；事件预筛
   默认关闭，开启前需完成回放验收
-- 15m 细化入场，1H/4H 评估止盈止损；三个周期保留完整采集历史，只有 5m 可缩短。
-  不恢复 4H 趋势和 20 根历史硬门槛，由 AI 综合多空判断。
+- 默认使用 grouped workflow：每组最多 4 个标的独立分析，再由 coordinator 选择一项动作；
+  `AIConfig.analysisWorkflow="single"` 可由运维显式切换为单次整池分析。
+- 4H 是新开仓的主结构周期，至少需要 20 根有效已确认 K 线；新空单必须符合 bearish 4H
+  趋势，偏多行情等待空头机会。15m 只细化入场时机，1H/4H 共同评估止盈止损；
+  5m 可缩短，缺失或混合的高周期结构会阻断新开仓但不影响已有持仓保护、平仓和撤单。
   行情、资金费、持仓量、多空账户比和主动买卖量优先使用 OKX v5 API；补充盘口、
   RSI、波动率、量比、滚动加权均价及 BTC/ETH 背景。情绪指数和美联储官方消息
   是注明范围和时间的可选外部证据；不足窗口/来源失败明确标注，不虚构。
 - 默认账户环境为本地纸面交易，启用后使用 `paper-active`；真实公共行情与本地撮合
   的执行边界见公共规则中的“账户模式与执行边界”，初始资金为 5000 USDT
+- AI 开仓按可用权益的 `riskPerTradePercent`（默认 0.5%）和入场至止损的距离计算合约数量，
+  按合约步长向下取整；`marginPerOrderUSD`（默认 500 USDT）只作为保证金上限。手动订单
+ 继续使用调用方数量，缺少有效止损或规格时拒绝 AI 开仓
 - AI 入场默认使用止损后的 4 小时同品种冷却，并在 60 分钟内累计 2 次止损后暂停
   全部 AI 新开仓；状态持久化在纸面账本中，手动平仓和保护管理仍可执行
 - 账户级日损熔断固定为 UTC 日初权益的 5%（`ACCOUNT_DAILY_LOSS_PERCENT`），
@@ -38,8 +45,8 @@
   固定倍数反推止盈。低盈亏比方案保留原值并标为不可入场，提示与多空/分批方案
   保留回归位于 `tests/test_holistic_scan.py`，验收说明见
   [`research/ENTRY_PREFLIGHT.md`](research/ENTRY_PREFLIGHT.md)。
-- v1.8 以小时级结构维持保护，避免仅凭短周期噪声平仓换向；整池使用一次 Codex 调用，默认决策超时为 180 秒；旧默认 30/600/900 秒
-  配置迁移为 300 秒，保留其他自定义值及启停/故障闩锁。`tests/test_scan_schedule.py`
+- v1.9 恢复 4H/20 根入场数据与趋势一致性门槛，并默认使用分组分析和 coordinator；整池使用一次 Codex 调用仅可通过 `analysisWorkflow="single"` 显式配置；默认决策超时为 180 秒；纸面 AI 限价入场单绑定快照/决策期限，过期自动释放预留；达到 20 笔平仓后，实际胜率低于 40% 或策略累计已实现盈亏不为正时暂停新开仓；旧默认间隔
+  配置中的 30/900 秒迁移为 300 秒，v1.10 保留显式设置的 600 秒及其他自定义值和启停/故障闩锁。`tests/test_scan_schedule.py`
   验证节奏与迁移，`tests/test_holistic_scan.py` 验证高周期数据及提示传递。
 
 Swift 客户端通过 API 对齐配置与审计契约：参数设置可保存快照时效和三个止损闸门，
@@ -49,7 +56,7 @@ Swift 客户端通过 API 对齐配置与审计契约：参数设置可保存快
 `Tests/OKXGatewayTests/AIRiskContractTests.swift` 和
 `Tests/OKXGatewayTests/RiskDataQualityTests.swift`，不在运行时读取本目录。
 扫描节奏与综合分析的回归回放分别位于 `tests/test_scan_schedule.py` 和
-`tests/test_holistic_scan.py`；默认值及 15m 优先分析参数由 `tests/test_contract.py`
+`tests/test_holistic_scan.py`；默认值及 4H/20 根趋势一致性参数由 `tests/test_contract.py`
 与服务端常量逐项对齐。快照有效期独立保持默认 90 秒。
 数据源、缺失数据、外部消息、指标和事件指纹回归位于 `tests/test_market_context.py`。
 单次扫描输入字节数和真实 provider token 用量可用

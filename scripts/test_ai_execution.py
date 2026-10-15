@@ -30,6 +30,42 @@ BTC = "BTC-USDT-SWAP"
 NEIRO = "NEIRO-USDT-SWAP"
 
 
+class AIRiskSizingTests(unittest.TestCase):
+    def setUp(self):
+        self.spec = InstrumentSpec(BTC, ctVal=0.01, ctMult=1, lotSize=0.01, minSize=0.01)
+
+    def test_quantity_scales_down_for_wider_stop(self):
+        config = AIConfig(riskPerTradePercent=0.5, marginPerOrderUSD=10_000)
+        narrow = main._ai_risk_sized_quantity(
+            config=config, equity=5_000, entry_price=100, stop_loss_price=99,
+            leverage=2, instrument=self.spec,
+        )
+        wide = main._ai_risk_sized_quantity(
+            config=config, equity=5_000, entry_price=100, stop_loss_price=95,
+            leverage=2, instrument=self.spec,
+        )
+        self.assertGreater(narrow[0], wide[0])
+        self.assertLessEqual(narrow[0] * 0.01, 25 / 1)
+        self.assertLessEqual(wide[0] * 0.05, 25 / 1)
+
+    def test_margin_cap_remains_a_hard_ceiling(self):
+        config = AIConfig(riskPerTradePercent=5, marginPerOrderUSD=50)
+        quantity, notional, budget = main._ai_risk_sized_quantity(
+            config=config, equity=5_000, entry_price=100, stop_loss_price=99,
+            leverage=2, instrument=self.spec,
+        )
+        self.assertEqual(budget, 250)
+        self.assertLessEqual(notional / 2, 50)
+        self.assertGreater(quantity, 0)
+
+    def test_invalid_or_too_small_risk_budget_is_rejected(self):
+        config = AIConfig(riskPerTradePercent=0.01, marginPerOrderUSD=500)
+        with self.assertRaises(HTTPException):
+            main._ai_risk_sized_quantity(
+                config=config, equity=1, entry_price=100, stop_loss_price=90,
+                leverage=1, instrument=self.spec,
+            )
+
 def iso(value: datetime) -> str:
     return value.isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -207,7 +243,7 @@ class AccountExecutionUniverseTests(NoNetworkTests):
 
     async def test_execution_rejects_open_when_current_position_exists(self):
         now = datetime.now(timezone.utc)
-        config = AIConfig(enabled=True, mode="demo-active", allowedInstruments=(BTC,), maxLeverage=5)
+        config = AIConfig(enabled=True, mode="demo-active", allowedInstruments=(BTC,), maxLeverage=5, riskPerTradePercent=5)
         snapshot = AISnapshot(
             snapshotId="position-gate", capturedAt=iso(now), instruments=[{"id": BTC}],
             account={"authenticated": True, "pendingOrdersKnown": True,
@@ -244,7 +280,7 @@ class AccountExecutionUniverseTests(NoNetworkTests):
 
     async def test_execution_rejects_open_when_current_pending_order_exists(self):
         now = datetime.now(timezone.utc)
-        config = AIConfig(enabled=True, mode="demo-active", allowedInstruments=(BTC,), maxLeverage=5)
+        config = AIConfig(enabled=True, mode="demo-active", allowedInstruments=(BTC,), maxLeverage=5, riskPerTradePercent=5)
         snapshot = AISnapshot(
             snapshotId="pending-gate", capturedAt=iso(now), instruments=[{"id": BTC}],
             account={"authenticated": True, "pendingOrdersKnown": True,
@@ -281,7 +317,7 @@ class AccountExecutionUniverseTests(NoNetworkTests):
 
     async def test_execution_refreshes_authenticated_account_and_risk_before_entry(self):
         now = datetime.now(timezone.utc)
-        config = AIConfig(enabled=True, mode="demo-active", allowedInstruments=(BTC,), maxLeverage=5)
+        config = AIConfig(enabled=True, mode="demo-active", allowedInstruments=(BTC,), maxLeverage=5, riskPerTradePercent=5)
         snapshot = AISnapshot(
             snapshotId="refresh-before-entry", capturedAt=iso(now), instruments=[{"id": BTC}],
             account={
@@ -361,7 +397,7 @@ class AccountExecutionUniverseTests(NoNetworkTests):
                 return {"orderID": "test-order"}
 
         gateway = Gateway()
-        with patch.object(main, "ai_worker", SimpleNamespace(config=AIConfig(enabled=True, mode="demo-active", maxLeverage=5))), \
+        with patch.object(main, "ai_worker", SimpleNamespace(config=AIConfig(enabled=True, mode="demo-active", maxLeverage=5, riskPerTradePercent=5))), \
              patch.object(main, "OKX_DEMO", True), \
              patch.object(main, "_instrument_spec", new=AsyncMock(return_value=InstrumentSpec(BTC, ctVal=1))), \
              patch.object(main, "_ticker_last", new=AsyncMock(return_value=100)), \

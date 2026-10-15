@@ -131,7 +131,7 @@ class ContextCollectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"longShortAccountRatio"', prompt)
         self.assertIn('"return24hPercent":25.0', prompt)
         self.assertIn("optional exchange source unavailable", prompt)
-        self.assertEqual(next(iter(_prompt_snapshot(source)["candles"])), BTC + "/15m")
+        self.assertEqual(next(iter(_prompt_snapshot(source)["candles"])), BTC + "/4H")
 
     async def test_unsupported_optional_sources_remain_unknown_and_all_contracts_remain(self):
         with patch.object(context, "_global_source", new=AsyncMock(return_value={"available": False})):

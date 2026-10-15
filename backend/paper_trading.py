@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 try:
+    from .ai_policy import MIN_PAPER_PERFORMANCE_TRADES, MIN_PAPER_REALIZED_WIN_RATE
     from .ai_schema import (
         ACCOUNT_DAILY_LOSS_PERCENT,
         DEFAULT_RECENT_STOP_LOSS_LIMIT,
@@ -26,6 +27,7 @@ try:
     )
     from .order_gateway import InstrumentSpec, OrderNotSubmittedError
 except ImportError:  # bundled backend modules are launched as scripts
+    from ai_policy import MIN_PAPER_PERFORMANCE_TRADES, MIN_PAPER_REALIZED_WIN_RATE
     from ai_schema import (
         ACCOUNT_DAILY_LOSS_PERCENT,
         DEFAULT_RECENT_STOP_LOSS_LIMIT,
@@ -133,7 +135,7 @@ class PaperTradingAccount:
     def __init__(
         self, state_path: Path, *, initial_balance: float = 5000,
         fee_rate: float = 0.0005, slippage_bps: float = 2,
-        max_drawdown_percent: float = 0,
+        max_drawdown_percent: float = 10,
         max_daily_loss_percent: float = ACCOUNT_DAILY_LOSS_PERCENT,
         stop_loss_cooldown_seconds: float = DEFAULT_STOP_LOSS_COOLDOWN_SECONDS,
         recent_stop_loss_window_seconds: float = DEFAULT_RECENT_STOP_LOSS_WINDOW_SECONDS,
@@ -206,6 +208,56 @@ class PaperTradingAccount:
         temporary = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
         temporary.write_text(json.dumps(self._state, ensure_ascii=False, allow_nan=False), encoding="utf-8")
         temporary.replace(self.state_path)
+
+    def _expire_orders(self, now: float | None = None) -> int:
+        """Expire stale AI entry orders and release their reservations.
+
+        Legacy orders without ``expiresAt`` remain valid indefinitely so old
+        paper account files keep their original semantics.
+        """
+        current = self._clock().astimezone(timezone.utc).timestamp() if now is None else float(now)
+        if not math.isfinite(current):
+            return 0
+        expired_at = _iso(datetime.fromtimestamp(current, timezone.utc))
+        changed = 0
+        for order in self._state["orders"]:
+            if order.get("status") != "live" or order.get("reduceOnly"):
+                continue
+            expires_at = order.get("expiresAt")
+            if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
+                continue
+            if not math.isfinite(expires_at) or expires_at <= 0 or current < expires_at:
+                continue
+            order.update({
+                "status": "expired",
+                "reservedMargin": 0.0,
+                "reservedFee": 0.0,
+                "expiredAt": expired_at,
+            })
+            self._event(
+                "order-expired",
+                orderID=order["id"],
+                instrumentID=order["instrumentID"],
+                clientOrderID=order.get("clientOrderID"),
+                expiresAt=order.get("expiresAt"),
+                reason="ai_entry_expired",
+            )
+            changed += 1
+        return changed
+
+    def _expire_orders_for_read(self) -> None:
+        """Reap stale entry orders before serving a synchronous projection.
+
+        The paper market loop normally calls :meth:`mark`, which also reaps
+        orders.  Read endpoints must still release a reservation when the
+        quote refresh is delayed or unavailable; otherwise an expired AI
+        order can continue to consume available margin and appear executable
+        in an account snapshot.  Projection methods are synchronous, so the
+        small atomic update and save can happen without awaiting the account
+        lock used by mutating methods.
+        """
+        if self._expire_orders():
+            self._save()
 
     def _equity(self) -> float:
         return self._state["cash"] + sum(self._unrealized(position) for position in self._state["positions"].values())
@@ -312,6 +364,7 @@ class PaperTradingAccount:
                 self._event("entry-rejected", instrumentID=instrument_id, source="ai", reason="stop_loss_cooldown", blockedUntil=until)
                 self._save()
                 raise PaperTradingError(reason)
+
         recent = [row for row in stop_losses if now.timestamp() - datetime.fromisoformat(row["closedAt"].replace("Z", "+00:00")).timestamp() <= window]
         if len(recent) >= limit:
             oldest = datetime.fromisoformat(recent[0]["closedAt"].replace("Z", "+00:00"))
@@ -322,6 +375,57 @@ class PaperTradingAccount:
                 self._event("entry-rejected", instrumentID=instrument_id, source="ai", reason="recent_stop_loss_burst", blockedUntil=until, stopLossCount=len(recent))
                 self._save()
                 raise PaperTradingError(reason)
+
+    def _strategy_performance(self, strategy_id: str = "codex") -> dict[str, Any]:
+        """Summarize realized results for one durable paper strategy ledger."""
+        strategy_key = str(strategy_id or "codex")
+        strategy_trades = [
+            trade for trade in self._state["closedTrades"]
+            if isinstance(trade, dict)
+            and str(trade.get("strategyID") or trade.get("ownerStrategyID") or "") == strategy_key
+        ]
+        winning_trades = sum(1 for trade in strategy_trades if float(trade.get("realizedPnL", 0)) > 1e-9)
+        strategy_realized = sum(float(trade.get("realizedPnL", 0)) for trade in strategy_trades)
+        return {
+            "available": True,
+            "closedTradeCount": len(strategy_trades),
+            "winningTradeCount": winning_trades,
+            "losingTradeCount": sum(1 for trade in strategy_trades if float(trade.get("realizedPnL", 0)) < -1e-9),
+            "winRate": winning_trades / len(strategy_trades) if strategy_trades else None,
+            "realizedPnLUSD": strategy_realized,
+        }
+
+    def _check_ai_strategy_performance(self, request: dict[str, Any], instrument_id: str) -> None:
+        """Reject new AI entries after a sufficiently large losing sample.
+
+        The policy gate checks the same ledger in the model snapshot.  Keep a
+        broker-side check as a final race-safe boundary because trades can
+        close between snapshot validation and order submission.
+        """
+        if request.get("source") != "ai" or bool(request.get("reduceOnly")):
+            return
+        strategy_id = str(request.get("strategyID") or "codex")
+        performance = self._strategy_performance(strategy_id)
+        trade_count = performance["closedTradeCount"]
+        win_rate = performance["winRate"]
+        realized = performance["realizedPnLUSD"]
+        if trade_count < MIN_PAPER_PERFORMANCE_TRADES or not (
+            win_rate is None or win_rate < MIN_PAPER_REALIZED_WIN_RATE or realized <= 0
+        ):
+            return
+        reason = (
+            f"paper strategy performance circuit breaker: {trade_count} trades, "
+            f"realized win rate {win_rate if win_rate is not None else 0:.1%}, "
+            f"PnL {realized:.2f} USDT"
+        )
+        self._event(
+            "entry-rejected", instrumentID=instrument_id, source="ai",
+            reason="strategy_performance_circuit_breaker", strategyID=strategy_id,
+            closedTradeCount=trade_count, winningTradeCount=performance["winningTradeCount"],
+            winRate=win_rate, realizedPnLUSD=realized,
+        )
+        self._save()
+        raise PaperTradingError(reason)
 
     def _event(self, event_type: str, **fields: Any) -> None:
         self._state["audit"].append({"type": event_type, "timestamp": _iso(self._clock()), "executionMode": "paper", **fields})
@@ -405,6 +509,9 @@ class PaperTradingAccount:
     ) -> dict[str, Any]:
         async with self._lock:
             self._roll_day()
+            expired = self._expire_orders()
+            if expired:
+                self._save()
             client_id = str(request.get("clientOrderID") or uuid4().hex)
             existing_order = next((order for order in self._state["orders"] if order["clientOrderID"] == client_id), None)
             if existing_order is not None:
@@ -434,6 +541,12 @@ class PaperTradingAccount:
                 refreshed = await entry_preflight(request)
                 quote = refreshed["quote"]
                 price = quote["last"]
+                # The preflight may suspend long enough for another AI entry
+                # order to reach its deadline. Reap it before rebuilding the
+                # live-order guard below.
+                expired = self._expire_orders()
+                if expired:
+                    self._save()
             market_quote = self._quote(instrument_id, price, quote)
             limit_price = _number(request.get("price"), "limit price", positive=True) if order_type == "limit" else None
             fill_price = self._execution_price(side, market_quote, limit_price)
@@ -470,6 +583,7 @@ class PaperTradingAccount:
                 self._update_risk()
                 if self._state["killSwitch"]:
                     raise PaperTradingError(self._state["riskReason"] or "risk kill switch is active")
+                self._check_ai_strategy_performance(request, instrument_id)
                 if position is not None or any(not order["reduceOnly"] for order in pending):
                     raise PaperTradingError("current instrument already has a position or entry order")
                 self._check_ai_entry_guard(request, instrument_id)
@@ -498,6 +612,9 @@ class PaperTradingAccount:
                 raise PaperTradingError("available paper account margin is insufficient")
             stop, targets = (None, []) if reduce_only else self._protection(request, direction, sizing_price, quantity, instrument.lotSize)
             now = _iso(self._clock())
+            expires_at = None
+            if request.get("source") == "ai" and not reduce_only and request.get("_aiEntryDeadline") is not None:
+                expires_at = _number(request.get("_aiEntryDeadline"), "AI entry deadline", positive=True)
             order = {
                 "id": str(uuid4()), "clientOrderID": client_id,
                 "strategyID": _strategy_uuid(request.get("strategyID")), "ownerStrategyID": str(request.get("strategyID") or "manual"),
@@ -511,6 +628,8 @@ class PaperTradingAccount:
                 "source": str(request.get("source") or "manual"), "spec": spec,
                 "signal": request.get("signal"),
             }
+            if expires_at is not None:
+                order["expiresAt"] = expires_at
             self._state["orders"].append(order)
             if not reduce_only:
                 day = self._state["dayStartDay"]
@@ -619,6 +738,9 @@ class PaperTradingAccount:
     async def mark(self, instrument_id: str, price: float, *, bid: float | None = None, ask: float | None = None, quote: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         async with self._lock:
             self._roll_day()
+            expired = self._expire_orders()
+            if expired:
+                self._save()
             market_quote = self._quote(instrument_id, price, {**(quote or {}), **({"bid": bid} if bid is not None else {}), **({"ask": ask} if ask is not None else {})})
             before = len(self._state["fills"])
             for order in self._state["orders"][:]:
@@ -672,6 +794,9 @@ class PaperTradingAccount:
 
     async def cancel_order(self, order_id: str) -> dict[str, Any]:
         async with self._lock:
+            expired = self._expire_orders()
+            if expired:
+                self._save()
             order = next((order for order in self._state["orders"] if order["id"] == order_id or order["clientOrderID"] == order_id), None)
             if order is None:
                 raise PaperTradingError("paper order does not exist")
@@ -683,6 +808,7 @@ class PaperTradingAccount:
 
     async def cancel_pending_orders(self, instrument_id: str | None = None) -> list[str]:
         async with self._lock:
+            self._expire_orders()
             ids = []
             for order in self._state["orders"]:
                 if order["status"] == "live" and (instrument_id is None or order["instrumentID"] == instrument_id):
@@ -754,6 +880,9 @@ class PaperTradingAccount:
     async def flatten(self, prices: dict[str, float] | None = None) -> dict[str, Any]:
         async with self._lock:
             self._roll_day()
+            expired = self._expire_orders()
+            if expired:
+                self._save()
             cancelled = []
             for order in self._state["orders"]:
                 if order["status"] == "live":
@@ -797,7 +926,8 @@ class PaperTradingAccount:
                 "side": order["side"], "orderType": order["orderType"], "quantity": order["quantity"],
                 "status": order["status"], "message": "本地纸面成交" if order["status"] == "filled" else "本地纸面挂单",
                 "submittedAt": order["requestedAt"], "notional": notional, "leverage": order["leverage"],
-                "marginUSD": notional / order["leverage"], "executionMode": "paper", "strategyID": order["ownerStrategyID"]}
+                "marginUSD": notional / order["leverage"], "executionMode": "paper", "strategyID": order["ownerStrategyID"],
+                "expiresAt": order.get("expiresAt")}
 
     def _position_snapshot(self, position: dict[str, Any]) -> dict[str, Any]:
         active_targets = [target["price"] for target in position["takeProfitLevels"] if not target["executed"] and target["quantity"] > 0]
@@ -812,20 +942,24 @@ class PaperTradingAccount:
         return [self._position_snapshot(position) for position in self._state["positions"].values()]
 
     def pending_orders(self) -> list[dict[str, Any]]:
+        self._expire_orders_for_read()
         return [{"id": order["id"], "instrumentID": order["instrumentID"], "side": order["side"],
                  "status": "live", "quantity": order["quantity"], "price": order["price"], "createdAt": order["createdAt"],
                  "filledQuantity": order["filledQuantity"], "averageFillPrice": order["fillPrice"],
                  "margin": order["reservedMargin"], "leverage": order["leverage"], "marginMode": "isolated",
                  "takeProfitPrice": order["takeProfitLevels"][0]["price"] if order["takeProfitLevels"] else None,
                  "stopLossPrice": order["stopLossPrice"], "clientOrderID": order["clientOrderID"],
-                 "strategyID": order["ownerStrategyID"], "reduceOnly": order["reduceOnly"]}
+                 "strategyID": order["ownerStrategyID"], "reduceOnly": order["reduceOnly"],
+                 "expiresAt": order.get("expiresAt")}
                 for order in self._state["orders"] if order["status"] == "live"]
 
     def all_orders(self) -> list[dict[str, Any]]:
+        self._expire_orders_for_read()
         return [{"id": order["id"], "strategyID": order["strategyID"], "instrumentID": order["instrumentID"],
                  "side": "long" if order["side"] == "buy" else "short", "quantity": order["quantity"],
                  "requestedAt": order["requestedAt"], "fillPrice": order["fillPrice"], "status": order["status"],
-                 "remoteOrderID": None, "clientOrderID": order["clientOrderID"], "signal": deepcopy(order["signal"])}
+                 "remoteOrderID": None, "clientOrderID": order["clientOrderID"], "signal": deepcopy(order["signal"]),
+                 "expiresAt": order.get("expiresAt")}
                 for order in self._state["orders"]]
 
     def all_fills(self) -> list[dict[str, Any]]:
@@ -836,6 +970,7 @@ class PaperTradingAccount:
         return self._result(order) if order is not None else None
 
     def tracked_instruments(self) -> list[str]:
+        self._expire_orders_for_read()
         return sorted(set(self._state["positions"]) | {order["instrumentID"] for order in self._state["orders"] if order["status"] == "live"})
 
     def daily_order_count(self, day: str | None = None) -> int:
@@ -890,6 +1025,7 @@ class PaperTradingAccount:
         recent_stop_loss_window_seconds: float | None = None,
         recent_stop_loss_limit: int | None = None,
     ) -> dict[str, Any]:
+        self._expire_orders_for_read()
         day = self._clock().astimezone(timezone.utc).date().isoformat()
         trades = [trade for trade in self._state["closedTrades"] if trade["closedAt"][:10] == day]
         today_fills = [fill for fill in self._state["fills"] if fill["timestamp"][:10] == day]
@@ -902,12 +1038,14 @@ class PaperTradingAccount:
             recent_stop_loss_window_seconds=recent_stop_loss_window_seconds,
             recent_stop_loss_limit=recent_stop_loss_limit,
         )
+        strategy_performance = self._strategy_performance()
         return {"mode": "paper", "executionMode": "paper", "profile": "local-paper", "site": "local",
                 "label": "纸面交易", "authenticated": True, "initialBalanceUSD": self._state["initialBalance"],
                 "equityUSD": equity, "availableEquityUSD": self._available(), "totalAssetValueUSD": equity,
                 "todayPnLUSD": closed_gross - sum(fill["fee"] for fill in today_fills),
                 "todayLossCount": sum(1 for trade in trades if trade["realizedPnL"] < -1e-9),
                 "todayAIOrderCount": self.daily_order_count(), "realizedPnLUSD": self._state["cash"] - self._state["initialBalance"],
+                "strategyPerformance": strategy_performance,
                 **guard,
                 "assets": [{"id": "USDT", "currency": "USDT", "equity": equity, "available": self._available(), "usdValue": equity}],
                 "positions": self.positions(), "positionsKnown": True, "pendingOrders": self.pending_orders(), "pendingOrdersKnown": True,
@@ -915,12 +1053,19 @@ class PaperTradingAccount:
                 "updatedAt": _iso(self._clock())}
 
     def risk_snapshot(self) -> dict[str, Any]:
+        # Risk reads are also a synchronization point. Quotes may have moved
+        # since the last mutating call, so update the peak/drawdown latch before
+        # exposing the snapshot and persist any account-wide cleanup it causes.
+        self._expire_orders_for_read()
+        self._update_risk()
+        self._save()
         equity, peak = self._equity(), self._state["equityPeak"]
         current_day = self._clock().astimezone(timezone.utc).date().isoformat()
         baseline = self._state["dayStartEquity"] if current_day == self._state["dayStartDay"] else equity
         return {"equity": equity, "equityPeak": peak, "dayStartEquity": baseline,
                 "dayStartAt": current_day + "T00:00:00Z", "dailyPnLPercent": (equity - baseline) / baseline * 100 if baseline > 0 else 0,
                 "drawdownPercent": (peak - equity) / peak * 100 if peak > 0 else 0,
+                "maxDrawdownPercent": self.max_drawdown_percent,
                 "killSwitch": self._state["killSwitch"], "reason": self._state["riskReason"], "strategyCapitals": [],
                 "globalNotionals": {position["instrumentID"]: position["quantity"] * position["contractValue"] * position["markPrice"] for position in self._state["positions"].values()},
                 "strategyCapitalBase": equity, "equitySource": "paper", "accountAvailable": True,

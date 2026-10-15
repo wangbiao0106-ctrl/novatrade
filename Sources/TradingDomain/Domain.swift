@@ -617,6 +617,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var maxDailyOrders: Int
     /// Maximum number of losing orders counted by the server during one day.
     public var maxDailyLosses: Int
+    /// Percentage of available account equity risked to the stop on each AI entry.
+    public var riskPerTradePercent: Double
     /// Fixed margin budget, in USDT, assigned to each opening order.
     public var marginPerOrderUSD: Double
     /// Upper leverage bound. The AI may request a lower leverage per decision.
@@ -628,7 +630,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
     /// Number of stop-loss exits in the rolling window that pauses AI entries.
     public var recentStopLossLimit: Int
 
-    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool = false, mode: AIRunMode = .disabled, allowedInstruments: [String] = [], minimumConfidence: Double = 0.65, decisionIntervalSeconds: Double = 300, cliTimeoutSeconds: Double = 180, snapshotMaxAgeSeconds: Double = 90, maxOutputBytes: Int = 1_000_000, maxConsecutiveFailures: Int = 3, allowOpen: Bool = true, allowClose: Bool = true, allowCancel: Bool = true, requireStopLoss: Bool = true, maxDailyOrders: Int = 20, maxDailyLosses: Int = 5, marginPerOrderUSD: Double = 500, maxLeverage: Double = 5, stopLossCooldownSeconds: Double = 14_400, recentStopLossWindowSeconds: Double = 3_600, recentStopLossLimit: Int = 2) {
+    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool = false, mode: AIRunMode = .disabled, allowedInstruments: [String] = [], minimumConfidence: Double = 0.65, decisionIntervalSeconds: Double = 300, cliTimeoutSeconds: Double = 180, snapshotMaxAgeSeconds: Double = 90, maxOutputBytes: Int = 1_000_000, maxConsecutiveFailures: Int = 3, allowOpen: Bool = true, allowClose: Bool = true, allowCancel: Bool = true, requireStopLoss: Bool = true, maxDailyOrders: Int = 20, maxDailyLosses: Int = 5, riskPerTradePercent: Double = 0.5, marginPerOrderUSD: Double = 500, maxLeverage: Double = 5, stopLossCooldownSeconds: Double = 14_400, recentStopLossWindowSeconds: Double = 3_600, recentStopLossLimit: Int = 2) {
         self.strategyID = strategyID; self.provider = provider
         self.enabled = enabled; self.mode = mode; self.allowedInstruments = allowedInstruments
         self.minimumConfidence = minimumConfidence; self.decisionIntervalSeconds = decisionIntervalSeconds
@@ -636,7 +638,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
         self.snapshotMaxAgeSeconds = snapshotMaxAgeSeconds; self.maxConsecutiveFailures = maxConsecutiveFailures
         self.allowOpen = allowOpen; self.allowClose = allowClose; self.allowCancel = allowCancel
         self.requireStopLoss = requireStopLoss
-        self.maxDailyOrders = maxDailyOrders; self.maxDailyLosses = maxDailyLosses
+        self.maxDailyOrders = maxDailyOrders; self.maxDailyLosses = maxDailyLosses; self.riskPerTradePercent = riskPerTradePercent
         self.marginPerOrderUSD = marginPerOrderUSD; self.maxLeverage = maxLeverage
         self.stopLossCooldownSeconds = stopLossCooldownSeconds
         self.recentStopLossWindowSeconds = recentStopLossWindowSeconds
@@ -647,7 +649,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
         case strategyID, provider, enabled, mode, allowedInstruments
         case minimumConfidence, decisionIntervalSeconds, cliTimeoutSeconds, snapshotMaxAgeSeconds, maxOutputBytes
         case maxConsecutiveFailures, allowOpen, allowClose, allowCancel
-        case requireStopLoss, maxDailyOrders, maxDailyLosses, marginPerOrderUSD, maxLeverage
+        case requireStopLoss, maxDailyOrders, maxDailyLosses, riskPerTradePercent, marginPerOrderUSD, maxLeverage
         case stopLossCooldownSeconds, recentStopLossWindowSeconds, recentStopLossLimit
     }
 
@@ -673,6 +675,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
             requireStopLoss: try container.decodeIfPresent(Bool.self, forKey: .requireStopLoss) ?? true,
             maxDailyOrders: try container.decodeIfPresent(Int.self, forKey: .maxDailyOrders) ?? 20,
             maxDailyLosses: try container.decodeIfPresent(Int.self, forKey: .maxDailyLosses) ?? 5,
+            riskPerTradePercent: try container.decodeIfPresent(Double.self, forKey: .riskPerTradePercent) ?? 0.5,
             marginPerOrderUSD: try container.decodeIfPresent(Double.self, forKey: .marginPerOrderUSD) ?? 500,
             maxLeverage: try container.decodeIfPresent(Double.self, forKey: .maxLeverage) ?? 5,
             stopLossCooldownSeconds: try container.decodeIfPresent(Double.self, forKey: .stopLossCooldownSeconds) ?? 14_400,
@@ -700,6 +703,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
         try container.encode(requireStopLoss, forKey: .requireStopLoss)
         try container.encode(maxDailyOrders, forKey: .maxDailyOrders)
         try container.encode(maxDailyLosses, forKey: .maxDailyLosses)
+        try container.encode(riskPerTradePercent, forKey: .riskPerTradePercent)
         try container.encode(marginPerOrderUSD, forKey: .marginPerOrderUSD)
         try container.encode(maxLeverage, forKey: .maxLeverage)
         try container.encode(stopLossCooldownSeconds, forKey: .stopLossCooldownSeconds)
@@ -728,13 +732,14 @@ public struct AIPatch: Codable, Equatable, Sendable {
     public var requireStopLoss: Bool?
     public var maxDailyOrders: Int?
     public var maxDailyLosses: Int?
+    public var riskPerTradePercent: Double?
     public var marginPerOrderUSD: Double?
     public var maxLeverage: Double?
     public var stopLossCooldownSeconds: Double?
     public var recentStopLossWindowSeconds: Double?
     public var recentStopLossLimit: Int?
 
-    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool? = nil, mode: AIRunMode? = nil, allowedInstruments: [String]? = nil, minimumConfidence: Double? = nil, decisionIntervalSeconds: Double? = nil, cliTimeoutSeconds: Double? = nil, snapshotMaxAgeSeconds: Double? = nil, maxOutputBytes: Int? = nil, maxConsecutiveFailures: Int? = nil, allowOpen: Bool? = nil, allowClose: Bool? = nil, allowCancel: Bool? = nil, requireStopLoss: Bool? = nil, maxDailyOrders: Int? = nil, maxDailyLosses: Int? = nil, marginPerOrderUSD: Double? = nil, maxLeverage: Double? = nil, stopLossCooldownSeconds: Double? = nil, recentStopLossWindowSeconds: Double? = nil, recentStopLossLimit: Int? = nil) {
+    public init(strategyID: AIStrategyID? = nil, provider: AIProvider? = nil, enabled: Bool? = nil, mode: AIRunMode? = nil, allowedInstruments: [String]? = nil, minimumConfidence: Double? = nil, decisionIntervalSeconds: Double? = nil, cliTimeoutSeconds: Double? = nil, snapshotMaxAgeSeconds: Double? = nil, maxOutputBytes: Int? = nil, maxConsecutiveFailures: Int? = nil, allowOpen: Bool? = nil, allowClose: Bool? = nil, allowCancel: Bool? = nil, requireStopLoss: Bool? = nil, maxDailyOrders: Int? = nil, maxDailyLosses: Int? = nil, riskPerTradePercent: Double? = nil, marginPerOrderUSD: Double? = nil, maxLeverage: Double? = nil, stopLossCooldownSeconds: Double? = nil, recentStopLossWindowSeconds: Double? = nil, recentStopLossLimit: Int? = nil) {
         self.strategyID = strategyID; self.provider = provider
         self.enabled = enabled; self.mode = mode; self.allowedInstruments = allowedInstruments
         self.minimumConfidence = minimumConfidence; self.decisionIntervalSeconds = decisionIntervalSeconds
@@ -742,7 +747,7 @@ public struct AIPatch: Codable, Equatable, Sendable {
         self.snapshotMaxAgeSeconds = snapshotMaxAgeSeconds; self.maxConsecutiveFailures = maxConsecutiveFailures
         self.allowOpen = allowOpen; self.allowClose = allowClose; self.allowCancel = allowCancel
         self.requireStopLoss = requireStopLoss
-        self.maxDailyOrders = maxDailyOrders; self.maxDailyLosses = maxDailyLosses
+        self.maxDailyOrders = maxDailyOrders; self.maxDailyLosses = maxDailyLosses; self.riskPerTradePercent = riskPerTradePercent
         self.marginPerOrderUSD = marginPerOrderUSD; self.maxLeverage = maxLeverage
         self.stopLossCooldownSeconds = stopLossCooldownSeconds
         self.recentStopLossWindowSeconds = recentStopLossWindowSeconds

@@ -16,10 +16,10 @@ from typing import Any, Mapping
 
 try:
     from .ai_market_facts import market_facts
-    from .ai_schema import AIConfig, AISnapshot
+    from .ai_schema import ALLOWED_OPEN_DIRECTIONS, AIConfig, AISnapshot
 except ImportError:  # bundled backend modules are launched as scripts
     from ai_market_facts import market_facts
-    from ai_schema import AIConfig, AISnapshot
+    from ai_schema import ALLOWED_OPEN_DIRECTIONS, AIConfig, AISnapshot
 
 
 FINGERPRINT_VERSION = 2
@@ -303,6 +303,7 @@ def decision_fingerprint(snapshot: AISnapshot, config: AIConfig) -> str:
             "enabled": config.enabled,
             "mode": config.mode,
             "allowedInstruments": list(config.allowedInstruments),
+            "allowedOpenDirections": list(ALLOWED_OPEN_DIRECTIONS),
             "minimumConfidence": config.minimumConfidence,
             # Scan cadence changes must force a new evaluation, while snapshot
             # age is an independent admission window (also used when freshness
@@ -315,6 +316,7 @@ def decision_fingerprint(snapshot: AISnapshot, config: AIConfig) -> str:
             "requireStopLoss": config.requireStopLoss,
             "maxDailyOrders": config.maxDailyOrders,
             "maxDailyLosses": config.maxDailyLosses,
+            "riskPerTradePercent": config.riskPerTradePercent,
             "marginPerOrderUSD": config.marginPerOrderUSD,
             "maxLeverage": config.maxLeverage,
             "stopLossCooldownSeconds": config.stopLossCooldownSeconds,

@@ -8,11 +8,11 @@ import math
 from typing import Any, Iterable
 
 try:
-    from .ai_market_facts import primary_entry_quality
-    from .ai_schema import ACCOUNT_DAILY_LOSS_PERCENT, AIDecision, AIConfig, AISnapshot, SchemaError
+    from .ai_market_facts import entry_structure_quality
+    from .ai_schema import ACCOUNT_DAILY_LOSS_PERCENT, ALLOWED_OPEN_DIRECTIONS, AIDecision, AIConfig, AISnapshot, SchemaError
 except ImportError:  # bundled backend modules are launched as scripts
-    from ai_market_facts import primary_entry_quality
-    from ai_schema import ACCOUNT_DAILY_LOSS_PERCENT, AIDecision, AIConfig, AISnapshot, SchemaError
+    from ai_market_facts import entry_structure_quality
+    from ai_schema import ACCOUNT_DAILY_LOSS_PERCENT, ALLOWED_OPEN_DIRECTIONS, AIDecision, AIConfig, AISnapshot, SchemaError
 
 
 class PolicyError(ValueError):
@@ -21,6 +21,13 @@ class PolicyError(ValueError):
 
 MIN_OPEN_WIN_RATE = 0.50
 MIN_OPEN_RISK_REWARD_RATIO = 2.2
+# A model-reported win rate is not a calibrated probability.  Once a paper
+# strategy has enough completed trades, its realized performance becomes a
+# circuit breaker for new entries.  The warm-up period remains available for
+# a fresh account, while a known losing account cannot keep trading on 0.53
+# or 0.56 self-reported estimates.
+MIN_PAPER_PERFORMANCE_TRADES = 20
+MIN_PAPER_REALIZED_WIN_RATE = 0.40
 # Both the model prompt and the execution layer must quote these numbers, so
 # they are public and imported instead of re-typed. MIN_EXIT_REASON_LENGTH is
 # shared by the policy check, the order-execution recheck and the prompt.
@@ -227,7 +234,7 @@ def _finite_positive(value: Any) -> bool:
     return math.isfinite(parsed) and parsed > 0
 
 
-def _open_snapshot_gate(snapshot: AISnapshot, instrument_id: str) -> str | None:
+def _open_snapshot_gate(snapshot: AISnapshot, instrument_id: str, direction: str | None = None) -> str | None:
     """Check server-owned facts required before an entry can be admitted."""
     if not _is_current_snapshot(snapshot):
         return None
@@ -274,6 +281,30 @@ def _open_snapshot_gate(snapshot: AISnapshot, instrument_id: str) -> str | None:
     if risk.get("killSwitch") or float(daily_pnl) <= -ACCOUNT_DAILY_LOSS_PERCENT:
         return "risk kill switch is active"
 
+    # Paper snapshots expose durable realized strategy performance.  Treat it
+    # as a circuit breaker after a meaningful sample; before that point the
+    # account is in a bounded warm-up period.  Missing performance data is
+    # handled by the existing account-quality gates and never guessed.
+    performance = account.get("strategyPerformance")
+    if isinstance(performance, dict) and performance.get("available") is True:
+        try:
+            trade_count = int(performance.get("closedTradeCount"))
+            realized = float(performance.get("realizedPnLUSD"))
+            win_rate = performance.get("winRate")
+            win_rate = float(win_rate) if win_rate is not None else None
+        except (TypeError, ValueError):
+            return "paper strategy performance is invalid"
+        if trade_count < 0 or not math.isfinite(realized) or (win_rate is not None and not math.isfinite(win_rate)):
+            return "paper strategy performance is invalid"
+        if trade_count >= MIN_PAPER_PERFORMANCE_TRADES and (
+            win_rate is None or win_rate < MIN_PAPER_REALIZED_WIN_RATE or realized <= 0
+        ):
+            return (
+                f"paper strategy performance circuit breaker: {trade_count} trades, "
+                f"realized win rate {win_rate if win_rate is not None else 0:.1%}, "
+                f"PnL {realized:.2f} USDT"
+            )
+
     availability = ai.get("tradingAvailability")
     item = availability.get(instrument_id) if isinstance(availability, dict) else None
     if not isinstance(item, dict) or item.get("available") is not True:
@@ -282,9 +313,9 @@ def _open_snapshot_gate(snapshot: AISnapshot, instrument_id: str) -> str | None:
     ticker = snapshot.tickers.get(instrument_id) if isinstance(snapshot.tickers, dict) else None
     if not isinstance(ticker, dict) or not _finite_positive(ticker.get("last")):
         return f"{instrument_id} ticker data is unavailable"
-    primary_quality = primary_entry_quality(snapshot, instrument_id)
-    if not primary_quality["canOpen"]:
-        return f"{instrument_id} {primary_quality['error']}"
+    entry_quality = entry_structure_quality(snapshot, instrument_id, direction)
+    if not entry_quality["canOpen"]:
+        return f"{instrument_id} {entry_quality['error']}"
     return None
 
 
@@ -604,6 +635,8 @@ def validate_decision(
         return reject(f"AI mode {parsed_config.mode} requires tradingMode {expected_mode}", parsed_snapshot.snapshotId)
     if parsed_decision.snapshotId != parsed_snapshot.snapshotId:
         return reject("decision snapshotId does not match current snapshot", parsed_snapshot.snapshotId)
+    if parsed_decision.action == "open" and parsed_decision.direction not in ALLOWED_OPEN_DIRECTIONS:
+        return reject("AI new entries are short-only; long opening is disabled", parsed_snapshot.snapshotId)
     if parsed_decision.assessments:
         try:
             # Validate direct dataclass/custom-runner inputs as well as JSON.
@@ -822,7 +855,7 @@ def validate_decision(
         if cancel_error:
             return reject(cancel_error, parsed_snapshot.snapshotId)
     if parsed_decision.action == "open":
-        gate_error = _open_snapshot_gate(parsed_snapshot, parsed_decision.instrumentID)
+        gate_error = _open_snapshot_gate(parsed_snapshot, parsed_decision.instrumentID, parsed_decision.direction)
         if gate_error:
             return reject(gate_error, parsed_snapshot.snapshotId)
         # Runtime entries must carry the complete per-contract analysis

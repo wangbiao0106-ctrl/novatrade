@@ -415,7 +415,7 @@ struct AIControlModule: View {
                 }
             }
             .font(.caption2)
-            Text("15m 优先 · AI 综合判断 · 每 \(scanIntervalLabel)扫描")
+            Text("仅做空 · AI 综合判断 · 每 \(scanIntervalLabel)扫描")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             if config.mode == .paperActive {
@@ -692,6 +692,17 @@ struct AISettingsSheet: View {
                         Text("单").foregroundStyle(.secondary)
                     }
                     HStack {
+                        Text("单笔止损风险").frame(width: 150, alignment: .leading)
+                        Spacer()
+                        TextField("0.5", value: $config.riskPerTradePercent, format: .number.precision(.fractionLength(2)))
+                            .frame(width: 72)
+                            .multilineTextAlignment(.trailing)
+                        Text("%").foregroundStyle(.secondary)
+                    }
+                    Text("按账户可用权益与止损距离计算仓位；单笔保证金仍是上限。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack {
                         Text("单笔保证金").frame(width: 150, alignment: .leading)
                         Spacer()
                         TextField("500", value: $config.marginPerOrderUSD, format: .number.precision(.fractionLength(2)))
@@ -785,6 +796,7 @@ struct AISettingsSheet: View {
             ("快照有效期（秒）", config.snapshotMaxAgeSeconds, 5, 3600),
             ("每日最多开仓单", Double(config.maxDailyOrders), 1, 10000),
             ("每日最多亏损单", Double(config.maxDailyLosses), 1, 10000),
+            ("单笔止损风险（%）", config.riskPerTradePercent, 0.01, 5),
             ("单笔保证金（USDT）", config.marginPerOrderUSD, 0.01, 1_000_000),
             ("最大杠杆", config.maxLeverage, 1, 125),
             ("同品种止损冷却（秒）", config.stopLossCooldownSeconds, 0, 604800),
@@ -815,6 +827,7 @@ struct AISettingsSheet: View {
             requireStopLoss: config.requireStopLoss,
             maxDailyOrders: config.maxDailyOrders,
             maxDailyLosses: config.maxDailyLosses,
+            riskPerTradePercent: config.riskPerTradePercent,
             marginPerOrderUSD: config.marginPerOrderUSD,
             maxLeverage: config.maxLeverage,
             stopLossCooldownSeconds: config.stopLossCooldownSeconds,

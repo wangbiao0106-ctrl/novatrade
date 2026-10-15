@@ -347,7 +347,9 @@ class GatewayContractTests(unittest.TestCase):
         )
         decision = SimpleNamespace(confidence=.9, reason="趋势确认，原保护线已不适用。")
         self.assertTrue(main._protection_needs_adjustment(position, protection, assessment, decision))
-        decision.confidence = .7
+        decision.confidence = .80
+        self.assertTrue(main._protection_needs_adjustment(position, protection, assessment, decision))
+        decision.confidence = .79
         self.assertFalse(main._protection_needs_adjustment(position, protection, assessment, decision))
 
         staged_assessment = SimpleNamespace(
@@ -355,7 +357,7 @@ class GatewayContractTests(unittest.TestCase):
                 {"price": 112, "quantityPercent": 50},
                 {"price": 120, "quantityPercent": 50},
             ],
-            takeProfitPrice=120, stopLossPrice=92, confidence=.7,
+            takeProfitPrice=120, stopLossPrice=92, confidence=.74,
             reason="分批目标调整，但信号未出现实质变化。",
         )
         self.assertFalse(main._protection_needs_adjustment(position, protection, staged_assessment, decision))

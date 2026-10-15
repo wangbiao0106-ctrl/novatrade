@@ -1,6 +1,6 @@
 {
   "strategy_id": "codex_ai_decision",
-  "version": "1.8",
+  "version": "1.10",
   "source_of_truth": "strategies/codex_ai_decision/STRATEGY.md",
   "display_name": "Codex AI 决策策略",
   "name_en": "Codex AI Decision",
@@ -10,7 +10,7 @@
     "strategy_id": "codex",
     "runtime_handler": "backend.ai_worker.CodexRunner",
     "decision_endpoint": "/api/v1/ai/strategies/codex",
-    "workflow": "single",
+    "workflow": "grouped",
     "event_prefilter_default": "off",
     "event_fingerprint": "market-facts-v2",
     "enabled_by_default": false,
@@ -30,6 +30,7 @@
     "max_consecutive_failures": 3,
     "max_daily_orders": 20,
     "max_daily_losses": 5,
+    "risk_per_trade_percent": 0.5,
     "margin_per_order_usd": 500,
     "max_leverage": 5,
     "stop_loss_cooldown_seconds": 14400,
@@ -37,19 +38,18 @@
     "recent_stop_loss_limit": 2
   },
   "entry_analysis": {
-    "primary_interval": "15m",
-    "minimum_confirmed_candles": 1,
+    "primary_interval": "4H",
+    "minimum_confirmed_candles": 20,
     "directions": [
-      "long",
       "short"
     ],
     "auxiliary_intervals": [
       "5m",
-      "1H",
-      "4H"
+      "15m",
+      "1H"
     ],
     "forming_candle_role": "context_only",
-    "direction_policy": "ai_holistic_no_4h_gate",
+    "direction_policy": "4h_trend_consistency_required",
     "price_plan_policy": "market_structure_before_entry_gates"
   },
   "entry_quality": {

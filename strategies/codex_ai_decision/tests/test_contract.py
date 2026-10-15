@@ -31,6 +31,7 @@ SIGNAL_PARAMETER_FIELDS = {
     "max_consecutive_failures": "maxConsecutiveFailures",
     "max_daily_orders": "maxDailyOrders",
     "max_daily_losses": "maxDailyLosses",
+    "risk_per_trade_percent": "riskPerTradePercent",
     "margin_per_order_usd": "marginPerOrderUSD",
     "max_leverage": "maxLeverage",
     "stop_loss_cooldown_seconds": "stopLossCooldownSeconds",
@@ -48,6 +49,7 @@ RISK_POLICY_FIELDS = {
 RUNTIME_FIELDS = frozenset({
     "provider", "enabled", "mode", "allowedInstruments",
     "routineModel", "routineReasoningEffort",
+    "analysisWorkflow",
 })
 
 
@@ -64,6 +66,7 @@ class CodexAIStrategyContractTests(unittest.TestCase):
         runtime = config["runtime_integration"]
         self.assertEqual(runtime["strategy_id"], "codex")
         self.assertEqual(runtime["decision_endpoint"], "/api/v1/ai/strategies/codex")
+        self.assertEqual(runtime["workflow"], AIConfig().analysisWorkflow)
         self.assertFalse(runtime["enabled_by_default"])
         self.assertEqual(config["lifecycle"], "candidate")
         self.assertIn("规则真源", (STRATEGY / "STRATEGY.md").read_text(encoding="utf-8"))
@@ -76,14 +79,14 @@ class CodexAIStrategyContractTests(unittest.TestCase):
 
     def test_holistic_entry_profile_matches_runtime(self) -> None:
         config = strategy_config()
-        self.assertEqual(config["version"], "1.8")
+        self.assertEqual(config["version"], "1.9")
         self.assertEqual(config["entry_analysis"], {
             "primary_interval": PRIMARY_ENTRY_INTERVAL,
             "minimum_confirmed_candles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
             "directions": ["long", "short"],
-            "auxiliary_intervals": ["5m", "1H", "4H"],
+            "auxiliary_intervals": ["5m", "15m", "1H"],
             "forming_candle_role": "context_only",
-            "direction_policy": "ai_holistic_no_4h_gate",
+            "direction_policy": "4h_trend_consistency_required",
             "price_plan_policy": "market_structure_before_entry_gates",
         })
         self.assertEqual(PRICE_PLAN_POLICY, config["entry_analysis"]["price_plan_policy"])

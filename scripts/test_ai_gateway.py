@@ -30,7 +30,8 @@ def iso(value: datetime) -> str:
 
 def valid_primary_candles() -> list[dict]:
     """Complete closed primary history for entry-focused runtime fixtures."""
-    return [{"open": 99, "high": 102, "low": 98, "close": 100, "confirmed": True} for _ in range(20)]
+    return [{"open": 99 + index, "high": 102 + index, "low": 98 + index,
+             "close": 100 + index, "confirmed": True} for index in range(20)]
 
 
 def restore_prompt_snapshot(value: dict) -> dict:
@@ -46,7 +47,13 @@ def restore_prompt_snapshot(value: dict) -> dict:
 
 class AIGatewayTests(unittest.TestCase):
     def snapshot(self) -> AISnapshot:
-        return AISnapshot(snapshotId="snap-1", capturedAt=iso(datetime.now(timezone.utc)), instruments=[{"id": "BTC-USDT-SWAP"}], account={"availableEquityUSD": 1000, "todayLossCount": 0}, risk={})
+        rows = [{"timestamp": iso(datetime.now(timezone.utc) - timedelta(hours=4 * (20 - index))),
+                 "open": 100 + index, "high": 102 + index, "low": 99 + index,
+                 "close": 101 + index, "volume": 10, "confirmed": True}
+                for index in range(20)]
+        return AISnapshot(snapshotId="snap-1", capturedAt=iso(datetime.now(timezone.utc)), instruments=[{"id": "BTC-USDT-SWAP"}],
+                          candles={"BTC-USDT-SWAP/4H": rows},
+                          account={"availableEquityUSD": 1000, "todayLossCount": 0}, risk={})
 
     def decision(self, **overrides) -> dict:
         value = {"schemaVersion": 1, "decisionId": "decision-1", "snapshotId": "snap-1", "action": "open", "instrumentID": "BTC-USDT-SWAP", "direction": "long", "orderType": "market", "riskBudgetPercent": 1, "stopLossPrice": 90, "winRate": .5, "riskRewardRatio": 2.2, "leverage": 1.0, "confidence": .9, "validUntil": iso(datetime.now(timezone.utc) + timedelta(minutes=1)), "reasonCode": "test", "reason": "test"}
@@ -117,7 +124,7 @@ class AIGatewayTests(unittest.TestCase):
 
             with patch("backend.ai_worker.asyncio.create_subprocess_exec", side_effect=launch):
                 runner = CodexRunner("stub")
-                decision = await runner.run(snapshot, AIConfig(enabled=True, mode="shadow", allowedInstruments=tuple(ids)))
+                decision = await runner.run(snapshot, AIConfig(enabled=True, mode="shadow", allowedInstruments=tuple(ids), analysisWorkflow="single"))
                 return decision, calls, snapshots, schemas, runner.last_run_metadata
 
         result, calls, snapshots, schemas, metadata = asyncio.run(run())
@@ -132,7 +139,7 @@ class AIGatewayTests(unittest.TestCase):
         self.assertEqual(snapshots[0]["fundingRates"], original["fundingRates"])
         self.assertEqual(set(snapshots[0]["candles"]), set(original["candles"]))
         for key, rows in snapshots[0]["candles"].items():
-            full_history = key.endswith(("/15m", "/1H", "/4H"))
+            full_history = key.endswith(("/1H", "/4H"))
             self.assertEqual(len(rows), 60 if full_history else 21)
             expected = original["candles"][key]
             self.assertEqual(rows[0], expected[0 if full_history else 39])
@@ -154,7 +161,7 @@ class AIGatewayTests(unittest.TestCase):
 
             runner = CodexRunner("unused")
             with patch.object(runner, "_run_prompt", side_effect=invoke):
-                decision = await runner.run(snapshot, AIConfig(enabled=True, mode="shadow", allowedInstruments=tuple(ids)))
+                decision = await runner.run(snapshot, AIConfig(enabled=True, mode="shadow", allowedInstruments=tuple(ids), analysisWorkflow="single"))
                 self.assertEqual(decision.action, action)
                 self.assertEqual(len(decision.assessments), 5)
 
@@ -179,7 +186,7 @@ class AIGatewayTests(unittest.TestCase):
                 raise CodexError(reason)
 
             with patch.object(runner, "_run_prompt", side_effect=invoke), self.assertRaises(CodexError) as caught:
-                await runner.run(snapshot, AIConfig(cliTimeoutSeconds=.5))
+                await runner.run(snapshot, AIConfig(cliTimeoutSeconds=.5, analysisWorkflow="single"))
             message = str(caught.exception)
             self.assertIn("provider unavailable", message)
             self.assertNotIn("'stage'", message)
@@ -187,6 +194,41 @@ class AIGatewayTests(unittest.TestCase):
             self.assertEqual(runner.last_run_metadata["stage"], "failed")
 
         asyncio.run(run())
+
+    def test_grouped_workflow_merges_group_assessments_and_coordinator_action(self):
+        snapshot = self.grouped_snapshot(5)
+        ids = snapshot.observed_instruments()
+        prompts = []
+
+        async def invoke(prompt, schema, config, **kwargs):
+            prompts.append(prompt)
+            if "GROUP REPORTS:" in prompt:
+                # The coordinator is only allowed to choose the top-level
+                # action; the worker attaches the exact group reports.
+                coordinator = self.decision(snapshotId=snapshot.snapshotId, action="hold", instrumentID=None)
+                coordinator.pop("assessments", None)
+                return coordinator
+            payload = self.decision(
+                snapshotId=snapshot.snapshotId, action="hold", instrumentID=None,
+                assessments=[self.assessment(item) for item in json.loads(
+                    prompt.split("OBSERVED CONTRACTS (complete assessment coverage required):\n", 1)[1].split("\nCOPY EXACT SNAPSHOT ID:", 1)[0]
+                )],
+            )
+            return payload
+
+        async def run():
+            runner = CodexRunner("unused")
+            with patch.object(runner, "_run_prompt", side_effect=invoke):
+                result = await runner.run(snapshot, AIConfig(enabled=True, mode="shadow", allowedInstruments=tuple(ids)))
+            return result, dict(runner.last_run_metadata)
+
+        result, metadata = asyncio.run(run())
+        self.assertEqual(result.action, "hold")
+        self.assertEqual([item.instrumentID for item in result.assessments], ids)
+        self.assertEqual(len(prompts), 3)
+        self.assertEqual(metadata["workflow"], "grouped")
+        self.assertEqual(metadata["groupCount"], 2)
+        self.assertEqual(metadata["completedGroups"], 2)
 
     def test_single_workflow_uses_one_bounded_cli_timeout(self):
         snapshot = self.grouped_snapshot()
@@ -200,7 +242,7 @@ class AIGatewayTests(unittest.TestCase):
 
             clock = asyncio.get_running_loop()
             started = clock.time()
-            config = AIConfig(cliTimeoutSeconds=.25)
+            config = AIConfig(cliTimeoutSeconds=.25, analysisWorkflow="single")
             with patch.object(runner, "_run_prompt", side_effect=invoke):
                 decision = await runner.run(snapshot, config)
             self.assertEqual(len(decision.assessments), 16)
@@ -222,7 +264,7 @@ class AIGatewayTests(unittest.TestCase):
                 raise CodexError("Codex CLI timed out")
 
             with patch.object(runner, "_run_prompt", side_effect=invoke), self.assertRaises(CodexError) as caught:
-                await runner.run(snapshot, AIConfig(cliTimeoutSeconds=.1))
+                await runner.run(snapshot, AIConfig(cliTimeoutSeconds=.1, analysisWorkflow="single"))
             return str(caught.exception), dict(runner.last_run_metadata)
 
         message, metadata = asyncio.run(run())
@@ -267,7 +309,7 @@ class AIGatewayTests(unittest.TestCase):
                 executable.chmod(0o700)
                 runner = CodexRunner(str(executable))
                 with patch.object(CodexRunner, "_decision_prompt", return_value="test snapshot"), self.assertRaises(CodexError) as raised:
-                    await runner.run(self.snapshot(), AIConfig(cliTimeoutSeconds=1))
+                    await runner.run(self.snapshot(), AIConfig(cliTimeoutSeconds=1, analysisWorkflow="single"))
                 self.assertIn("timed out", str(raised.exception))
                 child_pid = int(pid_path.read_text())
                 await asyncio.sleep(.02)
@@ -338,7 +380,7 @@ class AIGatewayTests(unittest.TestCase):
             ai={"tradingAvailability": {instrument: {"available": True}}},
             tickers={instrument: {"last": 100}},
             candles={
-                f"{instrument}/{interval}": valid_primary_candles() if interval == "15m" else [{"confirmed": True, "close": 100}]
+                f"{instrument}/{interval}": valid_primary_candles() if interval == "4H" else [{"confirmed": True, "close": 100}]
                 for interval in ("5m", "15m", "1H", "4H")
             },
             dataFreshness={"maxAgeSeconds": 90, "availability": {}},
@@ -640,7 +682,7 @@ class AIGatewayTests(unittest.TestCase):
         normalized = prompt.lower()
         self.assertIn("server market facts", normalized)
         self.assertIn("measured summaries", normalized)
-        self.assertIn("raw candles", normalized)
+        self.assertIn("raw confirmed 4h ohlcv", normalized)
         self.assertIn("inspect the complete raw confirmed 4h ohlc history", normalized)
         self.assertIn("execution/risk ambiguity", normalized)
         self.assertIn("do not recompute their arithmetic", normalized)
@@ -746,11 +788,11 @@ class AIGatewayTests(unittest.TestCase):
             for row in variants:
                 process = SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(json.dumps(row).encode(), b"")))
                 with self.subTest(row=row), patch("backend.ai_worker.asyncio.create_subprocess_exec", AsyncMock(return_value=process)), self.assertRaises(CodexError):
-                    await runner.run(self.snapshot(), AIConfig(enabled=True, mode="shadow"))
+                    await runner.run(self.snapshot(), AIConfig(enabled=True, mode="shadow", analysisWorkflow="single"))
             process = SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(json.dumps(valid).encode(), b"")))
             with patch("backend.ai_worker.asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
-                parsed = await runner.run(self.snapshot(), AIConfig(enabled=True, mode="shadow"))
-                self.assertEqual(len(parsed.assessments), 1)
+                parsed = await runner.run(self.snapshot(), AIConfig(enabled=True, mode="shadow", analysisWorkflow="single"))
+            self.assertEqual(len(parsed.assessments), 1)
 
         asyncio.run(run())
 
@@ -883,7 +925,7 @@ class AIGatewayTests(unittest.TestCase):
                         instruments=[{"id": "BTC-USDT-SWAP"}],
                         dataFreshness={"maxAgeSeconds": 90},
                     ),
-                    AIConfig(cliTimeoutSeconds=90, snapshotMaxAgeSeconds=90),
+                    AIConfig(cliTimeoutSeconds=90, snapshotMaxAgeSeconds=90, analysisWorkflow="single"),
                 )
             return runner.last_run_metadata
 
@@ -1492,7 +1534,7 @@ class AIGatewayTests(unittest.TestCase):
         return AISnapshot(
             snapshotId="snap-1", capturedAt=iso(datetime.now(timezone.utc)),
             instruments=[{"id": instrument}],
-            candles={f"{instrument}/{interval}": valid_primary_candles() if interval == "15m" else [{"confirmed": True, "close": 100}]
+            candles={f"{instrument}/{interval}": valid_primary_candles() if interval == "4H" else [{"confirmed": True, "close": 100}]
                      for interval in ("5m", "15m", "1H", "4H")},
             tickers={instrument: {"last": 100}},
             account={
@@ -1918,11 +1960,22 @@ class AIGatewayTests(unittest.TestCase):
                 )
                 executable.chmod(0o700)
                 runner = CodexRunner(str(executable))
-                decision = await runner.run(self.snapshot(), AIConfig(enabled=True, mode="shadow"))
+                decision = await runner.run(self.snapshot(), AIConfig(enabled=True, mode="shadow", analysisWorkflow="single"))
                 return decision
 
         decision = asyncio.run(run())
         self.assertEqual(decision.action, "hold")
+
+    def test_codex_runner_discovers_cli_from_gui_path_and_exports_bin_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "codex"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o700)
+            with patch.dict(os.environ, {"PATH": directory}, clear=True):
+                runner = CodexRunner()
+                self.assertEqual(runner.executable, str(executable))
+                child_path = CodexRunner._safe_environment(directory, runner.executable)["PATH"]
+                self.assertEqual(child_path.split(os.pathsep)[0], directory)
 
     def test_codex_prompt_budget_checks_utf8_bytes_before_starting_cli(self):
         async def run():
@@ -1935,7 +1988,7 @@ class AIGatewayTests(unittest.TestCase):
                     with patch.object(CodexRunner, "_decision_prompt", return_value="x" * size), \
                          patch.object(CodexRunner, "_safe_environment", return_value={}), \
                          patch("backend.ai_worker.asyncio.create_subprocess_exec", launch):
-                        decision = await runner.run(self.snapshot(), AIConfig())
+                        decision = await runner.run(self.snapshot(), AIConfig(analysisWorkflow="single"))
                     self.assertEqual(decision.action, "hold")
                     launch.assert_awaited_once()
                     self.assertEqual(len(process.communicate.await_args.args[0]), size)
@@ -1946,7 +1999,7 @@ class AIGatewayTests(unittest.TestCase):
                     with patch.object(CodexRunner, "_decision_prompt", return_value=prompt), \
                          patch("backend.ai_worker.asyncio.create_subprocess_exec", launch), \
                          self.assertRaises(CodexError) as raised:
-                        await runner.run(self.snapshot(), AIConfig())
+                        await runner.run(self.snapshot(), AIConfig(analysisWorkflow="single"))
                     self.assertIn("observation-pool snapshot exceeds", str(raised.exception))
                     self.assertIn("no instruments were omitted", str(raised.exception))
                     launch.assert_not_awaited()
@@ -2011,7 +2064,7 @@ class AIGatewayTests(unittest.TestCase):
                 executable.chmod(0o700)
                 runner = CodexRunner(str(executable))
                 with patch.object(CodexRunner, "_decision_prompt", return_value="test snapshot"), self.assertRaises(CodexError) as raised:
-                    await runner.run(self.snapshot(), AIConfig(mode="shadow", cliTimeoutSeconds=0.1))
+                    await runner.run(self.snapshot(), AIConfig(mode="shadow", cliTimeoutSeconds=0.1, analysisWorkflow="single"))
                 self.assertIn("timed out", str(raised.exception))
 
         asyncio.run(run())
@@ -2033,7 +2086,7 @@ class AIGatewayTests(unittest.TestCase):
                 runner = CodexRunner(str(executable))
                 started = asyncio.get_running_loop().time()
                 with patch.object(CodexRunner, "_decision_prompt", return_value="test snapshot"), self.assertRaises(CodexError):
-                    await runner.run(self.snapshot(), AIConfig(mode="shadow", cliTimeoutSeconds=0.1))
+                    await runner.run(self.snapshot(), AIConfig(mode="shadow", cliTimeoutSeconds=0.1, analysisWorkflow="single"))
                 return asyncio.get_running_loop().time() - started
 
         elapsed = asyncio.run(run())
@@ -2047,7 +2100,7 @@ class AIGatewayTests(unittest.TestCase):
                 executable.chmod(0o700)
                 runner = CodexRunner(str(executable))
                 with self.assertRaises(CodexError) as raised:
-                    await runner.run(self.snapshot(), AIConfig(mode="shadow", **config_values))
+                    await runner.run(self.snapshot(), AIConfig(mode="shadow", analysisWorkflow="single", **config_values))
                 return str(raised.exception)
 
         async def run():

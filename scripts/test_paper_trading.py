@@ -304,6 +304,62 @@ class PaperTradingTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PaperTradingError):
             await self.submit(source="ai", _aiEntryDeadline=(self.now + timedelta(seconds=30)).timestamp(), clientOrderID="limit", _dailyOrderLimit=1)
 
+    async def test_ai_limit_expiry_releases_reservation_and_survives_restart(self):
+        deadline = (self.now + timedelta(seconds=30)).timestamp()
+        result = await self.submit(
+            source="ai", _aiEntryDeadline=deadline, orderType="limit", price=90,
+            clientOrderID="expiring-ai",
+        )
+        self.assertEqual(result["status"], "live")
+        self.assertEqual(result["expiresAt"], deadline)
+        self.assertEqual(len(self.account.pending_orders()), 1)
+        self.assertLess(self.account.account_snapshot()["availableEquityUSD"], 5000)
+
+        self.now += timedelta(seconds=31)
+        await self.account.mark(BTC, 80)
+        self.assertEqual(self.account.pending_orders(), [])
+        self.assertEqual(self.account.positions(), [])
+        self.assertEqual(self.account.account_snapshot()["availableEquityUSD"], 5000)
+        expired = self.account.all_orders()[0]
+        self.assertEqual(expired["status"], "expired")
+        self.assertEqual(expired["expiresAt"], deadline)
+        event = next(event for event in self.account.audit() if event["type"] == "order-expired")
+        self.assertEqual(event["orderID"], expired["id"])
+        self.assertEqual(event["reason"], "ai_entry_expired")
+
+        self.account = self.make_account()
+        self.assertEqual(self.account.all_orders()[0]["status"], "expired")
+        self.assertEqual(self.account.account_snapshot()["availableEquityUSD"], 5000)
+
+    async def test_ai_limit_expiry_is_reaped_by_read_projection(self):
+        deadline = (self.now + timedelta(seconds=30)).timestamp()
+        await self.submit(
+            source="ai", _aiEntryDeadline=deadline, orderType="limit", price=90,
+            clientOrderID="read-expiring-ai",
+        )
+        self.now += timedelta(seconds=31)
+
+        # Quote refresh can be unavailable while an API read still needs to
+        # release stale reservations.  The account projection is therefore
+        # responsible for reaping the expired order and persisting the state.
+        snapshot = self.account.account_snapshot()
+        self.assertEqual(snapshot["pendingOrders"], [])
+        self.assertEqual(snapshot["availableEquityUSD"], 5000)
+        self.assertEqual(self.account.all_orders()[0]["status"], "expired")
+        persisted = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["orders"][0]["status"], "expired")
+
+    async def test_legacy_entry_without_expiry_remains_matchable(self):
+        deadline = (self.now + timedelta(seconds=30)).timestamp()
+        await self.submit(source="ai", _aiEntryDeadline=deadline, orderType="limit", price=90, clientOrderID="legacy-ai")
+        state = json.loads(self.path.read_text(encoding="utf-8"))
+        state["orders"][0].pop("expiresAt", None)
+        self.path.write_text(json.dumps(state), encoding="utf-8")
+        self.now += timedelta(days=1)
+        self.account = self.make_account()
+        await self.account.mark(BTC, 89)
+        self.assertEqual(self.account.positions()[0]["side"], "long")
+
     async def test_ai_reentry_cooldown_survives_restart_but_manual_entry_is_allowed(self):
         self.account = self.make_account(
             stop_loss_cooldown_seconds=3600,
@@ -393,6 +449,44 @@ class PaperTradingTests(unittest.IsolatedAsyncioTestCase):
         for invalid in (0, -1, 100, 250):
             with self.subTest(invalid=invalid), self.assertRaises(PaperTradingError):
                 self.make_account(max_daily_loss_percent=invalid)
+
+    async def test_cumulative_drawdown_breaker_is_configurable(self) -> None:
+        self.account = self.make_account(
+            fee_rate=0, slippage_bps=0, max_daily_loss_percent=20,
+            max_drawdown_percent=5,
+        )
+        await self.submit(quantity=50, leverage=2)
+        await self.account.mark(BTC, 94)
+        risk = self.account.risk_snapshot()
+        self.assertEqual(risk["maxDrawdownPercent"], 5)
+        self.assertTrue(risk["killSwitch"])
+        self.assertIn("回撤", risk["reason"])
+
+    async def test_ai_performance_breaker_is_enforced_by_paper_execution(self) -> None:
+        self.account = self.make_account(
+            fee_rate=0, slippage_bps=0, max_daily_loss_percent=20,
+            max_drawdown_percent=0,
+        )
+        for index in range(20):
+            await self.submit(
+                quantity=1, leverage=1, price=100,
+                strategyID="codex", clientOrderID=f"perf-entry-{index}",
+            )
+            await self.submit(
+                side="sell", quantity=1, reduceOnly=True, price=99,
+                strategyID="codex", clientOrderID=f"perf-close-{index}",
+            )
+        performance = self.account.account_snapshot()["strategyPerformance"]
+        self.assertEqual(performance["closedTradeCount"], 20)
+        self.assertLess(performance["realizedPnLUSD"], 0)
+        deadline = (self.now + timedelta(minutes=5)).timestamp()
+        with self.assertRaisesRegex(PaperTradingError, "performance circuit breaker"):
+            await self.submit(
+                source="ai", strategyID="codex", _aiEntryDeadline=deadline,
+                clientOrderID="performance-blocked",
+            )
+        self.assertEqual(self.account.pending_orders(), [])
+        self.assertEqual(self.account.audit()[-1]["reason"], "strategy_performance_circuit_breaker")
 
     async def test_account_breaker_cancels_entries_and_flattens_positions(self):
         self.account = self.make_account(fee_rate=0, slippage_bps=0)

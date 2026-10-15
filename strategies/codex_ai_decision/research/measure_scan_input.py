@@ -33,10 +33,13 @@ class UsageRunner(CodexRunner):
     def __init__(self):
         super().__init__()
         self.usage_events = []
-        self.prompt = ""
+        # Grouped workflow invokes one prompt per analysis group and then a
+        # coordinator prompt. Keep every provider prompt so this measurement
+        # remains correct when the default changes from the legacy single call.
+        self.prompts = []
 
     async def _run_prompt(self, prompt, schema, config, *, deadline=None):
-        self.prompt = prompt
+        self.prompts.append(prompt)
         return await super()._run_prompt(prompt, schema, config, deadline=deadline)
 
     def _extract_agent_text(self, output):
@@ -103,24 +106,42 @@ async def measure():
         finally:
             await main.OKX_HTTP_CLIENT.aclose()
 
-        actual_prompt = runner.prompt or prompt
-        prompt_bytes = actual_prompt.encode("utf-8")
-        encoded = json.loads(actual_prompt.split("\nSNAPSHOT:\n", 1)[1])
+        provider_prompts = list(runner.prompts)
+        # Analysis-group prompts contain a full SNAPSHOT; the coordinator
+        # prompt contains reports only. Use the former for candle accounting
+        # and fall back to the locally generated prompt if the provider failed
+        # before making an analysis call.
+        snapshot_prompts = [item for item in provider_prompts if "\nSNAPSHOT:\n" in item]
+        encoded_snapshots = []
+        for item in snapshot_prompts:
+            try:
+                encoded_snapshots.append(json.loads(item.split("\nSNAPSHOT:\n", 1)[1]))
+            except (IndexError, json.JSONDecodeError):
+                continue
+        if not encoded_snapshots:
+            encoded_snapshots = [json.loads(prompt.split("\nSNAPSHOT:\n", 1)[1])]
+        prompt_bytes_by_call = [len(item.encode("utf-8")) for item in provider_prompts]
+        if not prompt_bytes_by_call:
+            prompt_bytes_by_call = [len(prompt.encode("utf-8"))]
+        prompt_bytes = sum(prompt_bytes_by_call)
         candle_counts = {}
-        for key, series in encoded["candles"].items():
-            interval = key.rsplit("/", 1)[-1]
-            candle_counts[interval] = candle_counts.get(interval, 0) + len(series.get("rows", []) if isinstance(series, dict) else series)
+        for encoded in encoded_snapshots:
+            for key, series in encoded.get("candles", {}).items():
+                interval = key.rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+                candle_counts[interval] = candle_counts.get(interval, 0) + len(series.get("rows", []) if isinstance(series, dict) else series)
         local_time = datetime.fromisoformat(snapshot.capturedAt.replace("Z", "+00:00")).astimezone(__import__("zoneinfo").ZoneInfo("Asia/Shanghai"))
         return {
             "measuredAtAsiaShanghai": local_time.isoformat(timespec="seconds"),
             "snapshotId": snapshot.snapshotId, "model": config.routineModel,
-            "reasoningEffort": config.routineReasoningEffort, "workflow": "single",
+            "reasoningEffort": config.routineReasoningEffort, "workflow": config.analysisWorkflow,
             "instrumentCount": len(snapshot.observed_instruments()),
             "runtimeCandleSeriesCount": len(snapshot.candles), "promptCandleRowCounts": candle_counts,
-            "promptEncoding": "compact20", "promptBytes": len(prompt_bytes),
-            "promptSHA256": hashlib.sha256(prompt_bytes).hexdigest(),
-            "snapshotComponentBytes": {key: len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-                                       for key, value in encoded.items()},
+            "promptEncoding": "compact20", "promptBytes": prompt_bytes,
+            "promptBytesByCall": prompt_bytes_by_call,
+            "providerPromptCount": len(provider_prompts),
+            "promptSHA256": hashlib.sha256("\n".join(provider_prompts).encode("utf-8")).hexdigest(),
+            "snapshotComponentBytes": {key: sum(len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                                           for encoded in encoded_snapshots for key, value in encoded.items())},
             "usageSource": "Codex CLI turn.completed.usage",
             "usageEvents": runner.usage_events,
             "inputTokens": sum(event["input_tokens"] for event in runner.usage_events) if runner.usage_events and all("input_tokens" in event for event in runner.usage_events) else None,
@@ -128,7 +149,7 @@ async def measure():
             "outputTokens": sum(event["output_tokens"] for event in runner.usage_events) if runner.usage_events and all("output_tokens" in event for event in runner.usage_events) else None,
             "assessmentCount": assessment_count, "analysisErrorClass": error,
             "orderExecutionInvoked": False,
-            "tokenScope": "Provider-reported CLI turn input, including CLI context/schema; cached tokens are a subset of input tokens",
+            "tokenScope": "Provider-reported CLI turn input across grouped analysis/coordinator calls, including CLI context/schema; cached tokens are a subset of input tokens",
         }
 
 

@@ -32,7 +32,7 @@ from typing import Any, Protocol
 
 try:
     from .ai_entry_preflight import EntryPreflightRejected, ENTRY_PREFLIGHT_LIMITS
-    from .ai_market_facts import market_facts, primary_entry_quality
+    from .ai_market_facts import entry_structure_quality, market_facts, primary_entry_quality
     from .ai_trigger import decision_fingerprint, managed_state, structure_identity, trigger_reason
     from .ai_policy import (
         MIN_EXIT_REASON_LENGTH,
@@ -46,14 +46,14 @@ try:
         DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
         PREVIOUS_DEFAULT_CLI_TIMEOUT_SECONDS,
         DEFAULT_DECISION_INTERVAL_SECONDS, LEGACY_DEFAULT_DECISION_INTERVALS,
-        FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT,
+        FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT, ALLOWED_OPEN_DIRECTIONS,
         PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PROTECTION_ANALYSIS_INTERVALS,
         ai_chat_json_schema, decision_json_schema, dumps, normalize_ai_chat_patch,
         normalize_contract_ids,
     )
 except ImportError:  # launched from bundled backend/main.py as a script
     from ai_entry_preflight import EntryPreflightRejected, ENTRY_PREFLIGHT_LIMITS
-    from ai_market_facts import market_facts, primary_entry_quality
+    from ai_market_facts import entry_structure_quality, market_facts, primary_entry_quality
     from ai_trigger import decision_fingerprint, managed_state, structure_identity, trigger_reason
     from ai_policy import (
         MIN_EXIT_REASON_LENGTH,
@@ -67,7 +67,7 @@ except ImportError:  # launched from bundled backend/main.py as a script
         DEFAULT_CLI_TIMEOUT_SECONDS, LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS,
         PREVIOUS_DEFAULT_CLI_TIMEOUT_SECONDS,
         DEFAULT_DECISION_INTERVAL_SECONDS, LEGACY_DEFAULT_DECISION_INTERVALS,
-        FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT,
+        FIXED_AI_MODEL, FIXED_AI_REASONING_EFFORT, ALLOWED_OPEN_DIRECTIONS,
         PRIMARY_ENTRY_INTERVAL, MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES, PROTECTION_ANALYSIS_INTERVALS,
         ai_chat_json_schema, decision_json_schema, dumps, normalize_ai_chat_patch,
         normalize_contract_ids,
@@ -104,10 +104,15 @@ PRICE_PLAN_POLICY = "market_structure_before_entry_gates"
 # The analysis and coordinator prompts share one policy contract.
 _SHARED_POLICY_RULES = (
     "DECISION POLICY (follow these four groups in order):\n"
+    "SHORT-ONLY OPENING: New entries may only use action=open with direction=short. Never open a long. "
+    "When evaluating a new entry, a bullish market or no qualified short means hold instead of opening; "
+    "this does not prevent required close, cancel or protection actions. Mark any long entry plan entryEligible=false "
+    "and include the short-only restriction in unmetConditions. Existing long positions must still receive accurate "
+    "long-direction protection assessments and may be closed; buying to reduce a short and cancellation remain allowed. "
     "1. DATA CONTRACT AND QUALITY: Preserve the fixed observed contract pool and maintain exactly one assessment per contract. "
     "Assess contracts independently; a missing resource for one contract does not erase complete data for another. "
     "Use SERVER MARKET FACTS as measured summaries and do not recompute their arithmetic. "
-    "Prioritize complete raw candles from 15m OHLCV for entry timing, candle bodies/wicks and volume; preserve complete 1H/4H history for protection planning. "
+    "Use complete raw candles and raw confirmed 4H OHLCV as the primary entry structure and direction; use 15m OHLCV for entry timing, candle bodies/wicks and volume; preserve complete 1H/4H history for protection planning. "
     "Inspect the complete raw confirmed 4H OHLC history when it is supplied; do not replace it with a short-term proxy or hide execution/risk ambiguity. "
     "PRICE PLANNING BEFORE ELIGIBILITY: First independently choose each contract's defensible entry, structural invalidation stop "
     "and realistic take-profit from observed support/resistance, swing levels, liquidity or other concrete market evidence. "
@@ -122,17 +127,17 @@ _SHARED_POLICY_RULES = (
     "For a long plan use stopLossPrice < entry < takeProfitPrice; for a short plan use takeProfitPrice < entry < stopLossPrice. "
     "winRate is a subjective estimate for this conditional plan, not a verified historical success rate; confidence is confidence in the returned action. "
     "Use confirmed=true candles for closed-candle signals; a forming candle is context, not a closed-candle confirmation. "
-    f"PRIMARY ENTRY ANALYSIS: prioritize {PRIMARY_ENTRY_INTERVAL} OHLCV for BOTH long and short plans. "
+    f"PRIMARY ENTRY ANALYSIS: prioritize {PRIMARY_ENTRY_INTERVAL} OHLCV for short entries and existing-position management. "
     "Choose direction holistically using price structure, volume, funding, long/short account ratio, open interest, "
     "taker flow, volatility, RSI, rolling VWAP, liquidity, BTC/ETH context, market sentiment and Federal Reserve policy news. "
-    "There is no 4H trend-direction gate or 20-bar history requirement; intervals may disagree without an automatic direction veto. "
+    "A new short is allowed only when the measured 4H trend is bearish (latest close below SMA20 and negative 12-bar return). Bullish, mixed, missing, malformed or insufficient 4H data blocks opening while management actions remain available. "
     "PROTECTION PRICE BASIS: use BOTH confirmed 1H and 4H market structure to assess stop-loss, take-profit and every staged target, "
     "for new plans and existing positions. Explain each timeframe's support/resistance, swing levels, volatility, structural "
     "invalidation and realistic profit objectives in reason. 5m and 15m refine entry timing only; they must not be the sole "
     "basis for tight stops or nearby profit targets. If either hourly timeframe lacks defensible evidence, mark new plans "
     "entryEligible=false, explain missing evidence and keep existing valid protection; never invent hourly structure or fall "
     "back to a short-term-only protection plan. Do not impose a fixed stop width or holding period. "
-    f"Only {MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES} valid confirmed {PRIMARY_ENTRY_INTERVAL} candle is required for data integrity; "
+    f"At least {MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES} valid confirmed {PRIMARY_ENTRY_INTERVAL} candles are required before any new entry; "
     "insufficient indicator windows yield null, not an automatic rejection. "
     "Find conditional buy/sell points; no indicator independently mandates a trade. "
     "In each assessment explain the combined evidence, proposed entry conditions, and the invalidation level. "
@@ -149,7 +154,7 @@ _SHARED_POLICY_RULES = (
     "Use hold for an absent or blocked entry candidate, but do not let an entry block erase analysis or management actions. "
     "Select at most one contract and one action per round. Copy the selected assessment's direction, quality values, protection "
     "levels, and limitPrice exactly into an open decision. Every AI open must be a resting limit order: use orderType=limit, "
-    "set limitPrice below the current market for longs or above it for shorts, and never use a market order. The finalEntryPreflight "
+    "set the short entry limitPrice above the current market, and never use a market order. The finalEntryPreflight "
     "checks fresh ticker, order book and mark price immediately before submission; evaluate net reward/risk of the fixed plan "
     "after its fee and slippage budget. If net reward/risk is insufficient, block entry without changing the planned prices. "
     "A changed market does not change the submitted limit price.\n"
@@ -272,8 +277,45 @@ class CodexRunner:
     """Invoke an isolated Codex CLI subprocess for one snapshot."""
 
     def __init__(self, executable: str | None = None) -> None:
-        self.executable = executable or os.getenv("NOVATRADE_CODEX_BIN", "codex")
+        self.executable = executable if executable is not None else self._discover_executable()
         self.last_run_metadata: dict[str, Any] = {}
+
+    @staticmethod
+    def _discover_executable() -> str:
+        """Find Codex when NovaTrade is launched outside an interactive shell.
+
+        Finder-launched macOS apps commonly receive a short PATH that omits
+        version-manager bins. An explicit ``NOVATRADE_CODEX_BIN`` remains
+        authoritative; otherwise search the inherited PATH plus the common
+        Homebrew, npm-global, and versioned local Node locations.
+        """
+        configured = os.getenv("NOVATRADE_CODEX_BIN")
+        if configured:
+            return configured
+
+        home = Path.home()
+        candidates = [
+            *(Path(entry) / "codex" for entry in os.getenv("PATH", "").split(os.pathsep) if entry),
+            Path("/opt/homebrew/bin/codex"),
+            Path("/usr/local/bin/codex"),
+            home / ".npm-global/bin/codex",
+            home / ".local/bin/codex",
+            Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/codex"),
+            Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
+        ]
+        local_node_root = home / ".local"
+        try:
+            candidates.extend(
+                entry / "bin/codex"
+                for entry in local_node_root.iterdir()
+                if entry.is_dir() and entry.name.startswith("node-")
+            )
+        except OSError:
+            pass
+        for candidate in candidates:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        return "codex"
 
     @staticmethod
     def _validate_override(model: str, reasoning_effort: str) -> None:
@@ -422,13 +464,19 @@ class CodexRunner:
         return codex_home
 
     @staticmethod
-    def _safe_environment(workdir: str) -> dict[str, str]:
+    def _safe_environment(workdir: str, executable: str | None = None) -> dict[str, str]:
         # An allowlist prevents future credentials added to the parent process
         # from silently becoming available to the model.
         codex_home = CodexRunner._prepare_codex_home(workdir)
-        path = os.environ.get("PATH", "/usr/bin:/bin")
+        path_entries = os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep)
+        if executable:
+            executable_path = Path(executable).expanduser()
+            if executable_path.is_absolute():
+                executable_directory = str(executable_path.parent)
+                if executable_directory not in path_entries:
+                    path_entries.insert(0, executable_directory)
         return {
-            "PATH": path,
+            "PATH": os.pathsep.join(path_entries),
             "HOME": workdir,
             "TMPDIR": workdir,
             "LANG": "C.UTF-8",
@@ -545,7 +593,7 @@ class CodexRunner:
             try:
                 process = await asyncio.create_subprocess_exec(
                     *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE, env=self._safe_environment(workdir), cwd=workdir,
+                    stderr=asyncio.subprocess.PIPE, env=self._safe_environment(workdir, self.executable), cwd=workdir,
                     start_new_session=True,
                 )
                 try:
@@ -641,7 +689,14 @@ class CodexRunner:
         semaphore = asyncio.Semaphore(4)
         clock = asyncio.get_running_loop()
         analysis_started = clock.time()
-        analysis_budget = min(config.cliTimeoutSeconds, max(0.0, deadline - analysis_started))
+        # Reserve half of the total pipeline budget for the coordinator.  A
+        # fresh snapshot may bound the total below two full CLI allowances;
+        # consuming it all in parallel group calls would leave no time to make
+        # the final decision.
+        analysis_budget = min(
+            config.cliTimeoutSeconds,
+            max(0.0, (deadline - analysis_started) * 0.5),
+        )
         analysis_deadline = analysis_started + analysis_budget
         self.last_run_metadata.update(
             stage="analysis", groupCount=len(groups), completedGroups=0,
@@ -728,16 +783,16 @@ class CodexRunner:
     async def run(self, snapshot: AISnapshot, config: AIConfig) -> AIDecision:
         clock = asyncio.get_running_loop()
         started = clock.time()
-        # Send the complete observation pool in one prompt. The model call may
-        # outlive the snapshot admission window when the observation pool is
-        # large. That is safe: validate_decision() rejects stale ``open``
-        # intents, while a late hold can still record the worker's state and
-        # keep existing protection unchanged. Bounding the subprocess itself
-        # to snapshotMaxAgeSeconds turned large, valid scans into recurring
-        # timeout errors without changing the fail-closed execution gate.
-        pipeline_budget = config.cliTimeoutSeconds + config.snapshotMaxAgeSeconds
+        # Grouped analysis gets two bounded phases (parallel group reports and
+        # a final coordinator). ``single`` remains available as an operator
+        # override for environments where one provider call is preferable.
+        grouped = config.analysisWorkflow == "grouped"
+        pipeline_budget = (
+            _grouped_pipeline_budget_seconds(snapshot, config)
+            if grouped else config.cliTimeoutSeconds + config.snapshotMaxAgeSeconds
+        )
         self.last_run_metadata = {
-            "workflow": "single", "stage": "starting",
+            "workflow": "grouped" if grouped else "single", "stage": "starting",
             "observedCount": len(snapshot.observed_instruments()), "groupCount": 0,
             "completedGroups": 0, "assessmentCount": 0,
             # Configured per-CLI ceilings.
@@ -748,6 +803,14 @@ class CodexRunner:
             "pipelineBudgetSeconds": round(pipeline_budget, 3),
         }
         try:
+            if grouped:
+                decision = await self._run_grouped(snapshot, config, deadline=started + pipeline_budget)
+                self.last_run_metadata.update(
+                    completedGroups=self.last_run_metadata.get("completedGroups", 0),
+                    assessmentCount=len(decision.assessments),
+                )
+                self.last_run_metadata["stage"] = "complete"
+                return decision
             # Preserve the whole-pool budget guard before the CLI starts.
             prompt = self._decision_prompt(snapshot, config, encoding="compact20")
             self._check_prompt_budget(prompt)
@@ -769,10 +832,16 @@ class CodexRunner:
     @staticmethod
     def _entry_gates(snapshot: AISnapshot, config: AIConfig) -> dict[str, Any]:
         return {
+            "allowedOpenDirections": list(ALLOWED_OPEN_DIRECTIONS),
+            "analysisWorkflow": config.analysisWorkflow,
             "primaryEntryInterval": PRIMARY_ENTRY_INTERVAL,
             "minimumPrimaryConfirmedCandles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
             "primaryEntryQuality": {
                 instrument: primary_entry_quality(snapshot, instrument)
+                for instrument in snapshot.observed_instruments()
+            },
+            "entryStructureQuality": {
+                instrument: entry_structure_quality(snapshot, instrument)
                 for instrument in snapshot.observed_instruments()
             },
             "minimumConfidence": config.minimumConfidence,
@@ -788,6 +857,7 @@ class CodexRunner:
             "allowCancel": config.allowCancel,
             "requireStopLoss": config.requireStopLoss,
             "maxLeverage": config.maxLeverage,
+            "riskPerTradePercent": config.riskPerTradePercent,
             "marginPerOrderUSD": config.marginPerOrderUSD,
             "maxDailyOrders": config.maxDailyOrders,
             "maxDailyLosses": config.maxDailyLosses,
@@ -812,7 +882,7 @@ class CodexRunner:
         if selected_encoding in {"compact20", "compact10"}:
             limit = 20 if selected_encoding == "compact20" else 10
             candle_encoding_note = (
-                f"SNAPSHOT preserves all collected {PRIMARY_ENTRY_INTERVAL}, 1H and 4H rows (up to 60 per interval), including forming context. "
+                f"SNAPSHOT preserves all collected {PRIMARY_ENTRY_INTERVAL} and 1H rows (up to 60 per interval), including forming context. "
                 f"5m auxiliary candle series contain the latest {limit} confirmed rows plus the latest forming row when present; "
                 "the local SERVER MARKET FACTS still use the complete collected history. "
             )
@@ -830,8 +900,9 @@ class CodexRunner:
             "long/short/neutral direction, limitPrice, stopLossPrice, takeProfitPrice, optional one-to-four "
             "takeProfitLevels whose percentages sum to 100, winRate, riskRewardRatio, confidence, entryEligible, "
             "unmetConditions, and a specific concise Simplified Chinese reason. These are conditional plans, not placed orders. "
-            "For adequate data, compare the strongest long and short scenarios and retain a directional conditional plan even "
-            "when it is not ready to trade. Use neutral/null values only when data is genuinely unavailable or no defensible estimate exists. "
+            "For adequate data, evaluate the strongest short entry scenario and retain a conditional plan even "
+            "when it is not ready to trade. Use the actual direction when assessing existing-position protection. "
+            "Long entry plans are never eligible. Use neutral/null values only when data is genuinely unavailable or no defensible estimate exists. "
             "Do not inflate quality values to pass gates; list only the main blockers. "
             + candle_encoding_note
             + "Reconstruct columns/rows by pairing columns with row values; heterogeneous rows remain objects. "
@@ -883,7 +954,7 @@ class CodexRunner:
             try:
                 process = await asyncio.create_subprocess_exec(
                     *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE, env=self._safe_environment(workdir), cwd=workdir,
+                    stderr=asyncio.subprocess.PIPE, env=self._safe_environment(workdir, self.executable), cwd=workdir,
                     start_new_session=True,
                 )
                 try:
@@ -1563,10 +1634,9 @@ class AIWorker:
             # gateway uses that cycle to reconcile existing positions and
             # restore missing protection; it must not be treated as a no-op.
             should_reconcile = (
-                result.accepted
-                and self.order_gateway is not None
+                self.order_gateway is not None
                 and self.config.mode != "shadow"
-                and (result.decision.action != "hold" or managed_state(parsed_snapshot))
+                and ((result.accepted and result.decision.action != "hold") or managed_state(parsed_snapshot))
             )
             if should_reconcile:
                 try:

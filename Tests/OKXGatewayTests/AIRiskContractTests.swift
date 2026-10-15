@@ -38,6 +38,7 @@ func aiRiskLegacyConfigurationRetiredFields() throws {
     #expect(config.minimumConfidence == 0.83)
     #expect(config.decisionIntervalSeconds == 45.5)
     #expect(config.maxDailyLosses == 3)
+    #expect(config.riskPerTradePercent == 0.5)
     #expect(config.marginPerOrderUSD == 250)
     let encoded = try riskContractObject(config)
     for retiredKey in ["cooldownSeconds", "escalationModel", "escalationReasoningEffort"] {
@@ -56,6 +57,7 @@ func aiRiskConfigurationDefaults() throws {
     #expect(config.stopLossCooldownSeconds == 14_400)
     #expect(config.recentStopLossWindowSeconds == 3_600)
     #expect(config.recentStopLossLimit == 2)
+    #expect(config.riskPerTradePercent == 0.5)
     #expect(config.requireStopLoss)
     #expect(config == AIConfig(strategyID: .codex, provider: .codex))
     let expected = try riskContractObject("""
@@ -65,7 +67,8 @@ func aiRiskConfigurationDefaults() throws {
      "snapshotMaxAgeSeconds":90, "maxOutputBytes":1000000,
      "maxConsecutiveFailures":3, "allowOpen":true, "allowClose":true,
      "allowCancel":true, "requireStopLoss":true, "maxDailyOrders":20,
-     "maxDailyLosses":5, "marginPerOrderUSD":500, "maxLeverage":5,
+     "maxDailyLosses":5, "riskPerTradePercent":0.5,
+     "marginPerOrderUSD":500, "maxLeverage":5,
      "stopLossCooldownSeconds":14400, "recentStopLossWindowSeconds":3600,
      "recentStopLossLimit":2}
     """)

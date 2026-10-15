@@ -262,11 +262,17 @@ def main() -> int:
         fail(errors, "后端未在启用策略时校验资金池与固定熔断阈值")
     if "maxCapitalPoolPercent" not in domain or "maxCapitalPoolPercent" not in service_source:
         fail(errors, "领域层和后端未同步策略资金池安全上限")
+    # This validator covers the Swift ``sweep_reversal_short`` contract.  Its
+    # cumulative, historical-peak breaker intentionally remains disabled
+    # because that strategy cannot reset it.  The separate 10% paper-account
+    # peak-drawdown latch for the Codex AI worker lives in
+    # ``backend.paper_trading`` and is validated by the paper-mode tests; it
+    # must not be confused with this Swift strategy-level RiskLimits default.
     limits_default = re.search(r"maxDailyLossPercent:\s*Decimal\s*=\s*([0-9.]+),\s*maxDrawdownPercent:\s*Decimal\s*=\s*([0-9.]+)\)", domain)
     if not limits_default or float(limits_default.group(1)) != ACCOUNT_DAILY_LOSS_PCT:
         fail(errors, f"RiskLimits 默认日损熔断与实验室 {ACCOUNT_DAILY_LOSS_PCT:g}% 不一致")
     if limits_default and float(limits_default.group(2)) != 0:
-        fail(errors, "RiskLimits 默认累计回撤熔断必须关闭（无法复位）")
+        fail(errors, "sweep_reversal_short 的 Swift RiskLimits 累计回撤熔断必须关闭（无法复位）")
     if "if strategyID == nil {" not in (ROOT / "Sources" / "TradingService" / "PaperTrading.swift").read_text():
         fail(errors, "风控引擎未把账户级名义/保证金上限限定为非策略订单")
     if "enforceGlobalRiskIfNeeded" not in service_source or "closeDemoPosition" not in service_source:

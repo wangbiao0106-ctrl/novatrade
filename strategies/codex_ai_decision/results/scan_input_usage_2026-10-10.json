@@ -1,5 +1,8 @@
 {
   "measuredAtAsiaShanghai": "2026-10-10T00:22:25+08:00",
+  "historical": true,
+  "strategyVersion": "1.8",
+  "measurementNote": "Legacy single-workflow measurement retained as an input-size baseline; it is not the v1.9 grouped default.",
   "snapshotId": "d1fca2809893c121ce8198ad0961026a",
   "model": "gpt-6-luna",
   "reasoningEffort": "medium",

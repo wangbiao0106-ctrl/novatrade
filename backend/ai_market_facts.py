@@ -20,7 +20,7 @@ _INTERVALS = ("15m", "5m", "1H", "4H")
 _METHODOLOGY = {
     "primaryEntryInterval": PRIMARY_ENTRY_INTERVAL,
     "primaryEntryMinimumConfirmedCandles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
-    "entryAnalysis": "Prioritize 15m OHLCV for entry timing and judge direction holistically; no 4H direction gate. Stop-loss and take-profit use both confirmed 1H and 4H structure, not short-term noise.",
+    "entryAnalysis": "Use confirmed 4H OHLCV as the primary entry structure and direction gate; 15m OHLCV refines entry timing. Longs require a bullish 4H trend and shorts a bearish 4H trend. Stop-loss and take-profit use both confirmed 1H and 4H structure, not short-term noise.",
     "protectionAnalysisIntervals": list(PROTECTION_ANALYSIS_INTERVALS),
     "candleScope": "Only confirmed=true candles, in supplied oldest-to-newest order. Invalid OHLC breaks the usable trailing segment; forming candles are excluded.",
     "returnsPercent": "(latest close / close N confirmed bars earlier - 1) * 100; N+1 usable bars required.",
@@ -243,8 +243,60 @@ def _primary_entry_quality(facts: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _entry_structure_quality(
+    facts: Mapping[str, Any], *, direction: str | None = None,
+) -> dict[str, Any]:
+    """Gate new entries on confirmed 4H history and its direction.
+
+    The direction test deliberately requires both the latest close relative to
+    SMA20 and the 12-bar return to agree.  A missing or mixed signal is
+    reported as ``neutral`` and fails closed for an opening intent.
+    """
+    count = facts.get("usableTrailingConfirmedRowCount", 0)
+    close = facts.get("lastConfirmedClose")
+    sma20 = facts.get("sma20")
+    return12 = facts.get("return12BarPercent")
+    trend = "neutral"
+    if all(isinstance(value, (int, float)) and math.isfinite(float(value))
+           for value in (close, sma20, return12)):
+        if close > sma20 and return12 > 0:
+            trend = "bullish"
+        elif close < sma20 and return12 < 0:
+            trend = "bearish"
+    enough = isinstance(count, int) and count >= MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES
+    direction_ok = (
+        trend in {"bullish", "bearish"} if direction in (None, "neutral") else
+        (direction == "long" and trend == "bullish") or
+        (direction == "short" and trend == "bearish")
+    )
+    can_open = enough and direction_ok
+    if not enough:
+        error = (
+            f"{PRIMARY_ENTRY_INTERVAL} requires at least {MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES} "
+            f"valid confirmed OHLC candles; usable trailing history is {count}"
+        )
+    elif direction not in (None, "neutral") and not direction_ok:
+        error = f"4H trend is {trend}; {direction} entry is against the higher-timeframe direction"
+    elif direction in (None, "neutral") and trend == "neutral":
+        error = "4H trend direction is unavailable or mixed"
+    else:
+        error = None
+    return {
+        "interval": PRIMARY_ENTRY_INTERVAL,
+        "minimumConfirmedCandles": MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES,
+        "usableTrailingConfirmedRowCount": count,
+        "latestClose": close,
+        "sma20": sma20,
+        "return12BarPercent": return12,
+        "trendDirection": trend,
+        "direction": direction,
+        "canOpen": can_open,
+        "error": error,
+    }
+
+
 def primary_entry_quality(snapshot: AISnapshot, instrument_id: str) -> dict[str, Any]:
-    """Share minimal 15m data integrity between prompts and policy.
+    """Share 4H data integrity between prompts and policy.
 
     Confirmation and OHLC validity use the same trailing-segment arithmetic as
     the market summaries. This gate never chooses a direction or restricts
@@ -252,6 +304,14 @@ def primary_entry_quality(snapshot: AISnapshot, instrument_id: str) -> dict[str,
     """
     rows = snapshot.candles.get(f"{instrument_id}/{PRIMARY_ENTRY_INTERVAL}") if isinstance(snapshot.candles, Mapping) else None
     return _primary_entry_quality(_candles(rows))
+
+
+def entry_structure_quality(
+    snapshot: AISnapshot, instrument_id: str, direction: str | None = None,
+) -> dict[str, Any]:
+    """Return the shared high-timeframe entry gate for one instrument."""
+    rows = snapshot.candles.get(f"{instrument_id}/{PRIMARY_ENTRY_INTERVAL}") if isinstance(snapshot.candles, Mapping) else None
+    return _entry_structure_quality(_candles(rows), direction=direction)
 
 
 def market_facts(snapshot: AISnapshot) -> dict[str, Any]:
@@ -269,6 +329,7 @@ def market_facts(snapshot: AISnapshot) -> dict[str, Any]:
             },
             "timeframes": timeframes,
             "primaryEntryQuality": _primary_entry_quality(timeframes[PRIMARY_ENTRY_INTERVAL]),
+            "entryStructureQuality": _entry_structure_quality(timeframes[PRIMARY_ENTRY_INTERVAL]),
             "derivatives": snapshot.derivatives.get(instrument, {}),
         }
     return {"methodology": dict(_METHODOLOGY), "instruments": instruments}

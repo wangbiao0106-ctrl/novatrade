@@ -20,9 +20,13 @@ Direction = Literal["long", "short"]
 OrderType = Literal["market", "limit"]
 RunMode = Literal["disabled", "shadow", "paper-active", "demo-active", "live-armed", "halted"]
 AIProvider = Literal["codex"]
+AnalysisWorkflow = Literal["grouped", "single"]
 _CONTRACT_ID_RE = re.compile(r"^[A-Z0-9]+-USDT-SWAP$")
 FIXED_AI_MODEL = "gpt-6-luna"
 FIXED_AI_REASONING_EFFORT = "medium"
+# Codex strategy v1.10: restrict new exposure without changing the directions
+# used to describe and close existing positions.
+ALLOWED_OPEN_DIRECTIONS: tuple[Direction, ...] = ("short",)
 # A losing stop should not be followed immediately by a fresh signal on the
 # same contract. These defaults are deliberately long enough to require a
 # new market structure rather than a fast reversal re-entry.
@@ -37,19 +41,22 @@ DEFAULT_RECENT_STOP_LOSS_LIMIT = 2
 # Scan starts follow a five-minute cadence; collection and inference consume
 # part of that period rather than extending it.
 DEFAULT_DECISION_INTERVAL_SECONDS = 300.0
-LEGACY_DEFAULT_DECISION_INTERVALS = (30.0, 600.0, 900.0)
-PRIMARY_ENTRY_INTERVAL = "15m"
+LEGACY_DEFAULT_DECISION_INTERVALS = (30.0, 900.0)
+# Entry direction is anchored to the higher timeframe.  Shorter intervals
+# remain useful for timing, but cannot authorize a counter-trend opening.
+PRIMARY_ENTRY_INTERVAL = "4H"
 PROTECTION_ANALYSIS_INTERVALS = ("1H", "4H")
 # Minimal data integrity only; indicator window sizes are not entry gates.
-MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES = 1
+MIN_PRIMARY_ENTRY_CONFIRMED_CANDLES = 20
 # Fixed account-level daily-loss circuit breaker as a percentage of the UTC
 # day-start equity. This is a safety boundary, not a per-strategy parameter:
 # the research allocation ceilings are derived from the same 5% (see
 # scripts/validate_strategy_sync.py and Sources/TradingDomain/Domain.swift).
 # Every layer that gates entries imports this one constant.
 ACCOUNT_DAILY_LOSS_PERCENT = 5.0
-# The complete observation pool is sent in one request. Keep enough wall-clock
-# budget for provider queueing and model processing across all contracts.
+# Grouped analysis uses parallel group requests plus a coordinator; the single
+# workflow override sends the complete observation pool in one request. Keep
+# enough wall-clock budget for provider queueing and model processing.
 DEFAULT_CLI_TIMEOUT_SECONDS = 180.0
 LEGACY_DEFAULT_CLI_TIMEOUT_SECONDS = 45.0
 # 90 seconds was the immediately previous default. It is migrated alongside
@@ -481,6 +488,10 @@ _CONFIG_NUMBER_BOUNDS: dict[str, tuple[float | None, float | None]] = {
     # what ``allowOpen=false`` already expresses. Require a usable cap instead.
     "maxDailyLosses": (1, 10000),
     "marginPerOrderUSD": (0.01, 1_000_000),
+    # Maximum account equity risk allocated to one AI entry, expressed as a
+    # percentage.  Position size is derived from this budget and the proposed
+    # stop distance; the legacy margin budget remains a separate upper cap.
+    "riskPerTradePercent": (0.01, 5),
     "maxLeverage": (1, 125),
     "stopLossCooldownSeconds": (0, 7 * 24 * 60 * 60),
     "recentStopLossWindowSeconds": (1, 7 * 24 * 60 * 60),
@@ -512,6 +523,10 @@ class AIConfig:
     # apply to entries; reduce-only exits remain available.
     maxDailyOrders: int = 20
     maxDailyLosses: int = 5
+    # AI entries size against the stop distance so a wide stop cannot consume
+    # the same dollar risk as a tight one.  This is deliberately independent
+    # from marginPerOrderUSD, which is retained as a margin ceiling.
+    riskPerTradePercent: float = 0.5
     marginPerOrderUSD: float = 500.0
     maxLeverage: float = 5.0
     stopLossCooldownSeconds: float = DEFAULT_STOP_LOSS_COOLDOWN_SECONDS
@@ -522,6 +537,10 @@ class AIConfig:
     # route is retired because no code path ever consulted it.
     routineModel: str = FIXED_AI_MODEL
     routineReasoningEffort: str = FIXED_AI_REASONING_EFFORT
+    # Grouped analysis gives each small contract set a bounded independent
+    # review before the coordinator chooses one action.  ``single`` remains a
+    # supported operator override for constrained environments.
+    analysisWorkflow: AnalysisWorkflow = "grouped"
 
     _FIELDS: ClassVar[set[str]] = {
         "provider",
@@ -536,14 +555,17 @@ class AIConfig:
         "minimumConfidence", "decisionIntervalSeconds",
         "cliTimeoutSeconds", "snapshotMaxAgeSeconds", "maxOutputBytes", "maxConsecutiveFailures",
         "allowOpen", "allowClose", "allowCancel", "requireStopLoss",
-        "maxDailyOrders", "maxDailyLosses", "marginPerOrderUSD", "maxLeverage",
+        "maxDailyOrders", "maxDailyLosses", "riskPerTradePercent", "marginPerOrderUSD", "maxLeverage",
         "stopLossCooldownSeconds", "recentStopLossWindowSeconds", "recentStopLossLimit",
         "routineModel", "routineReasoningEffort",
+        "analysisWorkflow",
     }
 
     def __post_init__(self) -> None:
         if self.provider != "codex":
             raise SchemaError("config.provider must be codex")
+        if self.analysisWorkflow not in {"grouped", "single"}:
+            raise SchemaError("config.analysisWorkflow is invalid")
         # Apply the shared bound table so a directly constructed config cannot
         # carry a value the JSON path would have rejected.
         for name, (minimum, maximum) in _CONFIG_NUMBER_BOUNDS.items():
@@ -565,6 +587,9 @@ class AIConfig:
         mode = row.get("mode", "disabled")
         if mode not in {"disabled", "shadow", "paper-active", "demo-active", "live-armed", "halted"}:
             raise SchemaError("config.mode is invalid")
+        analysis_workflow = row.get("analysisWorkflow", "grouped")
+        if analysis_workflow not in {"grouped", "single"}:
+            raise SchemaError("config.analysisWorkflow is invalid")
         instruments = normalize_contract_ids(row.get("allowedInstruments", []), "config.allowedInstruments")
         # Accept only the previous known route during migration, then normalize
         # it without discarding the user's other settings. Retired fields
@@ -588,6 +613,7 @@ class AIConfig:
             allowOpen=bools["allowOpen"], allowClose=bools["allowClose"], allowCancel=bools["allowCancel"], requireStopLoss=bools["requireStopLoss"],
             maxDailyOrders=_integer(row.get("maxDailyOrders", 20), "config.maxDailyOrders"),
             maxDailyLosses=_integer(row.get("maxDailyLosses", 5), "config.maxDailyLosses"),
+            riskPerTradePercent=_number(row.get("riskPerTradePercent", 0.5), "config.riskPerTradePercent"),
             marginPerOrderUSD=_number(row.get("marginPerOrderUSD", 500), "config.marginPerOrderUSD"),
             maxLeverage=_number(row.get("maxLeverage", 5), "config.maxLeverage"),
             stopLossCooldownSeconds=_number(
@@ -602,6 +628,7 @@ class AIConfig:
                 row.get("recentStopLossLimit", DEFAULT_RECENT_STOP_LOSS_LIMIT),
                 "config.recentStopLossLimit",
             ),
+            analysisWorkflow=analysis_workflow,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -617,7 +644,7 @@ class AIConfig:
 AI_CHAT_PATCH_FIELDS: frozenset[str] = frozenset({
     "allowedInstruments", "minimumConfidence", "decisionIntervalSeconds",
     "allowOpen", "allowClose", "allowCancel",
-    "maxDailyOrders", "maxDailyLosses", "marginPerOrderUSD", "maxLeverage",
+    "maxDailyOrders", "maxDailyLosses", "riskPerTradePercent", "marginPerOrderUSD", "maxLeverage",
 })
 
 
@@ -674,6 +701,10 @@ def normalize_ai_chat_patch(value: Mapping[str, Any] | None) -> dict[str, Any]:
             # open again", which allowOpen=false already expresses.
             if isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > 10000:
                 raise SchemaError(f"chat.suggestion.{key} must be an integer within the configured range")
+    if "riskPerTradePercent" in row:
+        row["riskPerTradePercent"] = _number(
+            row["riskPerTradePercent"], "chat.suggestion.riskPerTradePercent", minimum=0.01, maximum=5,
+        )
     if "marginPerOrderUSD" in row:
         row["marginPerOrderUSD"] = _number(row["marginPerOrderUSD"], "chat.suggestion.marginPerOrderUSD", minimum=0.01, maximum=1_000_000)
     if "maxLeverage" in row:
@@ -829,6 +860,7 @@ def ai_chat_json_schema() -> dict[str, Any]:
         "allowCancel": {"type": ["boolean", "null"]},
         "maxDailyOrders": {"type": ["integer", "null"], "minimum": 1, "maximum": 10000},
         "maxDailyLosses": {"type": ["integer", "null"], "minimum": 1, "maximum": 10000},
+        "riskPerTradePercent": {"type": ["number", "null"], "minimum": 0.01, "maximum": 5},
         "marginPerOrderUSD": {"type": ["number", "null"], "minimum": 0.01, "maximum": 1000000},
         "maxLeverage": {"type": ["number", "null"], "minimum": 1, "maximum": 125},
     }

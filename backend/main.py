@@ -38,11 +38,11 @@ try:
         MIN_PROTECTION_REPLACEMENT_CONFIDENCE,
         _check_protection_geometry, entry_exposure_error, parse_time, snapshot_freshness,
     )
-    from .ai_schema import AIDecision, AIChatRequest, AIConfig, AISnapshot, SchemaError, normalize_contract_ids
+    from .ai_schema import ALLOWED_OPEN_DIRECTIONS, AIDecision, AIChatRequest, AIConfig, AISnapshot, SchemaError, normalize_contract_ids
     from .ai_worker import AIWorker, CodexError
     from .exit_audit import sync_native_protection_exits
     from .order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError
-    from .paper_trading import PaperTradingAccount
+    from .paper_trading import PaperTradingAccount, PaperTradingError
 except ImportError:  # bundled backend/main.py is launched as a script
     from ai_market_context import collect_market_context
     from ai_entry_preflight import EntryPreflightRejected, check_entry_preflight
@@ -52,11 +52,11 @@ except ImportError:  # bundled backend/main.py is launched as a script
         MIN_PROTECTION_REPLACEMENT_CONFIDENCE,
         _check_protection_geometry, entry_exposure_error, parse_time, snapshot_freshness,
     )
-    from ai_schema import AIDecision, AIChatRequest, AIConfig, AISnapshot, SchemaError, normalize_contract_ids
+    from ai_schema import ALLOWED_OPEN_DIRECTIONS, AIDecision, AIChatRequest, AIConfig, AISnapshot, SchemaError, normalize_contract_ids
     from ai_worker import AIWorker, CodexError
     from exit_audit import sync_native_protection_exits
     from order_gateway import InstrumentSpec, OrderGateway, OrderGatewayError, OrderNotSubmittedError
-    from paper_trading import PaperTradingAccount
+    from paper_trading import PaperTradingAccount, PaperTradingError
 
 
 def load_env_file() -> None:
@@ -95,6 +95,9 @@ if TRADING_MODE not in {"exchange", "paper"}:
 PAPER_INITIAL_USDT = float(os.getenv("NOVATRADE_PAPER_INITIAL_USDT", "5000"))
 if not math.isfinite(PAPER_INITIAL_USDT) or PAPER_INITIAL_USDT <= 0:
     raise ValueError("NOVATRADE_PAPER_INITIAL_USDT must be positive and finite")
+PAPER_MAX_DRAWDOWN_PERCENT = float(os.getenv("NOVATRADE_PAPER_MAX_DRAWDOWN_PERCENT", "10"))
+if not math.isfinite(PAPER_MAX_DRAWDOWN_PERCENT) or PAPER_MAX_DRAWDOWN_PERCENT < 0 or PAPER_MAX_DRAWDOWN_PERCENT >= 100:
+    raise ValueError("NOVATRADE_PAPER_MAX_DRAWDOWN_PERCENT must be finite and in [0, 100)")
 if TRADING_MODE == "paper":
     # Paper fills must use the production feed even when old demo overrides
     # or exchange credentials remain in the user's environment.
@@ -251,7 +254,11 @@ def local_paper_mode() -> bool:
 def _get_paper_account() -> PaperTradingAccount:
     global paper_account
     if paper_account is None:
-        paper_account = PaperTradingAccount(state_dir() / "paper-account.json", initial_balance=PAPER_INITIAL_USDT)
+        paper_account = PaperTradingAccount(
+            state_dir() / "paper-account.json",
+            initial_balance=PAPER_INITIAL_USDT,
+            max_drawdown_percent=PAPER_MAX_DRAWDOWN_PERCENT,
+        )
     return paper_account
 
 
@@ -1532,9 +1539,11 @@ def order_snapshot(row: dict[str, Any], *, instrument: dict[str, Any] | None = N
 
 
 def _assert_ai_entry_current(request: dict[str, Any]) -> None:
-    """Check the server-owned deadline immediately before exchange writes."""
+    """Check entry direction and the server-owned deadline before exchange writes."""
     if request.get("source") != "ai" or request.get("reduceOnly"):
         return
+    if request.get("side") != "sell" or request.get("positionSide") not in (None, "net", "short"):
+        raise EntryPreflightRejected("AI new entries are short-only; long opening is disabled")
     deadline = request.get("_aiEntryDeadline")
     if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
         raise OrderNotSubmittedError("AI entry deadline is unavailable or invalid")
@@ -1768,6 +1777,57 @@ async def _instrument_spec(instrument_id: str) -> InstrumentSpec:
         return InstrumentSpec.from_okx(row)
     except OrderGatewayError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+def _ai_risk_sized_quantity(
+    *,
+    config: AIConfig,
+    equity: float,
+    entry_price: float,
+    stop_loss_price: float | None,
+    leverage: float,
+    instrument: InstrumentSpec,
+) -> tuple[float, float, float]:
+    """Size an AI entry from account risk and its actual stop distance.
+
+    Returns ``(quantity, target_notional, risk_budget_usd)``.  The legacy
+    ``marginPerOrderUSD`` setting remains a hard margin ceiling, so a wide
+    stop can only reduce size further.  Manual order requests never call this
+    helper and keep their existing quantity/target-notional semantics.
+    """
+    if not math.isfinite(equity) or equity <= 0:
+        raise HTTPException(status_code=409, detail="available account equity is unavailable")
+    if not math.isfinite(entry_price) or entry_price <= 0:
+        raise HTTPException(status_code=422, detail="AI entry price is invalid for position sizing")
+    if stop_loss_price is None or not math.isfinite(stop_loss_price) or stop_loss_price <= 0:
+        raise HTTPException(status_code=422, detail="AI position sizing requires a valid stop-loss price")
+    if not math.isfinite(leverage) or leverage < 1:
+        raise HTTPException(status_code=422, detail="AI leverage is invalid for position sizing")
+    contract_value = instrument.ctVal * instrument.ctMult
+    stop_distance = abs(entry_price - stop_loss_price)
+    if not math.isfinite(stop_distance) or stop_distance <= 0 or contract_value <= 0:
+        raise HTTPException(status_code=422, detail="AI stop distance is invalid for position sizing")
+    risk_budget = equity * config.riskPerTradePercent / 100.0
+    risk_per_contract = stop_distance * contract_value
+    raw_quantity = risk_budget / risk_per_contract
+    quantity = math.floor(raw_quantity / instrument.lotSize) * instrument.lotSize
+
+    # Keep the historical per-order margin control as a ceiling.  Include a
+    # conservative 10 bps fee allowance in the cap so paper and exchange
+    # paths cannot differ by one lot at the margin boundary.
+    margin_denominator = contract_value * entry_price * (1.0 / leverage + 0.001)
+    margin_quantity = math.floor((config.marginPerOrderUSD / margin_denominator) / instrument.lotSize) * instrument.lotSize
+    quantity = min(quantity, margin_quantity)
+    if quantity < instrument.minSize or quantity <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"AI risk budget ({risk_budget:.2f} USDT) produces less than the "
+                f"minimum contract size at the proposed stop distance"
+            ),
+        )
+    target_notional = quantity * contract_value * entry_price
+    return round(quantity, 12), target_notional, risk_budget
 
 
 async def _ticker_last(instrument_id: str) -> float:
@@ -2111,9 +2171,11 @@ async def _ai_snapshot(strategy_id: str = "codex") -> AISnapshot:
         risk=risk_snapshot,
         ai={
             "mode": config.mode,
+            "allowedOpenDirections": list(ALLOWED_OPEN_DIRECTIONS),
             "enabled": config.enabled,
             "maxDailyOrders": config.maxDailyOrders,
             "maxDailyLosses": config.maxDailyLosses,
+            "riskPerTradePercent": config.riskPerTradePercent,
             "marginPerOrderUSD": config.marginPerOrderUSD,
             "maxLeverage": config.maxLeverage,
             "stopLossCooldownSeconds": config.stopLossCooldownSeconds,
@@ -2204,6 +2266,8 @@ async def _ai_cancel(decision: AIDecision, snapshot: AISnapshot, *, demo: bool) 
 
 async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: str = "codex") -> dict[str, Any]:
     """Apply current account/risk state immediately before submitting an AI intent."""
+    if decision.action == "open" and decision.direction not in ALLOWED_OPEN_DIRECTIONS:
+        raise EntryPreflightRejected("AI new entries are short-only; long opening is disabled")
     strategy_id = _strategy_id(strategy_id)
     worker = ai_workers.get(strategy_id) or (ai_worker if strategy_id == "codex" else None)
     config = worker.config if worker is not None else AIConfig()
@@ -2302,6 +2366,15 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
             raise HTTPException(status_code=502, detail="OKX ticker did not include a valid last price")
     else:
         last = await _ticker_last(decision.instrumentID)
+    # Ticker/spec reads can suspend long enough for the model intent to pass
+    # its deadline. Recheck immediately before geometry and risk sizing so an
+    # expired decision is reported as such instead of failing on a later
+    # quantity calculation (which may require a stop that the stale intent
+    # omitted).
+    if decision.action == "open":
+        rechecked = snapshot_freshness(snapshot, config, now=datetime.now(timezone.utc))
+        if not rechecked["valid"] or rechecked["isStale"] or parse_time(decision.validUntil) <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=409, detail=rechecked["error"] or "AI snapshot or decision has expired")
     if decision.action == "open":
         entry_price = decision.limitPrice if decision.orderType == "limit" else last
         decision_targets = _assessment_targets(decision)
@@ -2327,7 +2400,17 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
     if not reduce_only:
         if leverage < 1 or leverage > config.maxLeverage:
             raise HTTPException(status_code=422, detail="AI leverage exceeds configured maximum")
-        target_notional = config.marginPerOrderUSD * leverage
+        # Derive entry quantity from the account risk budget and the proposed
+        # stop distance.  ``marginPerOrderUSD`` is retained as a hard ceiling
+        # for compatibility, but it is no longer the sizing formula.
+        quantity, target_notional, risk_budget = _ai_risk_sized_quantity(
+            config=config,
+            equity=equity,
+            entry_price=entry_price,
+            stop_loss_price=decision.stopLossPrice,
+            leverage=leverage,
+            instrument=spec,
+        )
     else:
         # Prefer the exact current position quantity so an AI close does not
         # depend on an entry-only risk budget. Fall back to the configured
@@ -2408,6 +2491,9 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
     if not reduce_only:
         request["leverage"] = leverage
         request["marginUSD"] = config.marginPerOrderUSD
+        request["quantity"] = quantity
+        request["riskBudgetUSD"] = risk_budget
+        request["riskPerTradePercent"] = config.riskPerTradePercent
         request["_aiEntryDeadline"] = entry_deadline
         request["_aiEntryTickSize"] = spec.tickSize
     elif position_quantity > 0:
@@ -2427,6 +2513,14 @@ async def _ai_execute(decision: AIDecision, snapshot: AISnapshot, strategy_id: s
             return output
         except EntryPreflightRejected:
             raise
+        except PaperTradingError as error:
+            # A paper-only strategy circuit breaker is a deterministic market
+            # admission result. Treat it like an entry preflight rejection so
+            # the worker records a safe hold instead of counting the race as
+            # a provider/execution failure and advancing its halt counter.
+            if "strategy performance circuit breaker" in str(error):
+                raise EntryPreflightRejected(str(error)) from error
+            raise HTTPException(status_code=422, detail=str(error)) from error
         except OrderGatewayError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
     gateway = _get_order_gateway()
